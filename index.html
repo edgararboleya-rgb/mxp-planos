@@ -1245,15 +1245,36 @@ window.MAXPOWER_SUPABASE = {
   }
 
   function parseDist(s) {
+    // acepta TODO lo que la app misma escribe y lo que teclea un iPad:
+    // 20' · 20'-6" · 32'-6 1/2" · 6 1/2" · 54" · 1.5 (pies) · comillas rizadas ’ ”
+    if (s == null) return null;
+    s = String(s).trim()
+      .replace(/[’‘′]/g, "'").replace(/[“”″]/g, '"')
+      .replace(/,/g, '.')
+      .replace(/\bft\b/ig, "'").replace(/\bpies?\b/ig, "'")
+      .replace(/\b(?:in|pulg(?:adas)?)\b/ig, '"');
     if (!s) return null;
-    s = String(s).trim().replace(',', '.');
-    var m = s.match(/^(-?[\d.]+)\s*(?:'|ft|pies?)(?:\s*([\d.]+)\s*(?:"|in)?)?$/i);
-    if (m) return parseFloat(m[1]) * 12 + (m[2] ? parseFloat(m[2]) : 0);
-    m = s.match(/^(-?[\d.]+)\s*(?:"|in|pulg)$/i);
-    if (m) return parseFloat(m[1]);
-    m = s.match(/^(-?[\d.]+)$/);
-    if (m) return parseFloat(m[1]) * 12;   // número solo = pies
-    return null;
+    function num(t) {
+      if (t == null) return 0;
+      t = String(t).trim();
+      if (!t) return 0;
+      var fm = t.match(/^(?:(\d+(?:\.\d+)?)[\s-]+)?(\d+)\s*\/\s*(\d+)$/);
+      if (fm) return (fm[1] ? parseFloat(fm[1]) : 0) + parseInt(fm[2], 10) / parseInt(fm[3], 10);
+      if (!/^\d+(?:\.\d+)?$/.test(t)) return null;
+      return parseFloat(t);
+    }
+    var neg = /^-/.test(s) ? -1 : 1;
+    s = s.replace(/^-\s*/, '');
+    var m = s.match(/^([^'"]+)'\s*[-–]?\s*(?:([^'"]+)"?\s*)?$/);   // pies (+ pulgadas)
+    if (m) {
+      var f = num(m[1]), iv = m[2] !== undefined ? num(m[2]) : 0;
+      if (f === null || iv === null) return null;
+      return neg * (f * 12 + iv);
+    }
+    m = s.match(/^([^'"]+)"$/);                                     // solo pulgadas
+    if (m) { var i2 = num(m[1]); return i2 === null ? null : neg * i2; }
+    var nv = num(s);                                                // número pelado = pies
+    return nv === null ? null : neg * nv * 12;
   }
 
   function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -2429,7 +2450,7 @@ window.MAXPOWER_SUPABASE = {
       var now = Date.now();
       if (lastTap && now - lastTap.t < 450 && Math.hypot(ev.clientX - lastTap.x, ev.clientY - lastTap.y) < 30) {
         lastTap = null;
-        if (tool === 'select') {
+        if (tool === 'select' || tool === 'measure' || tool === 'dim') {
           var th = hitTest(p);
           if (th && th.kind === 'dim') {
             drag = null;
@@ -2495,8 +2516,12 @@ window.MAXPOWER_SUPABASE = {
     if (!dd) return;
     var len0 = Math.hypot(dd.x2 - dd.x1, dd.y2 - dd.y1) || 1;
     uiPrompt('Nueva medida de la cota (ej: 20\'  ·  20\' 6"):', fmtFtIn(len0), function (v) {
+      if (v === null || v === '') return;
       var nv = parseDist(v);
-      if (!nv || nv <= 0) return;
+      if (!nv || nv <= 0) {
+        uiAlert('No entendí la medida "' + v + '".\nEjemplos válidos:  20\'   ·   20\'-6"   ·   6 1/2"   ·   54"');
+        return;
+      }
       pushUndo();
       var ux = (dd.x2 - dd.x1) / len0, uy = (dd.y2 - dd.y1) / len0;
       dd.x2 = dd.x1 + ux * nv;
@@ -2553,7 +2578,15 @@ window.MAXPOWER_SUPABASE = {
       case 'pline': return areaDown(p);
       case 'door': return openingDown(p, curDoorType);
       case 'window': return openingDown(p, curWinType);
-      case 'measure': return twoPointDown(p, 'measure');
+      case 'measure':
+        // en Measure, tocar una medida existente la SELECCIONA (como Bluebeam):
+        // se puede mover, estirar por las asas y editar sin cambiar a Select
+        if (!drawing) {
+          var hm = hitTest(p);
+          if (hm && hm.kind === 'dim') return selectDown(p, ev);
+          if (sel) { sel = null; renderSel(); showProps(); }
+        }
+        return twoPointDown(p, 'measure');
       case 'dim': return twoPointDown(p, 'dim');
       case 'calibrate': return twoPointDown(p, 'calibrate');
       case 'wire': return twoPointDown(p, 'wire');
