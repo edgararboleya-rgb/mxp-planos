@@ -55,27 +55,43 @@ body {
 
 #toolbar button, #toolbar label.tbtn {
   background: transparent; color: #E8F3FA; border: 1px solid transparent;
-  border-radius: 9px; padding: 5px 9px; cursor: pointer; font-size: 15px;
+  border-radius: 10px; padding: 5px 10px; cursor: pointer; font-size: 15px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   line-height: 1.15; white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, transform .12s ease, box-shadow .15s ease;
 }
-/* cada herramienta es una cajita pareja y con aire */
+/* cada herramienta es una cajita pareja, con relieve y con aire */
 #toolbar button.tool {
-  min-width: 50px; height: 46px;
-  background: rgba(255,255,255,.04);
-  border-color: rgba(255,255,255,.10);
+  min-width: 52px; height: 46px;
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
+  border-color: rgba(255,255,255,.13);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 1px 3px rgba(0,0,0,.3);
 }
-#toolbar button.tool:hover { background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.2); }
+#toolbar button.tool:hover {
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06));
+  border-color: rgba(255,255,255,.25);
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 5px 12px rgba(0,0,0,.4);
+}
+/* botones de acción (no-herramienta) también como cajitas */
+#toolbar .tgroup button:not(.tool) {
+  background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12);
+  flex-direction: row; gap: 6px; font-size: 13px; height: 38px; padding: 4px 12px;
+}
+#toolbar .tgroup button:not(.tool):hover {
+  background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); transform: translateY(-1px);
+}
 #toolbar label.tbtn {
   background: var(--mp-grad); background-size: 190% 100%;
   color: #04202A; font-weight: 800;
 }
 #toolbar label.tbtn:hover { background-position: 60% 0; }
 #toolbar button label { font-size: 9.5px; cursor: pointer; opacity: .8; margin-top: 3px; letter-spacing: .3px; }
-#toolbar button:hover { background: rgba(255,255,255,.08); }
-#toolbar button.active {
+
+#toolbar button.active, #toolbar .tgroup button:not(.tool).active {
   background: rgba(34,232,224,.14); color: var(--mp-cyan);
-  border-color: rgba(34,232,224,.45);
+  border-color: rgba(34,232,224,.5);
+  box-shadow: 0 0 0 1px rgba(34,232,224,.25), 0 0 14px rgba(34,232,224,.22);
 }
 #toolbar button.active label { opacity: 1; }
 #toolbar select {
@@ -87,7 +103,7 @@ body {
 
 /* flyout de tipos en los botones Wall / Area */
 #toolbar button.tool { position: relative; }
-#toolbar button.tool:has(.dd) { padding-right: 16px; padding-left: 16px; min-width: 62px; }
+#toolbar button.tool:has(.dd) { padding-right: 24px; padding-left: 8px; min-width: 66px; }
 #toolbar .tool .dd {
   position: absolute; right: 0; top: 0; bottom: 0; width: 16px;
   display: flex; align-items: center; justify-content: center; padding: 0;
@@ -97,14 +113,16 @@ body {
 #toolbar .tool .dd:hover { background: rgba(255, 255, 255, .22); opacity: 1; }
 #toolbar .tool.active .dd { border-left-color: rgba(0, 0, 0, .2); }
 #toolMenu {
-  position: fixed; z-index: 300; background: #fff; color: #1e2530;
-  border: 1px solid #c9c9c2; border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
-  min-width: 215px; max-height: 62vh; overflow-y: auto; padding: 4px;
+  position: fixed; z-index: 300; background: #fff; color: var(--mp-ink);
+  border: 1px solid var(--mp-line); border-radius: 13px;
+  box-shadow: 0 4px 10px rgba(11,32,54,.1), 0 20px 44px -14px rgba(11,32,54,.35);
+  min-width: 215px; max-height: 62vh; overflow-y: auto; padding: 5px;
 }
 #toolMenu .tmHead { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #888; padding: 4px 8px 2px; }
 #toolMenu .tmItem { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
 #toolMenu .tmItem:hover { background: #eef2f8; }
-#toolMenu .tmItem.cur { background: #1e2530; color: #fff; }
+#toolMenu .tmItem.cur { background: var(--mp-deep); color: #fff; }
+#toolMenu .tmItem { border-radius: 8px; }
 #toolMenu .tmItem svg { flex: none; border: 1px solid #d8d8d2; border-radius: 3px; background: #fff; }
 .swRow { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
 .sw { width: 20px; height: 20px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, .25); cursor: pointer; }
@@ -113,10 +131,12 @@ body {
 /* pestañas de hojas (multi-hoja, estilo Bluebeam sets) */
 #sheetTabs { position: absolute; left: 10px; bottom: 10px; z-index: 40; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; max-width: 70%; }
 #sheetTabs .stab {
-  border: 1px solid #b9b9b3; background: #fff; border-radius: 7px; padding: 4px 10px;
+  border: 1.5px solid var(--mp-line); background: #fff; border-radius: 10px; padding: 5px 12px;
   font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .14); color: #1e2530;
+  box-shadow: 0 2px 8px rgba(11, 32, 54, .14); color: var(--mp-ink);
+  transition: transform .12s, box-shadow .15s, border-color .15s;
 }
+#sheetTabs .stab:hover { transform: translateY(-1px); border-color: var(--mp-blue); }
 #sheetTabs .stab.active { background: var(--mp-deep); color: var(--mp-cyan); border-color: var(--mp-deep); }
 #sheetTabs .stab .sx { font-weight: 400; opacity: .55; padding: 0 2px; }
 #sheetTabs .stab .sx:hover { opacity: 1; color: #c62828; }
@@ -130,20 +150,24 @@ body {
   width: 232px; flex: none; background: var(--mp-sky-1); border-right: 1px solid var(--mp-line);
   display: flex; flex-direction: column; min-height: 0;
 }
-#symSearch { margin: 8px; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 12px; }
+#symSearch { margin: 8px; padding: 7px 10px; border: 1.5px solid var(--mp-line); border-radius: 10px; font-size: 12px; background: #fff; transition: border-color .15s, box-shadow .15s; }
+#symSearch:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
 #catTabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 8px; }
 #catTabs .cat {
-  border: 1px solid #d0d0ca; background: #fff; border-radius: 20px;
-  font-size: 11px; padding: 3px 8px; cursor: pointer;
+  border: 1.5px solid var(--mp-line); background: #fff; border-radius: 999px;
+  font-size: 11px; padding: 4px 10px; cursor: pointer;
+  transition: background .15s, border-color .15s, transform .12s;
 }
+#catTabs .cat:hover { border-color: var(--mp-blue); transform: translateY(-1px); }
 #catTabs .cat.active { background: var(--mp-navy); color: #fff; border-color: var(--mp-navy); }
 #symList { flex: 1; overflow-y: auto; padding: 4px 8px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
 .symBtn {
-  border: 1px solid #d8d8d2; background: #fff; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--mp-line); background: #fff; border-radius: 12px; cursor: pointer;
   padding: 6px 4px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  transition: transform .12s ease, box-shadow .15s ease, border-color .15s ease;
 }
-.symBtn:hover { border-color: #f5b82e; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
-.symBtn.active { border-color: #0b84ff; background: #eaf3ff; }
+.symBtn:hover { border-color: var(--mp-blue); transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,32,54,.14); }
+.symBtn.active { border-color: var(--mp-blue); background: #EAF1FF; box-shadow: 0 0 0 3px rgba(42,91,215,.15); }
 .symBtn { position: relative; }
 .symBtn .favstar {
   position: absolute; top: 2px; right: 5px; font-size: 13px; color: #c9c5b8;
@@ -175,8 +199,12 @@ body {
 .panel h3 button:hover { background: #f0f0ec; }
 .pbody { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .pbody input[type="text"], .pbody input:not([type]), .pbody input[type="number"], .pbody select {
-  width: 100%; padding: 5px 7px; border: 1px solid #ccc; border-radius: 6px; font-size: 12px;
+  width: 100%; padding: 6px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 12px;
+  background: #fff; transition: border-color .15s, box-shadow .15s;
 }
+.pbody input:focus, .pbody select:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
+#layersBody button, .pbody button { border-radius: 9px !important; transition: background .15s, border-color .15s, transform .12s, box-shadow .15s; }
+#layersBody button:hover, .pbody button:hover { border-color: var(--mp-blue) !important; transform: translateY(-1px); box-shadow: 0 3px 8px rgba(11,32,54,.12); }
 .pbody .row { display: flex; gap: 6px; align-items: center; }
 .pbody .row label { flex: none; width: 74px; font-size: 11px; color: #555; }
 .pbody button {
@@ -281,3 +309,9 @@ body {
   #rightPanel { width: 200px; }
   #toolbar button label { display: none; }
 }
+
+/* scrollbars finos y modernos */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #B9D2E2; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #8FB6CE; background-clip: content-box; border: 2px solid transparent; }
+::-webkit-scrollbar-track { background: transparent; }
