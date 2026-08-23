@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.K';
+  var APP_VERSION = 'v23.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2070,9 +2070,13 @@ window.MAXPOWER_SUPABASE = {
       // medición: el número SIEMPRE horizontal y con fondito blanco — legible
       // en medidas verticales sin virar el plano (estilo Bluebeam)
       var lmx = (a[0] + b[0]) / 2, lmy = (a[1] + b[1]) / 2;
-      var tw = String(txt).length * 7 * 0.62 + 5;
-      s += '<rect x="' + (lmx - tw / 2) + '" y="' + (lmy - 8) + '" width="' + tw + '" height="10" rx="2" fill="#ffffff" fill-opacity="0.88" stroke="none"/>';
-      s += '<text x="' + lmx + '" y="' + lmy + '" font-size="7" text-anchor="middle">' + esc(txt) + '</text>';
+      // número discreto: chico, y si la medida es corta se achica más para no
+      // llevarse toda la línea
+      var chars = String(txt).length;
+      var fs = Math.max(2.2, Math.min(4.5, (len * 0.7) / (chars * 0.62)));
+      var tw = chars * fs * 0.62 + fs * 0.7;
+      s += '<rect x="' + (lmx - tw / 2) + '" y="' + (lmy - fs * 1.2) + '" width="' + tw + '" height="' + (fs * 1.55) + '" rx="' + (fs * 0.3) + '" fill="#ffffff" fill-opacity="0.88" stroke="none"/>';
+      s += '<text x="' + lmx + '" y="' + lmy + '" font-size="' + fs + '" text-anchor="middle">' + esc(txt) + '</text>';
     } else {
       var mid = [(a[0] + b[0]) / 2 + nx * 3.5, (a[1] + b[1]) / 2 + ny * 3.5];
       var ang = Math.atan2(dy, dx) * 180 / Math.PI;
@@ -4590,6 +4594,11 @@ window.MAXPOWER_SUPABASE = {
     $('#panelModal').hidden = false;
   });
   $('#psClose').addEventListener('click', function () { $('#panelModal').hidden = true; });
+  // tocar el fondo oscuro también cierra (clave en iPad, sin tecla Escape)
+  $$('.modal').forEach(function (m) {
+    if (m.id === 'askModal') return;
+    m.addEventListener('click', function (ev) { if (ev.target === m) m.hidden = true; });
+  });
   $('#psAddLoad').addEventListener('click', function () {
     curPanel().loads.push({ desc: '', va: 0, hvac: false });
     buildPanelModal();
@@ -4838,6 +4847,9 @@ window.MAXPOWER_SUPABASE = {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd') { ev.preventDefault(); copySel(); pasteClip(null, 24); return; }
     switch (ev.key) {
       case 'Escape':
+        // primero cierra cualquier modal abierto (Panel Schedule, Lot…)
+        var openMod = $$('.modal').find(function (m) { return !m.hidden && m.id !== 'askModal'; });
+        if (openMod) { openMod.hidden = true; break; }
         if (drawing) { drawing = null; G.prev.innerHTML = ''; }
         else if (tool === 'place') setTool('select');
         else { sel = null; selGroup = null; measure = null; renderSel(); renderAnnot(); showProps(); }
