@@ -1,7 +1,10 @@
-/* MXP Planos — service worker: la app funciona sin internet una vez instalada */
-var CACHE = 'mxp-v1';
+/* MXP Planos — service worker
+   Estrategia: RED PRIMERO (siempre busca la versión nueva); la copia en
+   caché se usa solo sin internet. Así cada actualización llega sola. */
+var CACHE = 'mxp-v2';
 var CORE = [
-  './', 'index.html', 'css/app.css', 'js/symbols.js', 'js/app.js',
+  './', 'index.html', 'css/app.css', 'js/config.js', 'js/logo.js',
+  'js/symbols.js', 'js/app.js',
   'js/vendor/pdf.min.js', 'js/vendor/pdf.worker.min.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png'
 ];
@@ -14,18 +17,18 @@ self.addEventListener('activate', function (e) {
   }).then(function () { return self.clients.claim(); }));
 });
 self.addEventListener('fetch', function (e) {
-  if (e.request.method !== 'GET' || e.request.url.indexOf('http') !== 0) return;
+  if (e.request.method !== 'GET' || e.request.url.indexOf(self.location.origin) !== 0) return;
   e.respondWith(
-    caches.match(e.request).then(function (r) {
-      return r || fetch(e.request).then(function (res) {
-        try {
-          if (res && res.ok && e.request.url.indexOf(self.location.origin) === 0) {
-            var copy = res.clone();
-            caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
-          }
-        } catch (err) {}
-        return res;
-      });
+    fetch(e.request).then(function (res) {
+      try {
+        if (res && res.ok) {
+          var copy = res.clone();
+          caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+        }
+      } catch (err) {}
+      return res;
+    }).catch(function () {
+      return caches.match(e.request).then(function (r) { return r || caches.match('index.html'); });
     })
   );
 });
