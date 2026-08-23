@@ -608,6 +608,7 @@ body.touch #main { position: relative; }
   <footer id="statusbar">
     <span id="hint">Selecciona una herramienta para comenzar</span>
     <span id="coords"></span>
+    <span id="verTag" style="opacity:.55;margin-left:10px;font-size:10px"></span>
   </footer>
 </div>
 
@@ -1208,6 +1209,11 @@ window.MAXPOWER_SUPABASE = {
  * ========================================================================= */
 (function () {
   'use strict';
+
+  // versión visible abajo a la derecha — para saber QUÉ build está corriendo
+  // cuando se depura a distancia. Subirla en cada entrega.
+  var APP_VERSION = 'v23.G';
+  try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
   // debe morirse a mitad de un import: se avisa y se sigue sin paleta.
@@ -2430,7 +2436,12 @@ window.MAXPOWER_SUPABASE = {
 
   svg.addEventListener('pointerdown', function (ev) {
     svg.setPointerCapture(ev.pointerId);
-    ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    // iOS a veces se traga el pointerup durante un pellizco y queda un "dedo
+    // fantasma": cada toque siguiente contaría como pellizco y la app parece
+    // muerta (solo zoom). Purgar punteros viejos sin movimiento lo cura.
+    var nowT = Date.now();
+    ptrs.forEach(function (v, k) { if (nowT - (v.t || 0) > 2500) ptrs.delete(k); });
+    ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY, t: nowT });
     if (ptrs.size === 2) {
       var a = Array.from(ptrs.values());
       pinch = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), mx: (a[0].x + a[1].x) / 2, my: (a[0].y + a[1].y) / 2, view: { tx: view.tx, ty: view.ty, z: view.z } };
@@ -2475,7 +2486,7 @@ window.MAXPOWER_SUPABASE = {
   var lastTap = null;
 
   svg.addEventListener('pointermove', function (ev) {
-    if (ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY, t: Date.now() });
     if (pinch && ptrs.size === 2) {
       var a = Array.from(ptrs.values());
       var d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
@@ -2506,6 +2517,11 @@ window.MAXPOWER_SUPABASE = {
   }
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', endPointer);
+  // red de seguridad iOS: si el dedo se levanta fuera del svg o Safari corta el
+  // gesto, igual se limpia — y al volver a la app no quedan dedos fantasma
+  window.addEventListener('pointerup', function (ev) { ptrs.delete(ev.pointerId); if (ptrs.size < 2) pinch = null; });
+  window.addEventListener('pointercancel', function (ev) { ptrs.delete(ev.pointerId); if (ptrs.size < 2) pinch = null; });
+  document.addEventListener('visibilitychange', function () { ptrs.clear(); pinch = null; drag = null; });
   svg.addEventListener('contextmenu', function (ev) {
     ev.preventDefault();
     if (drawing && drawing.mode === 'wallchain') finishWallChain();
@@ -4979,6 +4995,23 @@ window.MAXPOWER_SUPABASE = {
   try { isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
   if (isTouch) {
     document.body.classList.add('touch');
+    // salvavidas: en iPad no hay tecla Escape — si hay un trazo a medias
+    // (línea pegada al dedo), aparece este botón para cancelarlo
+    var cbtn = document.createElement('button');
+    cbtn.id = 'cancelDraw';
+    cbtn.textContent = '✕ Cancelar trazo';
+    cbtn.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
+      'padding:12px 22px;border-radius:24px;border:0;background:#c62828;color:#fff;' +
+      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
+    document.body.appendChild(cbtn);
+    cbtn.addEventListener('click', function () {
+      drawing = null; G.prev.innerHTML = '';
+      drag = null; pinch = null; ptrs.clear();
+      setHint('Trazo cancelado');
+    });
+    setInterval(function () {
+      cbtn.style.display = drawing ? 'block' : 'none';
+    }, 400);
     // iOS muestra los PDF "en gris" en la app de Archivos cuando el selector trae
     // filtro de tipos — se lo quitamos y la app valida el archivo por dentro
     ['fileBg', 'fileBg2', 'fileOpen'].forEach(function (id) {
