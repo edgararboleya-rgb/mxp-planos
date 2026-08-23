@@ -2648,7 +2648,7 @@
             return;
           }
           console.error(err);
-          uiAlert('No se pudo leer ese PDF. Prueba con una imagen o captura del plano.');
+          uiAlert('No se pudo leer el PDF.\nDetalle: ' + (err && err.message ? err.message : err) + '\n\nSi estás en el visor de Claude, usa mejor tu enlace propio (edgararboleya-rgb.github.io/mxp-planos). También puedes mandar una captura del plano como imagen.');
           setHint('');
         });
       }
@@ -2657,7 +2657,9 @@
     function renderPdfPage(doc, pageNum, cb) {
       doc.getPage(pageNum).then(function (page) {
         var vp1 = page.getViewport({ scale: 1 });
-        var scale = Math.min(4, 2800 / vp1.width);   // nítido pero sin pasarse de memoria
+        // en iPad/teléfono se renderiza más liviano para no agotar la memoria de Safari
+        var lite = document.body.classList.contains('touch');
+        var scale = Math.min(4, (lite ? 2000 : 2800) / vp1.width);
         var vp = page.getViewport({ scale: scale });
         var cv = document.createElement('canvas');
         cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
@@ -2665,13 +2667,14 @@
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
         return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
           // el PDF sabe su tamaño de papel real (72 puntos = 1"): con eso la escala del plano es exacta
-          var url = cv.toDataURL('image/png');
-          if (cb) cb(url, cv.width, cv.height, vp1.width / 72, vp1.height / 72);
-          else insertBackground(url, cv.width, cv.height, vp1.width / 72, vp1.height / 72);
+          var url = lite ? cv.toDataURL('image/jpeg', 0.85) : cv.toDataURL('image/png');
+          cv.width = 1; cv.height = 1;   // libera la memoria del canvas de una
+          if (cb) cb(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
+          else insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
         });
       }).catch(function (err) {
         console.error(err);
-        uiAlert('No se pudo renderizar esa página del PDF.');
+        uiAlert('No se pudo renderizar la página ' + pageNum + ' del PDF.\nDetalle: ' + (err && err.message ? err.message : err));
         setHint('');
       });
     }
@@ -3490,6 +3493,12 @@
   try { isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
   if (isTouch) {
     document.body.classList.add('touch');
+    // iOS muestra los PDF "en gris" en la app de Archivos cuando el selector trae
+    // filtro de tipos — se lo quitamos y la app valida el archivo por dentro
+    ['fileBg', 'fileBg2', 'fileOpen'].forEach(function (id) {
+      var f = document.getElementById(id);
+      if (f) f.removeAttribute('accept');
+    });
     var palOpen = false, propsOpen = false;
     function syncDrawers() {
       $('#palette').classList.toggle('open', palOpen);
