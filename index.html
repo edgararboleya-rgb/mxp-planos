@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.J';
+  var APP_VERSION = 'v23.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2177,13 +2177,16 @@ window.MAXPOWER_SUPABASE = {
     if (b && !rec && b.pdfId) loadPdfLive(b);
     if (!b || !rec || b.origUrl) return hiresClear();  // sin PDF vivo o con "Solo líneas"
     var basePx = b.pxW || 4096;
-    if (view.z <= (basePx / b.w) * 1.15) return hiresClear();  // el raster base alcanza
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // el raster base alcanza SOLO si cubre los píxeles FÍSICOS de la pantalla
+    // (Retina = 2x): sin esto, en iPad el modo nítido nunca encendía al zoom
+    // normal de trabajo y todo se veía igual de suave
+    if (view.z * dpr <= (basePx / b.w) * 1.05) return hiresClear();
     var r = svg.getBoundingClientRect();
     var p0 = screenToWorld(r.left, r.top), p1 = screenToWorld(r.right, r.bottom);
     var x0 = Math.max(b.x, p0[0]), y0 = Math.max(b.y, p0[1]);
     var x1 = Math.min(b.x + b.w, p1[0]), y1 = Math.min(b.y + b.h, p1[1]);
     if (x1 - x0 < 0.5 || y1 - y0 < 0.5) return hiresClear();
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var cw = Math.round((x1 - x0) * view.z * dpr), ch = Math.round((y1 - y0) * view.z * dpr);
     var MAXA = document.body.classList.contains('touch') ? 9e6 : 16e6;
     var shr = Math.min(1, 4096 / cw, 4096 / ch, Math.sqrt(MAXA / (cw * ch)));
