@@ -35,9 +35,9 @@ body {
 
 /* ===== Toolbar (marco oscuro con la firma de gradiente) ===== */
 #toolbar {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
   background: var(--mp-deep); color: #E8F3FA;
-  padding: 4px 10px; height: 52px; flex: none;
+  padding: 4px 12px; height: 60px; flex: none;
   overflow-x: auto; overflow-y: hidden;
   border-bottom: 3px solid;
   border-image: linear-gradient(96deg,#1B3C8C 0%,#2A5BD7 24%,#22E8E0 58%,#8CF06A 80%,#EFE22E 100%) 1;
@@ -50,21 +50,28 @@ body {
 }
 .brand span { color: #E8F3FA; font-weight: 300; margin-left: 2px; font-size: 14.5px; }
 
-.tgroup { display: flex; align-items: center; gap: 2px; border-left: 1px solid rgba(255,255,255,.12); padding-left: 8px; }
+.tgroup { display: flex; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,.14); padding-left: 10px; }
 .tgroup.right { margin-left: auto; }
 
 #toolbar button, #toolbar label.tbtn {
   background: transparent; color: #E8F3FA; border: 1px solid transparent;
-  border-radius: 8px; padding: 4px 7px; cursor: pointer; font-size: 14px;
-  display: flex; flex-direction: column; align-items: center; line-height: 1.1;
-  white-space: nowrap;
+  border-radius: 9px; padding: 5px 9px; cursor: pointer; font-size: 15px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  line-height: 1.15; white-space: nowrap;
 }
+/* cada herramienta es una cajita pareja y con aire */
+#toolbar button.tool {
+  min-width: 50px; height: 46px;
+  background: rgba(255,255,255,.04);
+  border-color: rgba(255,255,255,.10);
+}
+#toolbar button.tool:hover { background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.2); }
 #toolbar label.tbtn {
   background: var(--mp-grad); background-size: 190% 100%;
   color: #04202A; font-weight: 800;
 }
 #toolbar label.tbtn:hover { background-position: 60% 0; }
-#toolbar button label { font-size: 9px; cursor: pointer; opacity: .75; }
+#toolbar button label { font-size: 9.5px; cursor: pointer; opacity: .8; margin-top: 3px; letter-spacing: .3px; }
 #toolbar button:hover { background: rgba(255,255,255,.08); }
 #toolbar button.active {
   background: rgba(34,232,224,.14); color: var(--mp-cyan);
@@ -80,12 +87,12 @@ body {
 
 /* flyout de tipos en los botones Wall / Area */
 #toolbar button.tool { position: relative; }
-#toolbar button.tool:has(.dd) { padding-right: 17px; }
+#toolbar button.tool:has(.dd) { padding-right: 21px; }
 #toolbar .tool .dd {
   position: absolute; right: 0; top: 0; bottom: 0;
-  display: flex; align-items: center; padding: 0 4px;
-  font-size: 9px; opacity: .7; border-radius: 0 6px 6px 0;
-  border-left: 1px solid rgba(255, 255, 255, .12);
+  display: flex; align-items: center; padding: 0 5px;
+  font-size: 10px; opacity: .75; border-radius: 0 8px 8px 0;
+  border-left: 1px solid rgba(255, 255, 255, .14);
 }
 #toolbar .tool .dd:hover { background: rgba(255, 255, 255, .22); opacity: 1; }
 #toolbar .tool.active .dd { border-left-color: rgba(0, 0, 0, .2); }
