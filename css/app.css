@@ -315,3 +315,61 @@ body {
 ::-webkit-scrollbar-thumb { background: #B9D2E2; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: #8FB6CE; background-clip: content-box; border: 2px solid transparent; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ============================================================
+   MODO iPAD / TÁCTIL (estilo Bluebeam Revu iPad)
+   Se activa solo cuando la pantalla es de dedo (pointer: coarse).
+   Paneles = gavetas deslizables; el plano ocupa TODO; botones de dedo.
+   ============================================================ */
+.touch-only { display: none !important; }
+body.touch .touch-only { display: flex !important; }
+
+body.touch, body.touch button, body.touch label {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+/* inputs a 16px: evita que iOS haga zoom al enfocar */
+body.touch input, body.touch select, body.touch textarea, #askInput { font-size: 16px !important; }
+
+/* barra: botones de dedo (mín 44pt) */
+body.touch #toolbar { height: 68px; }
+body.touch #toolbar button.tool { min-width: 58px; height: 54px; font-size: 18px; }
+body.touch #toolbar button.tool:has(.dd) { padding-right: 30px; padding-left: 8px; min-width: 74px; }
+body.touch #toolbar .tool .dd { width: 22px; font-size: 12px; }
+body.touch #toolbar .tgroup button:not(.tool) { height: 46px; font-size: 14px; padding: 4px 14px; }
+body.touch #toolbar label.tbtn { height: 46px; }
+body.touch #toolbar button label { font-size: 10.5px; }
+
+/* paneles como GAVETAS sobre el plano */
+body.touch #palette {
+  position: absolute; left: 0; top: 0; bottom: 0; z-index: 70;
+  width: min(320px, 85vw);
+  transform: translateX(-105%);
+  transition: transform .22s ease;
+  box-shadow: 8px 0 28px rgba(11, 32, 54, .25);
+}
+body.touch #palette.open { transform: none; }
+body.touch #rightPanel {
+  position: absolute; right: 0; top: 0; bottom: 0; z-index: 70;
+  width: min(320px, 85vw);
+  transform: translateX(105%);
+  transition: transform .22s ease;
+  box-shadow: -8px 0 28px rgba(11, 32, 54, .25);
+}
+body.touch #rightPanel.open { transform: none; }
+body.touch #btnPal.active, body.touch #btnProps.active {
+  background: rgba(34, 232, 224, .14); color: var(--mp-cyan); border-color: rgba(34, 232, 224, .5);
+}
+
+/* símbolos y pestañas de dedo */
+body.touch .symBtn { padding: 10px 6px 8px; }
+body.touch .symBtn svg { width: 68px; height: 52px; }
+body.touch .symBtn .nm { font-size: 11px; }
+body.touch .symBtn .favstar { font-size: 17px; top: 4px; right: 7px; }
+body.touch #catTabs .cat { font-size: 13px; padding: 7px 13px; }
+body.touch #sheetTabs .stab { font-size: 14px; padding: 9px 16px; }
+body.touch #toolMenu .tmItem { padding: 11px 12px; font-size: 15px; }
+body.touch .pbody button, body.touch #layersBody button { padding: 9px 10px !important; font-size: 13px !important; }
+body.touch #statusbar { height: 32px; font-size: 13px; }
+body.touch .sw { width: 28px; height: 28px; }
+body.touch .handle { r: 9; }
+body.touch #main { position: relative; }

@@ -3485,6 +3485,40 @@
     if (!tm.hidden && !tm.contains(ev.target) && !(ev.target.closest && ev.target.closest('.dd'))) tm.hidden = true;
   });
 
+  /* ---------------- modo iPad / táctil (estilo Bluebeam Revu iPad) ---------------- */
+  var isTouch = false;
+  try { isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
+  if (isTouch) {
+    document.body.classList.add('touch');
+    var palOpen = false, propsOpen = false;
+    function syncDrawers() {
+      $('#palette').classList.toggle('open', palOpen);
+      $('#rightPanel').classList.toggle('open', propsOpen);
+      var bp = $('#btnPal'), bq = $('#btnProps');
+      if (bp) bp.classList.toggle('active', palOpen);
+      if (bq) bq.classList.toggle('active', propsOpen);
+    }
+    if ($('#btnPal')) $('#btnPal').addEventListener('click', function () {
+      palOpen = !palOpen; if (palOpen) propsOpen = false; syncDrawers();
+    });
+    if ($('#btnProps')) $('#btnProps').addEventListener('click', function () {
+      propsOpen = !propsOpen; if (propsOpen) palOpen = false; syncDrawers();
+    });
+    // al elegir un símbolo, la gaveta se cierra sola para dejar el plano completo
+    $('#symList').addEventListener('click', function (ev) {
+      if (ev.target.closest && ev.target.closest('.symBtn') && !ev.target.closest('.favstar')) {
+        palOpen = false; syncDrawers();
+      }
+    });
+    // tocar el plano cierra las gavetas
+    svg.addEventListener('pointerdown', function () {
+      if (palOpen || propsOpen) { palOpen = false; propsOpen = false; syncDrawers(); }
+    });
+    setTimeout(function () {
+      setHint('📱 Modo iPad: 🧰 abre los símbolos · ⚙ abre propiedades · pellizca para zoom · un dedo dibuja');
+    }, 400);
+  }
+
   /* ---------------- inicio ---------------- */
   window.__mxpRefresh = refresh;
   // logo oficial de Max Power en la barra (viene de js/logo.js)
