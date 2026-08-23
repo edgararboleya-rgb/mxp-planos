@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.I';
+  var APP_VERSION = 'v23.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1457,7 +1457,8 @@ window.MAXPOWER_SUPABASE = {
         g.onerror = function () { fin(null); };
       } catch (e) { fin(null); }
     });
-    setTimeout(function () { fin(null); }, 2500);
+    // un PDF de 30MB en un iPad puede tardar varios segundos la primera vez
+    setTimeout(function () { fin(null); }, 12000);
   }
   function applySnap(snap) {
     var o = JSON.parse(snap);
@@ -2156,7 +2157,7 @@ window.MAXPOWER_SUPABASE = {
     if (!key || pdfBinLoading[key] || typeof pdfjsLib === 'undefined') return;
     pdfBinLoading[key] = true;
     idbGet(key, function (bytes) {
-      if (!bytes) return;
+      if (!bytes) { delete pdfBinLoading[key]; return; }   // reintenta en el próximo zoom
       try { pdfjsLib.GlobalWorkerOptions.workerSrc = window.MXP_PDF_WORKER_URL || 'js/vendor/pdf.worker.min.js'; } catch (e) {}
       pdfjsLib.getDocument({ data: bytes.slice(0) }).promise.then(function (doc) {
         // el mismo archivo sirve a todas las hojas que salieron de él
@@ -2167,7 +2168,7 @@ window.MAXPOWER_SUPABASE = {
           if (o.bg && o.bg.pdfId === key) pdfLive[i] = { doc: doc, page: o.bg.pdfPage || 1 };
         });
         scheduleHires();
-      }).catch(function () {});
+      }).catch(function () { delete pdfBinLoading[key]; });
     });
   }
   function updateHires() {
@@ -5129,6 +5130,8 @@ window.MAXPOWER_SUPABASE = {
         if (ao && ao.app === 'mxp-planos' && ao.state) { restoreProject(ao); restored = true; }
       }
     } catch (e) {}
+    // precalentar el PDF guardado: el zoom nítido queda listo sin esperar al primer zoom
+    try { if (restored && state.bg && state.bg.pdfId) loadPdfLive(state.bg); } catch (e) {}
     renderSheetTabs();
     updateOvUI();
     setHint(restored
