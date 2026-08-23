@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.H';
+  var APP_VERSION = 'v23.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2064,11 +2064,21 @@ window.MAXPOWER_SUPABASE = {
       var mx = (ux + nx) * 2.4, my = (uy + ny) * 2.4;
       s += '<line x1="' + (p[0] - mx) + '" y1="' + (p[1] - my) + '" x2="' + (p[0] + mx) + '" y2="' + (p[1] + my) + '"/>';
     });
-    var mid = [(a[0] + b[0]) / 2 + nx * 3.5, (a[1] + b[1]) / 2 + ny * 3.5];
-    var ang = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (ang > 90 || ang <= -90) ang += 180;
-    s += '<text x="0" y="0" font-size="7" text-anchor="middle" transform="translate(' + mid[0] + ' ' + mid[1] + ') rotate(' + ang + ')">' +
-      esc(label || fmtFtIn(len)) + '</text>';
+    var txt = label || fmtFtIn(len);
+    if (String(cls).indexOf('meas') >= 0) {
+      // medición: el número SIEMPRE horizontal y con fondito blanco — legible
+      // en medidas verticales sin virar el plano (estilo Bluebeam)
+      var lmx = (a[0] + b[0]) / 2, lmy = (a[1] + b[1]) / 2;
+      var tw = String(txt).length * 7 * 0.62 + 5;
+      s += '<rect x="' + (lmx - tw / 2) + '" y="' + (lmy - 8) + '" width="' + tw + '" height="10" rx="2" fill="#ffffff" fill-opacity="0.88" stroke="none"/>';
+      s += '<text x="' + lmx + '" y="' + lmy + '" font-size="7" text-anchor="middle">' + esc(txt) + '</text>';
+    } else {
+      var mid = [(a[0] + b[0]) / 2 + nx * 3.5, (a[1] + b[1]) / 2 + ny * 3.5];
+      var ang = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (ang > 90 || ang <= -90) ang += 180;
+      s += '<text x="0" y="0" font-size="7" text-anchor="middle" transform="translate(' + mid[0] + ' ' + mid[1] + ') rotate(' + ang + ')">' +
+        esc(txt) + '</text>';
+    }
     return s + '</g>';
   }
 
@@ -2139,9 +2149,31 @@ window.MAXPOWER_SUPABASE = {
   var hiresTimer = null, hiresTok = 0, hiresTask = null;
   function scheduleHires() { clearTimeout(hiresTimer); hiresTimer = setTimeout(updateHires, 400); }
   function hiresClear() { var el = document.getElementById('bgHires'); if (el && el.parentNode) el.parentNode.removeChild(el); }
+  // tras recargar la página, el PDF vivo se rehidrata desde IndexedDB
+  var pdfBinLoading = {};
+  function loadPdfLive(bg) {
+    var key = bg.pdfId;
+    if (!key || pdfBinLoading[key] || typeof pdfjsLib === 'undefined') return;
+    pdfBinLoading[key] = true;
+    idbGet(key, function (bytes) {
+      if (!bytes) return;
+      try { pdfjsLib.GlobalWorkerOptions.workerSrc = window.MXP_PDF_WORKER_URL || 'js/vendor/pdf.worker.min.js'; } catch (e) {}
+      pdfjsLib.getDocument({ data: bytes.slice(0) }).promise.then(function (doc) {
+        // el mismo archivo sirve a todas las hojas que salieron de él
+        state.sheets.forEach(function (sh, i) {
+          var o;
+          if (i === state.curSheet) o = { bg: state.bg };
+          else { try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = {}; } }
+          if (o.bg && o.bg.pdfId === key) pdfLive[i] = { doc: doc, page: o.bg.pdfPage || 1 };
+        });
+        scheduleHires();
+      }).catch(function () {});
+    });
+  }
   function updateHires() {
     var tok = ++hiresTok;
     var b = state.bg, rec = pdfLive[state.curSheet];
+    if (b && !rec && b.pdfId) loadPdfLive(b);
     if (!b || !rec || b.origUrl) return hiresClear();  // sin PDF vivo o con "Solo líneas"
     var basePx = b.pxW || 4096;
     if (view.z <= (basePx / b.w) * 1.15) return hiresClear();  // el raster base alcanza
@@ -2348,7 +2380,8 @@ window.MAXPOWER_SUPABASE = {
         var g2 = { }, dx2 = e.x2 - e.x1, dy2 = e.y2 - e.y1, ln = Math.hypot(dx2, dy2) || 1;
         var nx = -dy2 / ln, ny = dx2 / ln, off = e.off == null ? 14 : e.off;
         var rd = distToSeg(p[0], p[1], e.x1 + nx * off, e.y1 + ny * off, e.x2 + nx * off, e.y2 + ny * off);
-        if (rd.d < (5 * TF) / view.z + 3 * TF) return { kind: 'dim', id: e.id };
+        var rd2 = distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y2);   // también los puntos medidos
+        if (Math.min(rd.d, rd2.d) < (5 * TF) / view.z + 3 * TF) return { kind: 'dim', id: e.id };
       }
     }
     // cables (muestrea la curva) y notas con flecha
@@ -2577,6 +2610,7 @@ window.MAXPOWER_SUPABASE = {
 
   /* ---------------- lógica por herramienta ---------------- */
   function onToolDown(p, ev) {
+    var rawP = p;   // el toque SIN imán: para detectar qué tocó el dedo de verdad
     if (SNAP_TOOLS[tool]) {
       var so = applyOsnap(p);
       if (so.sn) p = so.p;   // el snap gana sobre el ortho
@@ -2596,10 +2630,11 @@ window.MAXPOWER_SUPABASE = {
       case 'window': return openingDown(p, curWinType);
       case 'measure':
         // en Measure, tocar una medida existente la SELECCIONA (como Bluebeam):
-        // se puede mover, estirar por las asas y editar sin cambiar a Select
+        // se usa el toque SIN imán — el OSNAP saltaba al extremo de la medida
+        // vieja y arrancaba otra medida en vez de seleccionarla
         if (!drawing) {
-          var hm = hitTest(p);
-          if (hm && hm.kind === 'dim') return selectDown(p, ev);
+          var hm = hitTest(rawP);
+          if (hm && hm.kind === 'dim') return selectDown(rawP, ev);
           if (sel) { sel = null; renderSel(); showProps(); }
         }
         return twoPointDown(p, 'measure');
@@ -4069,6 +4104,7 @@ window.MAXPOWER_SUPABASE = {
     }
     pdfjsLib.GlobalWorkerOptions.workerSrc = window.MXP_PDF_WORKER_URL || 'js/vendor/pdf.worker.min.js';
     setHint('Leyendo PDF…');
+    var pdfKey = null;   // el PDF crudo se guarda en IndexedDB: el zoom nítido sobrevive recargas
     var rd = new FileReader();
     rd.onload = function () {
       tryOpen(null);
@@ -4077,6 +4113,10 @@ window.MAXPOWER_SUPABASE = {
         var data = rd.result.slice(0);
         var opts = password ? { data: data, password: password } : { data: data };
         pdfjsLib.getDocument(opts).promise.then(function (doc) {
+          if (!deliver && !pdfKey && !password) {
+            pdfKey = 'pdfbin_' + uid();
+            try { idbSet(pdfKey, rd.result.slice(0)); } catch (e) { pdfKey = null; }
+          }
           if (doc.numPages > 1) {
             if (deliver) {
               uiPrompt('El PDF tiene ' + doc.numPages + ' páginas. ¿Cuál quieres para el overlay?', '1', function (input) {
@@ -4137,6 +4177,7 @@ window.MAXPOWER_SUPABASE = {
           else {
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: doc, page: pageNum };
+            if (pdfKey) { state.bg.pdfId = pdfKey; state.bg.pdfPage = pageNum; }
             if (!state.sheets[state.curSheet].no) {
               state.sheets[state.curSheet].no = 'PG-1';
               state.project.sheetNo = 'PG-1';
@@ -4171,6 +4212,7 @@ window.MAXPOWER_SUPABASE = {
           }
           insertBackground(url, pxW, pxH, paperW, paperH);
           pdfLive[state.curSheet] = { doc: doc, page: i };
+          if (pdfKey) { state.bg.pdfId = pdfKey; state.bg.pdfPage = i; }
           i++;
           next();
         });
