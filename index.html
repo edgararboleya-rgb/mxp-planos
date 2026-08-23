@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.G';
+  var APP_VERSION = 'v23.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2703,7 +2703,9 @@ window.MAXPOWER_SUPABASE = {
     if (sel && sel.kind === 'dim') {
       var dsel = findSel();
       if (dsel) {
-        var dhr2 = (document.body.classList.contains('touch') ? 14 : 8) / view.z + 3;
+        var dLen = Math.hypot(dsel.x2 - dsel.x1, dsel.y2 - dsel.y1);
+        // el asa nunca se come más de un tercio de la medida: el centro queda libre para mover
+        var dhr2 = Math.min((document.body.classList.contains('touch') ? 14 : 8) / view.z + 3, dLen / 3);
         if (Math.hypot(p[0] - dsel.x1, p[1] - dsel.y1) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 1, snap: snapshot(), moved: false }; return; }
         if (Math.hypot(p[0] - dsel.x2, p[1] - dsel.y2) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 2, snap: snapshot(), moved: false }; return; }
       }
@@ -2833,11 +2835,11 @@ window.MAXPOWER_SUPABASE = {
           renderWalls(); renderSel();
         }
       } else if (drag.kind === 'dim') {
-        // arrastrar una cota mueve su línea (offset) sin soltar los puntos medidos,
-        // para apilar varias medidas sin que se encimen
-        var ddx = o.x2 - o.x1, ddy = o.y2 - o.y1, ln = Math.hypot(ddx, ddy) || 1;
-        var nnx = -ddy / ln, nny = ddx / ln;
-        e.off = (o.off == null ? 14 : o.off) + (dx * nnx + dy * nny);
+        // arrastrar la medida la MUEVE completa (como Bluebeam);
+        // los extremos se estiran con sus asas
+        var mdx = Math.round(dx), mdy = Math.round(dy);
+        e.x1 = o.x1 + mdx; e.y1 = o.y1 + mdy;
+        e.x2 = o.x2 + mdx; e.y2 = o.y2 + mdy;
         renderAnnot(); renderSel();
       } else if (drag.kind === 'area') {
         var rx = Math.round(dx), ry = Math.round(dy);
@@ -5009,8 +5011,21 @@ window.MAXPOWER_SUPABASE = {
       drag = null; pinch = null; ptrs.clear();
       setHint('Trazo cancelado');
     });
+    // 🗑 flotante: en iPad no hay tecla Delete — aparece al seleccionar algo
+    var dbtn = document.createElement('button');
+    dbtn.id = 'touchDel';
+    dbtn.textContent = '🗑 Borrar';
+    dbtn.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
+      'padding:12px 22px;border-radius:24px;border:0;background:#14161a;color:#fff;' +
+      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
+    document.body.appendChild(dbtn);
+    dbtn.addEventListener('click', function () {
+      if (selGroup) deleteGroup();
+      else if (sel) deleteSelected();
+    });
     setInterval(function () {
       cbtn.style.display = drawing ? 'block' : 'none';
+      dbtn.style.display = !drawing && (sel || selGroup) ? 'block' : 'none';
     }, 400);
     // iOS muestra los PDF "en gris" en la app de Archivos cuando el selector trae
     // filtro de tipos — se lo quitamos y la app valida el archivo por dentro
