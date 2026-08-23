@@ -2735,13 +2735,7 @@
   }
   $('#btnOpen').addEventListener('click', function () { $('#fileOpen').click(); });
   $('#fileOpen').addEventListener('change', function () {
-    var f = this.files[0]; this.value = '';
-    if (!f) return;
-    // "Abrir" acepta todo: si es un PDF o una foto, se importa como plano de fondo
-    if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '') || /^image\//.test(f.type || '')) {
-      handleBgFile(f);
-      return;
-    }
+    var f = this.files[0]; if (!f) return;
     var rd = new FileReader();
     rd.onload = function () {
       try {
@@ -2750,11 +2744,10 @@
         pushUndo();
         restoreProject(o);
         setHint('Proyecto abierto: ' + (state.project.name || f.name));
-      } catch (e) {
-        uiAlert('Ese archivo no es un proyecto de MXP Planos (.mxp.json).\n\nSi es un PLANO (PDF o foto), úsalo con el botón 🖼 Subir Fondo — o vuelve a elegirlo aquí mismo, que ahora los planos también entran por Abrir.');
-      }
+      } catch (e) { uiAlert('No se pudo abrir el archivo — no parece un proyecto de MXP Planos.'); }
     };
     rd.readAsText(f);
+    this.value = '';
   });
 
   /* ---------------- zoom ---------------- */

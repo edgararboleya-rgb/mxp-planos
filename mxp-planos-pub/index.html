@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MXP Planos — Diseño Eléctrico y Arquitectónico</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231e2530'/%3E%3Ctext x='16' y='22' font-size='14' font-family='Arial' font-weight='bold' fill='%23f5b82e' text-anchor='middle'%3EMX%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#071A2E">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ======= BARRA SUPERIOR ======= -->
+  <header id="toolbar">
+    <div class="brand"><img id="brandLogo" alt="Max Power" hidden><b>max power</b><span>PLANOS</span></div>
+
+    <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos">🧰<label>Símbolos</label></button>
+
+    <div class="tgroup" id="toolButtons">
+      <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
+      <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
+      <button class="tool" data-tool="wall" title="Dibujar pared (W)">▬<label>Wall</label><span class="dd" data-menu="wall" title="Elegir tipo de pared">▾</span></button>
+      <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
+      <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
+      <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
+      <button class="tool" data-tool="rect" title="Rectángulo (2 clics, SHIFT = cuadrado)">▭<label>Rect</label></button>
+      <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
+      <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label></button>
+      <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label></button>
+      <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
+      <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
+      <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
+      <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
+      <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
+      <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
+    </div>
+
+    <div class="tgroup">
+      <button id="btnOrtho" title="ORTHO 90°: mantiene las líneas rectas sin apretar Shift (F8)">∟ 90°</button>
+      <select id="wallType" title="Tipo de pared al dibujar">
+        <option value="block">8" Block</option>
+        <option value="block12">12" Block</option>
+        <option value="blockdry">8" Block + Drywall</option>
+        <option value="drywall25">Drywall 2½"</option>
+        <option value="drywall35">Drywall 3½"</option>
+        <option value="drywall">Drywall 4½"</option>
+        <option value="drywall6">Drywall 6"</option>
+      </select>
+    </div>
+
+    <div class="tgroup">
+      <button id="btnUndo" title="Deshacer (Ctrl+Z)">↩</button>
+      <button id="btnRedo" title="Rehacer (Ctrl+Y)">↪</button>
+    </div>
+
+    <div class="tgroup">
+      <button id="btnZoomOut" title="Alejar">−</button>
+      <span id="zoomLabel">100%</span>
+      <button id="btnZoomIn" title="Acercar">+</button>
+      <button id="btnZoomFit" title="Ajustar a contenido">⛶</button>
+    </div>
+
+    <div class="tgroup right">
+      <button id="btnProps" class="touch-only" title="Abrir / cerrar propiedades y capas">⚙<label>Panel</label></button>
+      <button id="btnLot" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎 Lot</button>
+      <button id="btnPanel" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋 Panel Schedule</button>
+      <label for="fileBg" id="btnBg" class="tbtn" title="SUBIR plano, PDF o foto de fondo (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">🖼 Subir Fondo</label>
+      <button id="btnOpen" title="Abrir un proyecto guardado">📂 Abrir</button>
+      <button id="btnSave" title="Guardar el proyecto como archivo">💾 Guardar</button>
+      <button id="btnPng" title="Exportar imagen PNG">PNG</button>
+      <button id="btnPrint" title="Imprimir / Guardar PDF">🖨 PDF</button>
+    </div>
+    <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" hidden>
+    <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>
+    <input type="file" id="fileOpen" accept=".json,application/json" hidden>
+  </header>
+
+  <div id="toolMenu" hidden></div>
+
+  <div id="main">
+
+    <!-- ======= PALETA DE SÍMBOLOS ======= -->
+    <aside id="palette">
+      <input type="search" id="symSearch" placeholder="Search symbol…">
+      <div id="catTabs">
+        <button class="cat" data-cat="fav">★ My Tools</button>
+        <button class="cat active" data-cat="electrical">⚡ Electrical</button>
+        <button class="cat" data-cat="riser">🔌 Riser</button>
+        <button class="cat" data-cat="elev">🗄 Elevation</button>
+        <button class="cat" data-cat="plumbing">🚿 Plumbing</button>
+        <button class="cat" data-cat="furniture">🛋 Furniture</button>
+        <button class="cat" data-cat="site">🌴 Site</button>
+      </div>
+      <div id="symList"></div>
+    </aside>
+
+    <!-- ======= LIENZO ======= -->
+    <div id="canvasWrap">
+      <svg id="canvas" class="mxp" xmlns="http://www.w3.org/2000/svg">
+        <style>
+          .mxp { background:#f5f4ef; }
+          .mxp .sym, .mxp .arch { stroke:#14161a; fill:none; stroke-width:1; stroke-linecap:round; stroke-linejoin:round; }
+          .mxp .sym text, .mxp text.lbl { fill:#14161a; stroke:none; font-family:Arial, Helvetica, sans-serif; }
+          .mxp .wall-edge { stroke:#14161a; stroke-width:1.6; fill:none; }
+          .mxp .wall-fill-drywall { fill:#e8e6df; stroke:none; }
+          .mxp .wall-fill-block { fill:url(#hatchBlock); stroke:none; }
+          .mxp .jamb { stroke:#14161a; stroke-width:1.2; }
+          .mxp .furr-line { stroke:#14161a; stroke-width:0.7; fill:none; }
+          .mxp .wire { stroke:#14161a; stroke-width:0.7; fill:none; }
+          .mxp .wire.dashed { stroke-dasharray:4 3; }
+          .mxp .wire-conduit-outer { stroke:#14161a; stroke-width:3.6; fill:none; stroke-linecap:butt; stroke-linejoin:miter; }
+          .mxp .wire-conduit-inner { stroke:#ffffff; stroke-width:2; fill:none; stroke-linecap:butt; stroke-linejoin:miter; }
+          .mxp .leader-line { stroke:#14161a; stroke-width:0.6; fill:none; }
+          .mxp .leader-head { fill:#14161a; stroke:none; }
+          .mxp .door-leaf { stroke:#14161a; stroke-width:1.4; fill:none; }
+          .mxp .door-arc { stroke:#14161a; stroke-width:0.7; fill:none; stroke-dasharray:3 2.4; }
+          .mxp .win-line { stroke:#14161a; stroke-width:0.9; fill:none; }
+          .mxp .dim { stroke:#8a2f2f; stroke-width:0.6; fill:none; }
+          .mxp .dim text { fill:#8a2f2f; stroke:none; font-family:Arial, sans-serif; }
+          .mxp .meas { stroke:#1c5fa8; stroke-width:0.8; fill:none; }
+          .mxp .meas text { fill:#1c5fa8; stroke:none; font-family:Arial, sans-serif; font-weight:bold; }
+          .mxp .sel { stroke:#0b84ff; stroke-width:1.2; fill:none; stroke-dasharray:5 4; }
+          .mxp .handle { fill:#ffffff; stroke:#0b84ff; stroke-width:1.2; }
+          .mxp .preview { opacity:0.55; }
+          .mxp .osnap { fill:none; stroke:#0a8f3c; stroke-width:1.4; }
+          .mxp .gridline { stroke:#d8d5ca; stroke-width:0.4; }
+          .mxp .gridline.major { stroke:#c6c2b4; stroke-width:0.7; }
+        </style>
+        <defs>
+          <pattern id="hatchBlock" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="6" height="6" fill="#efede6"></rect>
+            <line x1="0" y1="0" x2="0" y2="6" stroke="#8f8b7e" stroke-width="0.8"></line>
+          </pattern>
+          <pattern id="grid12" width="12" height="12" patternUnits="userSpaceOnUse">
+            <path d="M12 0 H0 V12" fill="none" class="gridline"></path>
+          </pattern>
+          <pattern id="grid60" width="60" height="60" patternUnits="userSpaceOnUse">
+            <path d="M60 0 H0 V60" fill="none" class="gridline major"></path>
+          </pattern>
+        </defs>
+        <g id="world">
+          <g id="gGridBase"></g>
+          <g id="gBackground"></g>
+          <g id="gAreas"></g>
+          <g id="gFurniture"></g>
+          <g id="gWalls"></g>
+          <g id="gElectrical"></g>
+          <g id="gAnnot"></g>
+          <g id="gMeasure"></g>
+          <g id="gPreview"></g>
+          <g id="gSel"></g>
+        </g>
+      </svg>
+      <div id="sheetTabs"></div>
+    </div>
+
+    <!-- ======= PANEL DERECHO ======= -->
+    <aside id="rightPanel">
+      <section class="panel" id="propsPanel">
+        <h3>Propiedades</h3>
+        <div id="propsBody" class="pbody muted">Nada seleccionado</div>
+      </section>
+
+      <section class="panel">
+        <h3>Capas</h3>
+        <div class="pbody" id="layersBody">
+          <label class="lay"><input type="checkbox" data-layer="background" checked> Background (imported plan)</label>
+          <div class="sub"><span>Opacity</span><input type="range" id="bgOpacity" min="10" max="100" value="70"></div>
+          <div class="sub"><button id="btnBgScale" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Aplica la escala escrita en el plano (ej: 1/4&quot; = 1'-0&quot;) sin calibrar">📐 Escala del plano</button></div>
+          <div class="sub"><button id="btnBgLines" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">✂ Solo líneas (fondo transparente)</button></div>
+          <div class="sub"><button id="btnOv" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara 2 pisos: el plano base se pone AZUL y el otro ROJO — donde no cuadran, algo cambió">🔴 Overlay: comparar con otro plano</button></div>
+          <div class="sub" id="ovRow" hidden><span>Rojo</span><input type="range" id="ov2Op" min="10" max="100" value="70"></div>
+          <div class="sub" id="ovRow2" hidden>
+            <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
+            <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
+          </div>
+          <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
+          <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
+          <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
+          <label class="lay"><input type="checkbox" data-layer="electrical" checked> Electrical</label>
+          <label class="lay"><input type="checkbox" data-layer="annotation" checked> Dims &amp; Text</label>
+          <label class="lay"><input type="checkbox" data-layer="grid" checked> Grid</label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Proyecto</h3>
+        <div class="pbody">
+          <input id="pjName" placeholder="Nombre del proyecto">
+          <input id="pjClient" placeholder="Cliente">
+          <input id="pjAddress" placeholder="Dirección">
+          <div class="row">
+            <input id="pjJob" placeholder="Job No. (MXP-…)">
+            <input id="pjSheetNo" placeholder="Hoja (E-1)" style="width:70px;flex:none">
+          </div>
+          <input id="pjSheetTitle" placeholder="Título de hoja (POWER RISER DIAGRAM)">
+          <input id="pjDrawn" placeholder="Dibujado por" value="">
+          <div class="row"><label>Precision</label>
+            <select id="pjPrec" style="flex:1">
+              <option value="8">1/8"</option>
+              <option value="4" selected>1/4"</option>
+              <option value="2">1/2"</option>
+              <option value="1">1"</option>
+            </select>
+          </div>
+          <div class="row"><label>Print scale</label>
+            <select id="pjScale" style="flex:1">
+              <option value="fit" selected>Graphic (fit page)</option>
+              <option value="24">1/2" = 1'-0"</option>
+              <option value="32">3/8" = 1'-0"</option>
+              <option value="48">1/4" = 1'-0"</option>
+              <option value="64">3/16" = 1'-0"</option>
+              <option value="96">1/8" = 1'-0"</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Materiales <span class="muted small">(automático)</span> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)">📤 Estimador</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)">⬇ CSV</button></h3>
+        <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- ======= BARRA DE ESTADO ======= -->
+  <footer id="statusbar">
+    <span id="hint">Selecciona una herramienta para comenzar</span>
+    <span id="coords"></span>
+  </footer>
+</div>
+
+<!-- ======= EDITOR DE PANEL SCHEDULE (E-2) ======= -->
+<div id="panelModal" class="modal" hidden>
+  <div class="modalBox">
+    <div class="modalHead">
+      <b>PANEL SCHEDULE &amp; LOAD CALCULATION</b>
+      <div class="mbtns">
+        <button id="psPrint">🖨 Print Sheet (E-2)</button>
+        <button id="psClose">✕ Cerrar</button>
+      </div>
+    </div>
+    <div class="psHeader">
+      <label>Panel <input id="psName" style="width:50px"></label>
+      <label>Voltaje <input id="psVolts" style="width:130px"></label>
+      <label>Main <input id="psMain" style="width:90px"></label>
+      <label>Montaje <input id="psMount" style="width:140px"></label>
+      <label>Espacios <input id="psSpaces" type="number" min="2" max="84" step="2" style="width:56px"></label>
+      <label>AIC <input id="psAic" style="width:110px"></label>
+    </div>
+    <div class="psGrid"><table id="psTable"></table></div>
+    <div id="psTotals" class="psTotals"></div>
+    <h4>LOAD CALCULATION — NEC 220.83 <button id="psAddLoad" class="small">+ Agregar carga</button></h4>
+    <table id="psLoads" class="psLoadsT"></table>
+    <div id="psCalc" class="psCalc"></div>
+  </div>
+</div>
+
+<!-- ======= DIÁLOGO PROPIO (el visor bloquea los del navegador) ======= -->
+<div id="askModal" class="modal" hidden style="z-index:80">
+  <div class="modalBox" style="width:min(440px,92vw)">
+    <div id="askTitle" style="font-size:13.5px;margin-bottom:10px;white-space:pre-wrap;line-height:1.5"></div>
+    <input id="askInput" style="width:100%;padding:9px;font-size:15px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box">
+    <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+      <button id="askCancel" style="padding:7px 14px;border:1px solid #c9c9c3;background:#fff;border-radius:6px;cursor:pointer">Cancelar</button>
+      <button id="askOk" style="padding:7px 18px;border:none;background:#1e2530;color:#fff;font-weight:700;border-radius:6px;cursor:pointer">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======= BUSCADOR DE PROPIEDAD / LOTE ======= -->
+<div id="lotModal" class="modal" hidden>
+  <div class="modalBox" style="width:min(580px,94vw)">
+    <div class="modalHead">
+      <b>🔎 PROPERTY / LOT SEARCH</b>
+      <div class="mbtns"><button id="lotClose">✕ Cerrar</button></div>
+    </div>
+    <div class="pbody">
+      <input id="lotAddr" placeholder="Dirección o folio — ej: 410 S Sterling Ave, Tampa, FL 33609" style="font-size:14px;padding:8px">
+      <div class="row"><label>Condado</label><select id="lotCounty" style="flex:1"></select></div>
+      <div class="row">
+        <button id="lotAddCounty" style="flex:1">+ Agregar condado</button>
+        <button id="lotEditCounty" style="flex:1">✎ Editar</button>
+        <button id="lotDelCounty" style="flex:1">🗑 Borrar</button>
+      </div>
+      <button id="lotDirect" style="padding:9px;font-weight:700">🎯 Ir directo al lote</button>
+      <div class="muted small">Busca la dirección exacta dentro del sitio del condado — el primer resultado es la página del lote. Si pones el número de folio (Hillsborough), abre el lote directo.</div>
+      <button id="lotOpenPA" style="padding:7px">🏛 Abrir el buscador del Property Appraiser</button>
+      <div class="muted small">Al abrir, la dirección queda copiada — pégala (Ctrl+V) en el buscador de la página.</div>
+      <div class="row">
+        <button id="lotGoogle" style="flex:1">🔍 Google</button>
+        <button id="lotMaps" style="flex:1">🗺 Maps</button>
+        <button id="lotFema" style="flex:1">🌊 FEMA Flood</button>
+      </div>
+      <div id="lotFallback" hidden>
+        <a id="lotUrlA" href="#" target="_blank" rel="noopener" style="display:block;text-align:center;padding:9px;background:#1e2530;color:#f5b82e;font-weight:700;border-radius:6px;text-decoration:none;margin-top:4px">↗ ABRIR EN PESTAÑA NUEVA</a>
+        <div class="muted small" style="margin-top:4px">Si el botón de arriba no abre (visor bloqueado): copia el link y pégalo en la <b>barra de direcciones</b> del navegador (no en el buscador de Google):</div>
+        <div class="row">
+          <input id="lotUrl" readonly style="flex:1;font-size:11px">
+          <button id="lotCopy" style="flex:none">📋 Copiar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======= HOJA DE IMPRESIÓN ======= -->
+<div id="printSheet" hidden></div>
+
+<script src="js/vendor/pdf.min.js"></script>
+<script src="js/logo.js"></script>
+<script src="js/config.js"></script>
+<script src="js/symbols.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
