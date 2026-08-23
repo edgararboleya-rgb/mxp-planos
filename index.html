@@ -1395,8 +1395,42 @@ window.MAXPOWER_SUPABASE = {
   function doAutosave() {
     try {
       syncSheet();
-      localStorage.setItem('mxp_autosave', JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view }));
-    } catch (e) { /* sin espacio (planos muy pesados): se guarda con 💾 */ }
+      var payload = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
+      // IndexedDB primero: localStorage se queda corto (~5MB) con varios planos
+      // de fondo y fallaba en silencio — se perdían las medidas al salir
+      idbSet('autosave', payload);
+      try { localStorage.setItem('mxp_autosave', payload); }
+      catch (e) { try { localStorage.removeItem('mxp_autosave'); } catch (e2) {} }
+    } catch (e) {}
+  }
+  function idbKV(mode, cb) {
+    try {
+      var rq = indexedDB.open('mxp-planos', 1);
+      rq.onupgradeneeded = function () { rq.result.createObjectStore('kv'); };
+      rq.onsuccess = function () {
+        var db = rq.result;
+        try {
+          var tx = db.transaction('kv', mode);
+          cb(tx.objectStore('kv'));
+          tx.oncomplete = function () { db.close(); };
+        } catch (e) { db.close(); cb(null); }
+      };
+      rq.onerror = function () { cb(null); };
+    } catch (e) { cb(null); }
+  }
+  function idbSet(k, v) { idbKV('readwrite', function (st) { if (st) try { st.put(v, k); } catch (e) {} }); }
+  function idbGet(k, done) {
+    var called = false;
+    function fin(v) { if (!called) { called = true; done(v); } }
+    idbKV('readonly', function (st) {
+      if (!st) return fin(null);
+      try {
+        var g = st.get(k);
+        g.onsuccess = function () { fin(g.result || null); };
+        g.onerror = function () { fin(null); };
+      } catch (e) { fin(null); }
+    });
+    setTimeout(function () { fin(null); }, 2500);
   }
   function applySnap(snap) {
     var o = JSON.parse(snap);
@@ -1461,6 +1495,7 @@ window.MAXPOWER_SUPABASE = {
   function applyView() {
     G.world.setAttribute('transform', 'translate(' + view.tx + ' ' + view.ty + ') scale(' + view.z + ')');
     $('#zoomLabel').textContent = zoomPct() + '%';
+    if (typeof scheduleHires === 'function') scheduleHires();
   }
 
   /* ---------------- snap ---------------- */
@@ -2016,7 +2051,7 @@ window.MAXPOWER_SUPABASE = {
 
   function renderAnnot() {
     var s = '';
-    state.dims.forEach(function (d) { s += dimMarkup(d.x1, d.y1, d.x2, d.y2, d.off, 'dim'); });
+    state.dims.forEach(function (d) { s += dimMarkup(d.x1, d.y1, d.x2, d.y2, d.off, d.meas ? 'dim meas' : 'dim'); });
     state.leaders.forEach(function (l) { s += leaderMarkup(l); });
     state.texts.forEach(function (t) {
       var sz = t.size || 9;
@@ -2056,6 +2091,61 @@ window.MAXPOWER_SUPABASE = {
         '" preserveAspectRatio="none"/>';
     }
     G.bg.innerHTML = out;
+    scheduleHires();
+  }
+
+  /* --- re-dibujado nítido de la zona visible (nivel Bluebeam) ---
+     El raster base se queda corto al acercarse en hojas de 36". Si la hoja
+     vino de un PDF (vectorial) y sigue abierta en la sesión, al parar el
+     zoom se re-dibuja SOLO el pedazo visible a resolución de pantalla. */
+  var pdfLive = {};   // índice de hoja → { doc, page } — solo vive en la sesión
+  var hiresTimer = null, hiresTok = 0, hiresTask = null;
+  function scheduleHires() { clearTimeout(hiresTimer); hiresTimer = setTimeout(updateHires, 400); }
+  function hiresClear() { var el = document.getElementById('bgHires'); if (el && el.parentNode) el.parentNode.removeChild(el); }
+  function updateHires() {
+    var tok = ++hiresTok;
+    var b = state.bg, rec = pdfLive[state.curSheet];
+    if (!b || !rec || b.origUrl) return hiresClear();  // sin PDF vivo o con "Solo líneas"
+    var basePx = b.pxW || 4096;
+    if (view.z <= (basePx / b.w) * 1.15) return hiresClear();  // el raster base alcanza
+    var r = svg.getBoundingClientRect();
+    var p0 = screenToWorld(r.left, r.top), p1 = screenToWorld(r.right, r.bottom);
+    var x0 = Math.max(b.x, p0[0]), y0 = Math.max(b.y, p0[1]);
+    var x1 = Math.min(b.x + b.w, p1[0]), y1 = Math.min(b.y + b.h, p1[1]);
+    if (x1 - x0 < 0.5 || y1 - y0 < 0.5) return hiresClear();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var cw = Math.round((x1 - x0) * view.z * dpr), ch = Math.round((y1 - y0) * view.z * dpr);
+    var MAXA = document.body.classList.contains('touch') ? 9e6 : 16e6;
+    var shr = Math.min(1, 4096 / cw, 4096 / ch, Math.sqrt(MAXA / (cw * ch)));
+    cw = Math.max(1, Math.round(cw * shr)); ch = Math.max(1, Math.round(ch * shr));
+    rec.doc.getPage(rec.page).then(function (page) {
+      if (tok !== hiresTok) return;
+      var vp1 = page.getViewport({ scale: 1 });
+      var S = cw / (vp1.width * ((x1 - x0) / b.w));
+      var vp = page.getViewport({ scale: S });
+      var cv = document.createElement('canvas');
+      cv.width = cw; cv.height = ch;
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+      var ox = (x0 - b.x) / b.w * vp.width, oy = (y0 - b.y) / b.h * vp.height;
+      if (hiresTask) { try { hiresTask.cancel(); } catch (e) {} }
+      hiresTask = page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -ox, -oy] });
+      hiresTask.promise.then(function () {
+        hiresTask = null;
+        if (tok !== hiresTok) { cv.width = 1; cv.height = 1; return; }
+        var url = cv.toDataURL('image/jpeg', 0.85);
+        cv.width = 1; cv.height = 1;
+        hiresClear();
+        var im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+        im.setAttribute('id', 'bgHires');
+        im.setAttribute('href', url);
+        im.setAttribute('x', x0); im.setAttribute('y', y0);
+        im.setAttribute('width', x1 - x0); im.setAttribute('height', y1 - y0);
+        im.setAttribute('opacity', b.opacity == null ? 0.7 : b.opacity);
+        im.setAttribute('preserveAspectRatio', 'none');
+        G.bg.appendChild(im);
+      }).catch(function () { hiresTask = null; });
+    }).catch(function () {});
   }
   function renderGrid() {
     var EXT = 12000;
@@ -2777,9 +2867,13 @@ window.MAXPOWER_SUPABASE = {
     var len = Math.hypot(p[0] - a[0], p[1] - a[1]);
     if (len < 1) return;
     if (kind === 'measure') {
-      measure = { x1: a[0], y1: a[1], x2: p[0], y2: p[1] };
-      renderAnnot();
-      setHint('Distancia: ' + fmtFtIn(len) + ' — clic para medir otra vez');
+      // la medida queda como objeto real: seleccionable, movible y guardada
+      pushUndo();
+      var dm = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], off: 14, meas: true };
+      state.dims.push(dm);
+      sel = { kind: 'dim', id: dm.id };
+      refresh();
+      setHint('Distancia: ' + fmtFtIn(len) + ' — quedó en el plano · clic para medir otra vez · Delete la borra');
     } else if (kind === 'wire') {
       pushUndo();
       var wr = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, bulge: 0.22 };
@@ -3730,6 +3824,14 @@ window.MAXPOWER_SUPABASE = {
             var wasActive = idx === state.curSheet;
             var activeObj = state.sheets[state.curSheet];
             state.sheets.splice(idx, 1);
+            // el mapa de PDFs vivos va por índice de hoja: correr los que siguen
+            var nl = {};
+            Object.keys(pdfLive).forEach(function (k) {
+              k = +k;
+              if (k < idx) nl[k] = pdfLive[k];
+              else if (k > idx) nl[k - 1] = pdfLive[k];
+            });
+            pdfLive = nl;
             if (wasActive) activateSheet(Math.min(idx, state.sheets.length - 1));
             else { state.curSheet = state.sheets.indexOf(activeObj); renderSheetTabs(); scheduleAutosave(); }
           });
@@ -3819,7 +3921,7 @@ window.MAXPOWER_SUPABASE = {
   function insertBackground(url, pxW, pxH, paperW, paperH) {
     pushUndo();
     var w = 600; // se inserta a 50 pies de ancho; luego se pone a escala o se calibra
-    state.bg = { url: url, x: 0, y: 0, w: w, h: w * pxH / pxW, opacity: ($('#bgOpacity').value / 100) };
+    state.bg = { url: url, x: 0, y: 0, w: w, h: w * pxH / pxW, pxW: pxW, pxH: pxH, opacity: ($('#bgOpacity').value / 100) };
     if (paperW) { state.bg.paperW = paperW; state.bg.paperH = paperH; }
     renderBg();
     zoomFit();
@@ -3902,7 +4004,11 @@ window.MAXPOWER_SUPABASE = {
           var url = (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
           cv.width = 1; cv.height = 1;   // libera la memoria del canvas de una
           if (cb) cb(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
-          else insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
+          else {
+            insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
+            pdfLive[state.curSheet] = { doc: doc, page: pageNum };
+            scheduleHires();
+          }
         });
       }).catch(function (err) {
         console.error(err);
@@ -3923,6 +4029,7 @@ window.MAXPOWER_SUPABASE = {
         renderPdfPage(doc, i, function (url, pxW, pxH, paperW, paperH) {
           if (i > 1) addSheet('PG-' + i);
           insertBackground(url, pxW, pxH, paperW, paperH);
+          pdfLive[state.curSheet] = { doc: doc, page: i };
           i++;
           next();
         });
@@ -4798,20 +4905,23 @@ window.MAXPOWER_SUPABASE = {
   applyView();
   refresh();
   setTool('select');
-  // restaurar el trabajo guardado automáticamente (si lo hay)
-  var restored = false;
-  try {
-    var as = localStorage.getItem('mxp_autosave');
-    if (as) {
-      var ao = JSON.parse(as);
-      if (ao && ao.app === 'mxp-planos' && ao.state) { restoreProject(ao); restored = true; }
-    }
-  } catch (e) {}
-  renderSheetTabs();
-  updateOvUI();
-  setHint(restored
-    ? '🔄 Tu trabajo se restauró automáticamente — todo se guarda solo mientras dibujas (💾 Guardar para tener el archivo)'
-    : 'Bienvenido a MXP Planos — dibuja paredes (W), coloca símbolos desde la paleta, o importa un plano con "Fondo" y calíbralo (K)');
+  // restaurar el trabajo guardado automáticamente: IndexedDB primero (aguanta
+  // planos pesados), localStorage como respaldo de versiones viejas
+  idbGet('autosave', function (payload) {
+    var restored = false;
+    try {
+      var as = payload || localStorage.getItem('mxp_autosave');
+      if (as) {
+        var ao = JSON.parse(as);
+        if (ao && ao.app === 'mxp-planos' && ao.state) { restoreProject(ao); restored = true; }
+      }
+    } catch (e) {}
+    renderSheetTabs();
+    updateOvUI();
+    setHint(restored
+      ? '🔄 Tu trabajo se restauró automáticamente — todo se guarda solo mientras dibujas (💾 Guardar para tener el archivo)'
+      : 'Bienvenido a MXP Planos — dibuja paredes (W), coloca símbolos desde la paleta, o importa un plano con "Fondo" y calíbralo (K)');
+  });
   // app instalable: registra el service worker cuando corre como sitio (GitHub Pages / servidor)
   try {
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
