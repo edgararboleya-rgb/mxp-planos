@@ -1,0 +1,14 @@
+{
+  "name": "MXP Planos — Max Power Electrical",
+  "short_name": "MXP Planos",
+  "description": "Editor de planos eléctricos y arquitectónicos de Max Power Electrical Solutions: dibujo, markup, medidas y takeoff.",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F6FCFF",
+  "theme_color": "#071A2E",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
