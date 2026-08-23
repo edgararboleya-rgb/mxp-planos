@@ -1349,7 +1349,7 @@ window.MAXPOWER_SUPABASE = {
     bg2: null,     // overlay de comparación (plano rojo encima del azul)
     panels: [],    // panel schedules E-2
     precision: 4,  // fracción de pulgada para medidas (8=1/8")
-    sheets: [{ no: 'E-1', title: '', data: null }],   // multi-hoja: cada hoja guarda su dibujo
+    sheets: [{ no: '', title: '', data: null }],   // multi-hoja: cada hoja guarda su dibujo (sin nombre hasta que haya contenido)
     curSheet: 0,
     project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }
   };
@@ -1570,6 +1570,16 @@ window.MAXPOWER_SUPABASE = {
   }
   $('#btnOrtho').addEventListener('click', function () { setOrtho(!orthoOn); });
   function wantOrtho(ev) { return orthoOn || (ev && ev.shiftKey); }
+  // medir/cotas/calibrar: si la línea va CASI recta, se endereza sola (como
+  // Bluebeam) — con ORTHO o Shift el candado es total
+  function autoStraight(p, ev) {
+    if (!(drawing && drawing.mode === 'twopoint')) return p;
+    if (wantOrtho(ev)) return orthoLock(drawing.a, p);
+    if (drawing.kind === 'measure' || drawing.kind === 'dim' || drawing.kind === 'calibrate') {
+      return orthoSnap(drawing.a, p);
+    }
+    return p;
+  }
   function orthoSnap(a, b) {
     var dx = b[0] - a[0], dy = b[1] - a[1];
     var ang = Math.atan2(dy, dx);
@@ -2494,10 +2504,10 @@ window.MAXPOWER_SUPABASE = {
     if (SNAP_TOOLS[tool]) {
       var so = applyOsnap(p);
       if (so.sn) p = so.p;   // el snap gana sobre el ortho
-      else if (wantOrtho(ev) && drawing && drawing.mode === 'twopoint') p = orthoLock(drawing.a, p);
+      else if (drawing && drawing.mode === 'twopoint') p = autoStraight(p, ev);
       else if (wantOrtho(ev) && drawing && drawing.mode === 'areachain') p = orthoLock(drawing.pts[drawing.pts.length - 1], p);
-    } else if (wantOrtho(ev) && drawing && drawing.mode === 'twopoint') {
-      p = orthoLock(drawing.a, p);
+    } else if (drawing && drawing.mode === 'twopoint') {
+      p = autoStraight(p, ev);
     }
     switch (tool) {
       case 'select': return selectDown(p, ev);
@@ -2524,10 +2534,10 @@ window.MAXPOWER_SUPABASE = {
     if (SNAP_TOOLS[tool]) {
       var so = applyOsnap(p);
       if (so.sn) { p = so.p; snapMark = osnapMarker(so.sn); }
-      else if (drawing && drawing.mode === 'twopoint' && wantOrtho(ev)) p = orthoLock(drawing.a, p);
+      else if (drawing && drawing.mode === 'twopoint') p = autoStraight(p, ev);
       else if (drawing && drawing.mode === 'areachain' && wantOrtho(ev)) p = orthoLock(drawing.pts[drawing.pts.length - 1], p);
-    } else if (drawing && drawing.mode === 'twopoint' && wantOrtho(ev)) {
-      p = orthoLock(drawing.a, p);
+    } else if (drawing && drawing.mode === 'twopoint') {
+      p = autoStraight(p, ev);
     }
     var hadPreview = true;
     if (tool === 'wall' && drawing && drawing.mode === 'wallchain') {
@@ -3809,7 +3819,7 @@ window.MAXPOWER_SUPABASE = {
     state.sheets.forEach(function (sh, i) {
       html += '<button class="stab' + (i === state.curSheet ? ' active' : '') + '" data-i="' + i + '" title="Doble clic: renombrar la hoja">' +
         esc(sh.no || ('H' + (i + 1))) +
-        (state.sheets.length > 1 ? '<span class="sx" data-x="' + i + '" title="Eliminar hoja">×</span>' : '') +
+        '<span class="sx" data-x="' + i + '" title="' + (state.sheets.length > 1 ? 'Eliminar hoja' : 'Borrar todo y dejar la hoja en blanco') + '">×</span>' +
         '</button>';
     });
     html += '<button class="stab add" id="stAdd" title="Agregar hoja al set">+</button>';
@@ -3819,6 +3829,22 @@ window.MAXPOWER_SUPABASE = {
         var t = ev.target;
         if (t.classList && t.classList.contains('sx')) {
           var idx = parseInt(t.dataset.x, 10);
+          if (state.sheets.length === 1) {
+            // última hoja: borrar todo deja el lienzo en blanco, sin nombre
+            uiConfirm('¿Borrar TODO (dibujo y plano de fondo) y dejar una hoja en blanco?', function (ok) {
+              if (!ok) return;
+              state.sheets = [{ no: '', title: '', data: null }];
+              state.curSheet = 0;
+              state.project.sheetNo = ''; state.project.sheetTitle = '';
+              pdfLive = {};
+              loadSheetData(null);
+              syncProjectInputs();
+              renderSheetTabs();
+              scheduleAutosave();
+              setHint('Hoja en blanco — dibuja, o abre un plano con 📂 Abrir');
+            });
+            return;
+          }
           uiConfirm('¿Eliminar la hoja "' + (state.sheets[idx].no || '') + '" con todo su dibujo?', function (ok) {
             if (!ok) return;
             var wasActive = idx === state.curSheet;
@@ -4007,6 +4033,11 @@ window.MAXPOWER_SUPABASE = {
           else {
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: doc, page: pageNum };
+            if (!state.sheets[state.curSheet].no) {
+              state.sheets[state.curSheet].no = 'PG-1';
+              state.project.sheetNo = 'PG-1';
+              syncProjectInputs(); renderSheetTabs();
+            }
             scheduleHires();
           }
         });
@@ -4028,6 +4059,12 @@ window.MAXPOWER_SUPABASE = {
         setHint('Importando página ' + i + ' de ' + n + '…');
         renderPdfPage(doc, i, function (url, pxW, pxH, paperW, paperH) {
           if (i > 1) addSheet('PG-' + i);
+          else {
+            // el set completo se nombra PG-1, PG-2, … desde la primera página
+            state.sheets[state.curSheet].no = 'PG-1';
+            state.project.sheetNo = 'PG-1';
+            syncProjectInputs();
+          }
           insertBackground(url, pxW, pxH, paperW, paperH);
           pdfLive[state.curSheet] = { doc: doc, page: i };
           i++;
