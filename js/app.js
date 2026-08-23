@@ -2097,6 +2097,152 @@
     setHint('Lista de materiales exportada a CSV (se abre en Excel)');
   }
 
+  /* ---------------- puente al estimador de Max Power (Fase 3) ----------------
+     El plano dice CUÁNTO · el estimador dice A CÓMO · el proyecto dice CÓMO SALIÓ.
+     Este botón deja las cantidades en las tablas del estimador (estado BORRADOR),
+     usando los nombres EXACTOS del catálogo y la tabla alias_takeoff. */
+  var SB = window.MAXPOWER_SUPABASE || null;
+  function sbAuth() { try { return JSON.parse(localStorage.getItem('mxp_sb_auth') || 'null'); } catch (e) { return null; } }
+  function sbFetch(path, opts) {
+    opts = opts || {};
+    var auth = sbAuth();
+    var headers = { 'apikey': SB.key, 'Content-Type': 'application/json' };
+    if (auth && auth.access_token) headers['Authorization'] = 'Bearer ' + auth.access_token;
+    if (opts.prefer) headers['Prefer'] = opts.prefer;
+    return fetch(SB.url + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
+      .then(function (r) {
+        if (r.status === 401) throw new Error('login');
+        return r.text().then(function (t) {
+          var data = null; try { data = t ? JSON.parse(t) : null; } catch (e2) {}
+          if (!r.ok) throw new Error((data && (data.message || data.msg || data.error_description)) || ('HTTP ' + r.status));
+          return data;
+        });
+      });
+  }
+  function sbLogin(email, pass) {
+    return fetch(SB.url + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'apikey': SB.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: pass })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.access_token) throw new Error(d.error_description || d.msg || 'email o contraseña incorrectos');
+      localStorage.setItem('mxp_sb_auth', JSON.stringify({ access_token: d.access_token, email: email }));
+      return d;
+    });
+  }
+  function askLogin(done) {
+    uiPrompt('Entra con tu usuario del panel de Max Power — email:', (sbAuth() && sbAuth().email) || '', function (em) {
+      if (!em) return;
+      uiPrompt('Contraseña:', '', function (pw) {
+        var inp0 = $('#askInput'); if (inp0) inp0.type = 'text';
+        if (pw === null || pw === '') return;
+        setHint('Entrando al estimador…');
+        sbLogin(em.trim(), pw).then(function () { setHint('✔ Sesión iniciada'); done(); })
+          .catch(function (e) { uiAlert('No se pudo entrar: ' + e.message); setHint(''); });
+      });
+      var inp = $('#askInput'); if (inp) inp.type = 'password';
+    });
+  }
+  function normTxt2(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  // cantidades de TODO el set (todas las hojas), listas para mapear al catálogo
+  function buildTakeoffEntries() {
+    syncSheet();
+    var out = [];
+    function add(name, qty, unit) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit }); }
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areas = [];
+    state.sheets.forEach(function (sh) {
+      var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {}
+      (d.symbols || []).forEach(function (s) { if (SYMBOLS[s.key]) byKey[s.key] = (byKey[s.key] || 0) + 1; });
+      (d.openings || []).forEach(function (o) { oc[o.type] = (oc[o.type] || 0) + 1; });
+      (d.wires || []).forEach(function (w) {
+        var key = w.label || WIRE_STYLE_NAMES[w.style || 'dashed'] || 'Cableado';
+        wg[key] = (wg[key] || 0) + wireLen(w);
+      });
+      (d.walls || []).forEach(function (w) { wl[w.type] = (wl[w.type] || 0) + wallGeom(w).len; });
+      (d.areas || []).forEach(function (a) {
+        if (a.open || !AREA_PATTERNS[a.pattern] || a.pattern === 'none') return;
+        areas.push([AREA_PATTERNS[a.pattern].name, Math.round(polyArea(a.pts) / 144)]);
+      });
+    });
+    Object.keys(byKey).forEach(function (k) { add(SYMBOLS[k].name, byKey[k], 'EA'); });
+    Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA'); });
+    Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
+    Object.keys(wl).forEach(function (k) { add(WALL_TYPES[k].name + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
+    areas.forEach(function (a) { add(a[0], a[1], 'SF'); });
+    return out;
+  }
+  if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
+    if (!SB || typeof fetch === 'undefined') { uiAlert('La conexión al estimador no está configurada.'); return; }
+    var entries = buildTakeoffEntries();
+    if (!entries.length) { uiAlert('El plano no tiene nada que contar todavía — coloca símbolos, paredes o cableado primero.'); return; }
+    function go() {
+      setHint('Leyendo el catálogo del estimador…');
+      Promise.all([
+        sbFetch('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad'),
+        sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor')
+      ]).then(function (res) {
+        var cat = res[0] || [], alias = res[1] || [];
+        if (!cat.length) {
+          uiAlert('El catálogo del estimador llegó vacío.\nEntra con el usuario DUEÑO del panel de Max Power (el mismo de la app operativa) y vuelve a intentar.');
+          localStorage.removeItem('mxp_sb_auth');
+          setHint(''); return;
+        }
+        var catByNorm = {}; cat.forEach(function (c) { catByNorm[normTxt2(c.item)] = c; });
+        var aliasByNorm = {}; alias.forEach(function (a) { aliasByNorm[normTxt2(a.alias)] = a; });
+        var mapped = {}, unmapped = [];
+        entries.forEach(function (e) {
+          var n = normTxt2(e.name), target = null, factor = 1;
+          var al = aliasByNorm[n];
+          if (al) { target = catByNorm[normTxt2(al.item)]; factor = Number(al.factor) || 1; }
+          if (!target) target = catByNorm[n];
+          if (!target) { unmapped.push(e.name + ' (' + e.qty + ' ' + e.unit + ')'); return; }
+          var k = target.item;
+          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: target.precio || 0, horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff' };
+          mapped[k].cantidad += e.qty * factor;
+        });
+        var items = Object.keys(mapped).map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
+        if (!items.length) {
+          uiAlert('Ninguna pieza del plano coincide todavía con el catálogo del estimador.\n\nSIN MAPEAR:\n• ' + unmapped.join('\n• ') + '\n\nAgrega esos nombres en la tabla de alias del estimador (alias_takeoff) y vuelve a intentar.');
+          setHint(''); return;
+        }
+        // estimate_id EST-AAAA-NNN: lo emite esta app (contrato de datos §3)
+        var year = new Date().getFullYear();
+        var seq = parseInt(localStorage.getItem('mxp_est_seq_' + year) || '0', 10) + 1;
+        var estId = 'EST-' + year + '-' + ('00' + seq).slice(-3);
+        setHint('Creando el estimado borrador…');
+        sbFetch('/rest/v1/estimados', {
+          method: 'POST', prefer: 'return=representation',
+          body: [{
+            nombre: (state.project.name || 'Takeoff MXP Planos') + ' [' + estId + ']',
+            cliente: state.project.client || null,
+            direccion: state.project.address || null,
+            estado: 'borrador'
+          }]
+        }).then(function (rows) {
+          var est = rows && rows[0];
+          if (!est) throw new Error('no se recibió el estimado creado');
+          items.forEach(function (it) { it.estimado_id = est.id; });
+          return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }).then(function () { return est; });
+        }).then(function (est) {
+          localStorage.setItem('mxp_est_seq_' + year, String(seq));
+          state.project.estimateId = estId;
+          scheduleAutosave();
+          uiAlert('✔ Takeoff enviado al estimador de Max Power.\n\nEstimado: "' + est.nombre + '" — BORRADOR\nRenglones enviados: ' + items.length +
+            (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
+            '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
+          setHint('✔ Estimado ' + estId + ' creado como borrador en el estimador');
+        }).catch(handleErr);
+      }).catch(handleErr);
+      function handleErr(e) {
+        if (e && e.message === 'login') { askLogin(go); return; }
+        uiAlert('No se pudo conectar con el estimador: ' + (e && e.message ? e.message : e) +
+          '\n\nNota: dentro del visor de Claude las conexiones externas están bloqueadas — usa la app desde tu enlace propio (edgararboleya-rgb.github.io/mxp-planos).');
+        setHint('');
+      }
+    }
+    if (!sbAuth()) askLogin(go); else go();
+  });
+
   /* ---------------- capas ---------------- */
   var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], grid: ['gGridBase'] };
   $$('#layersBody input[type=checkbox]').forEach(function (cb) {
