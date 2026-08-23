@@ -2237,6 +2237,9 @@ window.MAXPOWER_SUPABASE = {
           s += '<rect class="sel" x="' + (e.x - 3) + '" y="' + (e.y - (e.size || 9)) + '" width="' + tw + '" height="' + ((e.size || 9) + 6) + '"/>';
         } else if (sel.kind === 'dim') {
           s += '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
+          var dhr = (document.body.classList.contains('touch') ? 9 : 5) / view.z + 2;
+          s += '<circle class="handle" data-h="1" cx="' + e.x1 + '" cy="' + e.y1 + '" r="' + dhr + '"/>';
+          s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + dhr + '"/>';
         } else if (sel.kind === 'area') {
           s += '<path class="sel" d="' + areaPath(e) + '"/>';
         } else if (sel.kind === 'wire') {
@@ -2267,6 +2270,8 @@ window.MAXPOWER_SUPABASE = {
 
   function hitTest(p) {
     var i, e, def;
+    // en pantalla táctil el dedo no es un cursor: tolerancia doble para atinar
+    var TF = document.body.classList.contains('touch') ? 2.4 : 1;
     // símbolos (de arriba hacia abajo: eléctrico primero)
     var ordered = state.symbols.slice().sort(function (a, b) {
       var la = SYMBOLS[a.key].layer === 'electrical' ? 1 : 0;
@@ -2316,7 +2321,7 @@ window.MAXPOWER_SUPABASE = {
         var g2 = { }, dx2 = e.x2 - e.x1, dy2 = e.y2 - e.y1, ln = Math.hypot(dx2, dy2) || 1;
         var nx = -dy2 / ln, ny = dx2 / ln, off = e.off == null ? 14 : e.off;
         var rd = distToSeg(p[0], p[1], e.x1 + nx * off, e.y1 + ny * off, e.x2 + nx * off, e.y2 + ny * off);
-        if (rd.d < 5 / view.z + 3) return { kind: 'dim', id: e.id };
+        if (rd.d < (5 * TF) / view.z + 3 * TF) return { kind: 'dim', id: e.id };
       }
     }
     // cables (muestrea la curva) y notas con flecha
@@ -2331,7 +2336,7 @@ window.MAXPOWER_SUPABASE = {
           var dd = Math.hypot(p[0] - qx, p[1] - qy);
           if (dd < best) best = dd;
         }
-        if (best < 4 / view.z + 2.5) return { kind: 'wire', id: e.id };
+        if (best < (4 * TF) / view.z + 2.5 * TF) return { kind: 'wire', id: e.id };
       }
     }
     if (layerVisible.annotation) {
@@ -2419,8 +2424,34 @@ window.MAXPOWER_SUPABASE = {
     }
     if (ev.button === 2) return;
     var p = screenToWorld(ev.clientX, ev.clientY);
+    // doble TOQUE en pantalla táctil = doble clic (editar medida/texto)
+    if (ev.pointerType === 'touch') {
+      var now = Date.now();
+      if (lastTap && now - lastTap.t < 450 && Math.hypot(ev.clientX - lastTap.x, ev.clientY - lastTap.y) < 30) {
+        lastTap = null;
+        if (tool === 'select') {
+          var th = hitTest(p);
+          if (th && th.kind === 'dim') {
+            drag = null;
+            editDimValue(state.dims.find(function (x) { return x.id === th.id; }));
+            return;
+          }
+          if (th && th.kind === 'text') {
+            drag = null;
+            var tt = state.texts.find(function (x) { return x.id === th.id; });
+            uiPrompt('Editar texto:', tt.text, function (nt) {
+              if (nt !== null && nt !== '') { pushUndo(); tt.text = nt; refresh(); }
+            });
+            return;
+          }
+        }
+      } else {
+        lastTap = { t: now, x: ev.clientX, y: ev.clientY };
+      }
+    }
     onToolDown(p, ev);
   });
+  var lastTap = null;
 
   svg.addEventListener('pointermove', function (ev) {
     if (ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
@@ -2459,6 +2490,22 @@ window.MAXPOWER_SUPABASE = {
     if (drawing && drawing.mode === 'wallchain') finishWallChain();
     else if (drawing && drawing.mode === 'areachain') finishAreaChain();
   });
+  // escribe la medida deseada y el segundo punto se ajusta solo en la misma dirección
+  function editDimValue(dd) {
+    if (!dd) return;
+    var len0 = Math.hypot(dd.x2 - dd.x1, dd.y2 - dd.y1) || 1;
+    uiPrompt('Nueva medida de la cota (ej: 20\'  ·  20\' 6"):', fmtFtIn(len0), function (v) {
+      var nv = parseDist(v);
+      if (!nv || nv <= 0) return;
+      pushUndo();
+      var ux = (dd.x2 - dd.x1) / len0, uy = (dd.y2 - dd.y1) / len0;
+      dd.x2 = dd.x1 + ux * nv;
+      dd.y2 = dd.y1 + uy * nv;
+      sel = { kind: 'dim', id: dd.id };
+      refresh();
+    });
+  }
+
   svg.addEventListener('dblclick', function (ev) {
     if (drawing && drawing.mode === 'wallchain') { finishWallChain(); return; }
     if (drawing && drawing.mode === 'areachain') { finishAreaChain(); return; }
@@ -2470,19 +2517,7 @@ window.MAXPOWER_SUPABASE = {
         if (nt !== null && nt !== '') { pushUndo(); t.text = nt; refresh(); }
       });
     } else if (h && h.kind === 'dim') {
-      // doble clic en una cota: escribe la medida y la línea se ajusta sola
-      var dd = state.dims.find(function (x) { return x.id === h.id; });
-      var len0 = Math.hypot(dd.x2 - dd.x1, dd.y2 - dd.y1) || 1;
-      uiPrompt('Nueva medida de la cota (ej: 20\'  ·  20\' 6"):', fmtFtIn(len0), function (v) {
-        var nv = parseDist(v);
-        if (!nv || nv <= 0) return;
-        pushUndo();
-        var ux = (dd.x2 - dd.x1) / len0, uy = (dd.y2 - dd.y1) / len0;
-        dd.x2 = dd.x1 + ux * nv;
-        dd.y2 = dd.y1 + uy * nv;
-        sel = { kind: 'dim', id: dd.id };
-        refresh();
-      });
+      editDimValue(state.dims.find(function (x) { return x.id === h.id; }));
     }
   });
 
@@ -2615,6 +2650,15 @@ window.MAXPOWER_SUPABASE = {
         if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < hr) { drag = { mode: 'endpoint', wall: w, end: 2, snap: snapshot(), moved: false }; return; }
       }
     }
+    // asas de extremos de una medida/cota seleccionada
+    if (sel && sel.kind === 'dim') {
+      var dsel = findSel();
+      if (dsel) {
+        var dhr2 = (document.body.classList.contains('touch') ? 14 : 8) / view.z + 3;
+        if (Math.hypot(p[0] - dsel.x1, p[1] - dsel.y1) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 1, snap: snapshot(), moved: false }; return; }
+        if (Math.hypot(p[0] - dsel.x2, p[1] - dsel.y2) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 2, snap: snapshot(), moved: false }; return; }
+      }
+    }
     // asas de jamba: agrandar / achicar una puerta o ventana arrastrando su borde
     if (sel && sel.kind === 'opening') {
       var op = findSel();
@@ -2698,6 +2742,15 @@ window.MAXPOWER_SUPABASE = {
       drag.moved = true;
       renderWalls(); renderSel(); return;
     }
+    if (drag.mode === 'dimEnd') {
+      var od = drag.dim;
+      var anchor = drag.end === 1 ? [od.x2, od.y2] : [od.x1, od.y1];
+      var dp = orthoSnap(anchor, p);   // se endereza solo si va casi recto
+      if (drag.end === 1) { od.x1 = dp[0]; od.y1 = dp[1]; }
+      else { od.x2 = dp[0]; od.y2 = dp[1]; }
+      drag.moved = true;
+      renderAnnot(); renderSel(); return;
+    }
     if (drag.mode === 'openJamb') {
       // se mueve una jamba, la otra queda fija: la abertura crece o se achica
       var op = drag.open, hw = drag.wall;
@@ -2768,7 +2821,7 @@ window.MAXPOWER_SUPABASE = {
       pushUndo(drag.snap);
       refreshCounts();
     }
-    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb') && drag.moved) {
+    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
     }
