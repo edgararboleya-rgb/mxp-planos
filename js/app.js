@@ -2657,9 +2657,15 @@
     function renderPdfPage(doc, pageNum, cb) {
       doc.getPage(pageNum).then(function (page) {
         var vp1 = page.getViewport({ scale: 1 });
-        // en iPad/teléfono se renderiza más liviano para no agotar la memoria de Safari
+        // resolución alta para que el zoom no se pixele (Bluebeam re-dibuja el vector;
+        // aquí se rasteriza una vez, así que hay que rasterizar grande). Límite de
+        // Safari iOS por canvas: ~16.7 MP → presupuesto de área con margen.
         var lite = document.body.classList.contains('touch');
-        var scale = Math.min(4, (lite ? 2000 : 2800) / vp1.width);
+        var MAXDIM = lite ? 4096 : 6000;
+        var AREA = lite ? 13e6 : 26e6;
+        var scale = Math.min(6,
+          MAXDIM / vp1.width, MAXDIM / vp1.height,
+          Math.sqrt(AREA / (vp1.width * vp1.height)));
         var vp = page.getViewport({ scale: scale });
         var cv = document.createElement('canvas');
         cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
@@ -2667,7 +2673,9 @@
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
         return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
           // el PDF sabe su tamaño de papel real (72 puntos = 1"): con eso la escala del plano es exacta
-          var url = lite ? cv.toDataURL('image/jpeg', 0.85) : cv.toDataURL('image/png');
+          // JPEG para hojas grandes (el PNG de 20+ MP pesa demasiado en memoria)
+          var big = cv.width * cv.height > 9e6;
+          var url = (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
           cv.width = 1; cv.height = 1;   // libera la memoria del canvas de una
           if (cb) cb(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
           else insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
