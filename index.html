@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.C';
+  var APP_VERSION = 'v24.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5142,7 +5142,7 @@ window.MAXPOWER_SUPABASE = {
       var k = o.units === 'm' ? M2IN : 1;
       var fd0 = { walls: [], drs: [], wins: [], labels: [], furn: [] };
       o.walls.forEach(function (w) { fd0.walls.push({ x1: w.x1 * k, y1: w.y1 * k, x2: w.x2 * k, y2: w.y2 * k, t: w.t || 4.5 }); });
-      (o.doors || []).forEach(function (d) { fd0.drs.push({ cx: d.x * k, cy: d.y * k, w: (d.w || 36 / k) * k, type: d.type || 'door' }); });
+      (o.doors || []).forEach(function (d) { fd0.drs.push({ cx: d.x * k, cy: d.y * k, w: (d.w || 36 / k) * k, type: 'opening' }); });
       (o.windows || []).forEach(function (d) { fd0.wins.push({ cx: d.x * k, cy: d.y * k, w: (d.w || 36 / k) * k, type: 'window' }); });
       buildFloor(fd0);
       totals.floors = 1;
@@ -5163,13 +5163,10 @@ window.MAXPOWER_SUPABASE = {
     var APPLE_DOOR = { door: 'door', doubleDoor: 'double', french: 'double', slidingDoor: 'slider', foldingDoor: 'bifold', garage: 'garage', opening: 'opening' };
     (o.doors || []).forEach(function (s) {
       var g = seg(s);
-      var ty = APPLE_DOOR[catKey(s.category)] || 'door';
-      // Apple marca "door" hasta pasos de 6-19 ft: una puerta abatible de
-      // ese ancho no existe — >100" es un paso abierto, >60" corredera
-      // (así no salen arcos de abatir gigantes cruzando el plano)
-      if (ty === 'door' && g.w > 100) ty = 'opening';
-      else if (ty === 'door' && g.w > 60) ty = 'slider';
-      fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: ty, pid: s.parentIdentifier });
+      // pedido de Edgar: el escaneo pone SOLO la abertura (el hueco en la
+      // pared, sin hoja ni arco de abatir) — las puertas con su hoja las
+      // pone el en 2 minutos con el editor, como a el le gusta
+      fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'opening', pid: s.parentIdentifier });
     });
     (o.openings || []).forEach(function (s) { var g = seg(s); fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'opening', pid: s.parentIdentifier }); });
     (o.windows || []).forEach(function (s) { var g = seg(s); fl(s).wins.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'window', pid: s.parentIdentifier }); });
@@ -5422,7 +5419,7 @@ window.MAXPOWER_SUPABASE = {
           var doImport = function (withFurn) {
             pushUndo();
             var n = importRoomScan(o, { furniture: withFurn });
-            setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' puertas, ' +
+            setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' aberturas, ' +
               n.windows + ' ventanas' + (n.floors > 1 ? ' en ' + n.floors + ' pisos' : '') +
               (withFurn && n.furn ? ' + ' + n.furn + ' muebles de referencia' : ' — plano limpio, sin muebles') +
               ' · a escala real, listo para símbolos y medidas');
