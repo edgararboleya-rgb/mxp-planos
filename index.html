@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.X';
+  var APP_VERSION = 'v23.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5077,6 +5077,47 @@ window.MAXPOWER_SUPABASE = {
         allPolys[p[1]].name = String(metaAll[p[2]].name).toUpperCase();
       });
     }
+    // cuarto ESCANEADO DOS VECES: dos huellas solapadas >55% son el mismo
+    // espacio (re-escanear sin borrar el anterior) — las copias encimadas
+    // y un pelín giradas eran el "reguero" de paredes cruzadas; se queda
+    // la huella mayor y hereda el nombre si le faltaba
+    Object.keys(floors).forEach(function (stk) {
+      var g = floors[stk];
+      if (!g.polys || g.polys.length < 2) return;
+      function areaOf(pts) {
+        var s = 0;
+        for (var i = 0; i < pts.length; i++) {
+          var b = pts[(i + 1) % pts.length];
+          s += pts[i].cx * b.cy - b.cx * pts[i].cy;
+        }
+        return Math.abs(s / 2);
+      }
+      function frac(small, big) {
+        var x1 = 1e18, y1 = 1e18, x2 = -1e18, y2 = -1e18;
+        small.pts.forEach(function (p) { x1 = Math.min(x1, p.cx); y1 = Math.min(y1, p.cy); x2 = Math.max(x2, p.cx); y2 = Math.max(y2, p.cy); });
+        var bigP = big.pts.map(function (p) { return [p.cx, p.cy]; });
+        var smallP = small.pts.map(function (p) { return [p.cx, p.cy]; });
+        var inside = 0, total = 0;
+        for (var i = 0; i < 15; i++) for (var j = 0; j < 15; j++) {
+          var px = x1 + (x2 - x1) * (i + 0.5) / 15, py = y1 + (y2 - y1) * (j + 0.5) / 15;
+          if (!ptInPoly(px, py, smallP)) continue;
+          total++;
+          if (ptInPoly(px, py, bigP)) inside++;
+        }
+        return total ? inside / total : 0;
+      }
+      for (var a2 = 0; a2 < g.polys.length; a2++) for (var b3 = a2 + 1; b3 < g.polys.length; b3++) {
+        var A = g.polys[a2], B = g.polys[b3];
+        if (!A || !B || A._dup || B._dup) continue;
+        var big = areaOf(A.pts) >= areaOf(B.pts) ? A : B;
+        var small = big === A ? B : A;
+        if (frac(small, big) > 0.55) {
+          small._dup = true;
+          if (!big.name) big.name = small.name;
+        }
+      }
+      g.polys = g.polys.filter(function (p) { return !p._dup; });
+    });
     // si TODOS los cuartos traen su huella de piso, las PAREDES se dibujan
     // desde la huella (no desde los muros escaneados): los muros llegan
     // cortados por gabinetes, sofitos y dobles alturas — la huella del piso
