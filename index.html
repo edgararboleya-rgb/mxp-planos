@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.Y';
+  var APP_VERSION = 'v23.Z';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4307,7 +4307,7 @@ window.MAXPOWER_SUPABASE = {
       var aa = Math.atan2(dy, dx);
       var dev = Math.abs(aa % (Math.PI / 2));
       dev = Math.min(dev, Math.PI / 2 - dev);
-      if (dev > 0.26) { w._o = 'D'; continue; }
+      if (dev > 0.14) { w._o = 'D'; continue; }   // >8°: angulo real (rombo), se respeta
       w._o = Math.abs(dx) >= Math.abs(dy) ? 'H' : 'V';
       if (w._o === 'H') { var my = Math.round((w.y1 + w.y2) / 2); w.y1 = my; w.y2 = my; w.x1 = Math.round(w.x1); w.x2 = Math.round(w.x2); }
       else { var mx = Math.round((w.x1 + w.x2) / 2); w.x1 = mx; w.x2 = mx; w.y1 = Math.round(w.y1); w.y2 = Math.round(w.y2); }
@@ -4876,7 +4876,7 @@ window.MAXPOWER_SUPABASE = {
               var ang2 = Math.atan2(dy2, dx2);
               var dev2 = Math.abs(ang2 % (Math.PI / 2));
               dev2 = Math.min(dev2, Math.PI / 2 - dev2);
-              if (dev2 > 0.32) continue;
+              if (dev2 > 0.14) continue;            // >8°: angulo real, no se aplana
               if (Math.abs(dx2) >= Math.abs(dy2)) { var my2 = (p1.cy + p2.cy) / 2; p1.cy = my2; p2.cy = my2; }
               else { var mx2 = (p1.cx + p2.cx) / 2; p1.cx = mx2; p2.cx = mx2; }
             }
@@ -4908,7 +4908,27 @@ window.MAXPOWER_SUPABASE = {
             pw.push({ x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy, t: 4.5 });
           }
         });
-        if (pw.length >= 3) fd.walls = pw;
+        if (pw.length >= 3) {
+          // muros escaneados que NINGUNA huella cubre: son las particiones
+          // interiores cuando se camina la casa ENTERA de una sola pasada
+          // (la huella solo trae el contorno). Solo tramos largos (>30"),
+          // los fragmentos cortos sueltos son ruido
+          function dW(px, py, w2) {
+            var dx3 = w2.x2 - w2.x1, dy3 = w2.y2 - w2.y1, L3 = dx3 * dx3 + dy3 * dy3;
+            var t3 = L3 ? ((px - w2.x1) * dx3 + (py - w2.y1) * dy3) / L3 : 0;
+            t3 = Math.max(0, Math.min(1, t3));
+            return Math.hypot(px - (w2.x1 + dx3 * t3), py - (w2.y1 + dy3 * t3));
+          }
+          fd.walls.forEach(function (w0) {
+            if (Math.hypot(w0.x2 - w0.x1, w0.y2 - w0.y1) < 30) return;
+            var mx0 = (w0.x1 + w0.x2) / 2, my0 = (w0.y1 + w0.y2) / 2;
+            for (var pwi = 0; pwi < pw.length; pwi++) {
+              if (dW(mx0, my0, pw[pwi]) < 16) return;
+            }
+            pw.push(w0);
+          });
+          fd.walls = pw;
+        }
       }
       if (!fd.walls.length) return;
       // los puntos de los polígonos de cuarto giran junto con las paredes
