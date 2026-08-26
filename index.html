@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.W';
+  var APP_VERSION = 'v23.X';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5027,7 +5027,7 @@ window.MAXPOWER_SUPABASE = {
     (o.windows || []).forEach(function (s) { var g = seg(s); fl(s).wins.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'window', pid: s.parentIdentifier }); });
     // polígonos de piso REALES por cuarto (rooms[].floors[].polygonCorners):
     // la fuente más fiel de área, centro y nombre — cuando existen, mandan
-    var polyCount = 0;
+    var polyCount = 0, allPolys = [];
     srcRooms.forEach(function (rm, ri) {
       var fsur = rm && rm.floors && rm.floors[0];
       if (!fsur || !Array.isArray(fsur.polygonCorners) || fsur.polygonCorners.length < 3 || !fsur.transform) return;
@@ -5039,10 +5039,44 @@ window.MAXPOWER_SUPABASE = {
       });
       var st = typeof fsur.story === 'number' ? fsur.story : 0;
       var g = floors[st] = floors[st] || { walls: [], drs: [], wins: [], labels: [], furn: [] };
-      var nm = metaAll[ri] && metaAll[ri].name ? String(metaAll[ri].name).toUpperCase() : null;
-      (g.polys = g.polys || []).push({ name: nm, pts: pts });
+      // huella digital del cuarto para casar el nombre: el área NO cambia
+      // cuando StructureBuilder recoloca los cuartos (los centros SÍ — se
+      // probó y quedan a 600" — jamás casar por posición ni por ICP)
+      var rectSq = Math.round(rm.floors.reduce(function (s, ff) {
+        return s + (ff.dimensions && ff.dimensions[0] * ff.dimensions[1] || 0);
+      }, 0) * 10.7639);
+      var shoe = 0;
+      for (var qi = 0; qi < pts.length; qi++) {
+        var qa = pts[qi], qb = pts[(qi + 1) % pts.length];
+        shoe += qa.cx * qb.cy - qb.cx * qa.cy;
+      }
+      var polySq = Math.round(Math.abs(shoe / 2) / 144);
+      var rp2 = { name: null, pts: pts, _sqR: rectSq, _sqP: polySq };
+      (g.polys = g.polys || []).push(rp2);
+      allPolys.push(rp2);
       polyCount++;
     });
+    // nombre → cuarto por huella de área (el sqft del meta se calculó con
+    // el mismo piso: Swift viejo = rectángulo, nuevo = polígono; se prueba
+    // contra ambos y gana la diferencia menor). En empate (dos BEDROOM
+    // iguales) el orden de captura desempata solo.
+    if (polyCount && metaAll.length) {
+      var pairs = [];
+      allPolys.forEach(function (rp, pi) {
+        metaAll.forEach(function (mr, mi) {
+          if (!mr || !mr.name || mr.sqft == null) return;
+          var d = Math.min(Math.abs(rp._sqR - mr.sqft), Math.abs(rp._sqP - mr.sqft));
+          if (d <= Math.max(25, mr.sqft * 0.25)) pairs.push([d, pi, mi]);
+        });
+      });
+      pairs.sort(function (a, b) { return a[0] - b[0]; });
+      var usedP = {}, usedM = {};
+      pairs.forEach(function (p) {
+        if (usedP[p[1]] || usedM[p[2]]) return;
+        usedP[p[1]] = 1; usedM[p[2]] = 1;
+        allPolys[p[1]].name = String(metaAll[p[2]].name).toUpperCase();
+      });
+    }
     // si TODOS los cuartos traen su huella de piso, las PAREDES se dibujan
     // desde la huella (no desde los muros escaneados): los muros llegan
     // cortados por gabinetes, sofitos y dobles alturas — la huella del piso
