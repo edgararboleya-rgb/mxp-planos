@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.E';
+  var APP_VERSION = 'v24.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4657,7 +4657,7 @@ window.MAXPOWER_SUPABASE = {
   // post-proceso con los polígonos de piso REALES de Apple (rooms[].floors):
   // área exacta por cuarto, nombre en su centro y tipo de pared por lados —
   // no depende de que el grafo de paredes cierre perfecto
-  function scanRoomsFromPolys(newWalls, polys, ox, oy, outer) {
+  function scanRoomsFromPolys(newWalls, polys, ox, oy, outer, noType) {
     var names = [];
     // huella exterior global (si viene): lo de "afuera" se mide contra
     // ELLA — un clóset sin huella propia ya no marca block a sus paredes
@@ -4687,7 +4687,7 @@ window.MAXPOWER_SUPABASE = {
       for (var i = 0; i < rl.length; i++) if (ptInPoly(x, y, rl[i].pts)) return true;
       return false;
     }
-    newWalls.forEach(function (w) {
+    if (!noType) newWalls.forEach(function (w) {
       var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
       var nx = -dy / L, ny = dx / L, OFF = 9, votes = 0;
       [0.25, 0.5, 0.75].forEach(function (t) {
@@ -4874,6 +4874,29 @@ window.MAXPOWER_SUPABASE = {
     // rooms[] originales (con sus pisos) ANTES de cualquier aplanado
     var srcRooms = Array.isArray(o.rooms) ? o.rooms : [];
     var metaAll = (o.mxpMeta && Array.isArray(o.mxpMeta.rooms)) ? o.mxpMeta.rooms : [];
+    // CUARTOS SUELTOS (arquitectura de Edgar): cada cuarto se escaneó por
+    // separado, SIN el entrelazado automático de Apple (ahí era donde se
+    // desfasaba todo en casas complejas). Cada uno se importa solo —
+    // perfecto, enderezado por su propio eje — y se monta AL LADO del
+    // anterior; se arma arrastrando el grupo (marco de selección) a su
+    // sitio. Paredes en drywall neutro: el tipo lo pone Edgar al armar.
+    if (o.mxpMeta && o.mxpMeta.separate && srcRooms.length && srcRooms[0] && srcRooms[0].walls) {
+      var totS = { walls: 0, doors: 0, windows: 0, furn: 0, floors: 1, names: [] };
+      srcRooms.forEach(function (rm, ri) {
+        var sub = {
+          version: 2,
+          walls: rm.walls || [], doors: rm.doors || [], windows: rm.windows || [],
+          openings: rm.openings || [], sections: [], objects: rm.objects || [],
+          floors: [], rooms: [rm], _noType: true,
+          mxpMeta: { app: 'MXP Scan', rooms: [metaAll[ri] || {}] }
+        };
+        var n = importRoomScan(sub, opts);
+        ['walls', 'doors', 'windows', 'furn'].forEach(function (k2) { totS[k2] += n[k2] || 0; });
+        totS.names = totS.names.concat(n.names || []);
+      });
+      refresh(); zoomFit();
+      return totS;
+    }
     function flat(t) { return Array.isArray(t[0]) ? [].concat(t[0], t[1], t[2], t[3]) : t; }
     function seg(s) {
       var f = flat(s.transform);
@@ -5107,7 +5130,7 @@ window.MAXPOWER_SUPABASE = {
       attach(fd.drs, false); attach(fd.wins, true);
       // habitaciones: nombre + sq ft en el centro, y tipo de pared (exterior=block)
       if (fd.polys && fd.polys.length) {
-        totals.names = totals.names.concat(scanRoomsFromPolys(newWalls, fd.polys, ox, oy, fd.outer));
+        totals.names = totals.names.concat(scanRoomsFromPolys(newWalls, fd.polys, ox, oy, fd.outer, fd.noType));
       } else {
         totals.names = totals.names.concat(scanRoomsPost(newWalls, fd.labels, ox, oy));
       }
@@ -5322,6 +5345,7 @@ window.MAXPOWER_SUPABASE = {
     keys.forEach(function (st, i) {
       if (i > 0) addSheet('PISO-' + (i + 1));
       floors[st].faithful = polysComplete;
+      floors[st].noType = !!o._noType;
       buildFloor(floors[st]);
     });
     totals.floors = keys.length;
