@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.B';
+  var APP_VERSION = 'v24.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4275,7 +4275,7 @@ window.MAXPOWER_SUPABASE = {
      2) cada pared se clasifica H o V y se le pone candado de eje
      3) las esquinas cercanas se sueldan: la pared V manda en X,
         la H manda en Y → esquinas perfectas a 90°                    */
-  function redrawScan(walls, anchors) {
+  function redrawScan(walls, anchors, noLock) {
     if (!walls.length) return;
     var i, j, w, dx, dy, len;
     // rotación dominante (espacio 4θ para que 0/90/180/270 cuenten juntos)
@@ -4309,16 +4309,17 @@ window.MAXPOWER_SUPABASE = {
       dev = Math.min(dev, Math.PI / 2 - dev);
       if (dev > 0.14) { w._o = 'D'; continue; }   // >8°: angulo real (rombo), se respeta
       w._o = Math.abs(dx) >= Math.abs(dy) ? 'H' : 'V';
+      if (noLock) continue;               // modo FIEL: clasificar sin mover
       if (w._o === 'H') { var my = Math.round((w.y1 + w.y2) / 2); w.y1 = my; w.y2 = my; w.x1 = Math.round(w.x1); w.x2 = Math.round(w.x2); }
       else { var mx = Math.round((w.x1 + w.x2) / 2); w.x1 = mx; w.x2 = mx; w.y1 = Math.round(w.y1); w.y2 = Math.round(w.y2); }
     }
-    weldCorners(walls);
+    if (!noLock) weldCorners(walls);
     return rot;
   }
   // soldar esquinas cercanas (union-find): la pared V manda en X, la H en Y
-  function weldCorners(walls) {
+  function weldCorners(walls, md) {
     // MD 12: los escaneos REALES dejan esquinas a 8-12" (los sintéticos a 2-3)
-    var i, j, MD = 12;
+    var i, j, MD = md || 12;
     walls.forEach(function (w) {
       if (!w._o) w._o = Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1) ? 'H' : 'V';
     });
@@ -5050,13 +5051,23 @@ window.MAXPOWER_SUPABASE = {
         })));
         polyPts = polyPts.concat(op);
       });
-      var rot = redrawScan(fd.walls, fd.drs.concat(fd.wins, fd.labels, fd.furn, polyPts));
-      mergeParallelWalls(fd.walls);
-      bridgeCollinear(fd.walls);
-      snapTJunctions(fd.walls);
-      closeLCorners(fd.walls);
-      weldCorners(fd.walls);
-      snapFreeEnds(fd.walls);
+      var rot = redrawScan(fd.walls, fd.drs.concat(fd.wins, fd.labels, fd.furn, polyPts), fd.faithful);
+      if (fd.faithful) {
+        // MODO FIEL (pedido de Edgar, y tiene razon): las paredes se
+        // dibujan EXACTAS como las entrega el escaneo — lo MISMO que se
+        // ve en el 3D del iPhone. Solo rotacion global para ver la casa
+        // derecha y soldar pelos de esquina de <7". Cada paso de
+        // "arreglar" (enderezar/fusionar/cuadrar) era donde se perdia
+        // la informacion.
+        weldCorners(fd.walls, 7);
+      } else {
+        mergeParallelWalls(fd.walls);
+        bridgeCollinear(fd.walls);
+        snapTJunctions(fd.walls);
+        closeLCorners(fd.walls);
+        weldCorners(fd.walls);
+        snapFreeEnds(fd.walls);
+      }
       var minx = Infinity, miny = Infinity;
       fd.walls.forEach(function (w) { minx = Math.min(minx, w.x1, w.x2); miny = Math.min(miny, w.y1, w.y2); });
       var ox = 24 - minx, oy = 24 - miny;
@@ -5303,7 +5314,7 @@ window.MAXPOWER_SUPABASE = {
     if (!keys.length) return totals;
     keys.forEach(function (st, i) {
       if (i > 0) addSheet('PISO-' + (i + 1));
-      floors[st].polyWalls = polysComplete;
+      floors[st].faithful = polysComplete;
       buildFloor(floors[st]);
     });
     totals.floors = keys.length;
