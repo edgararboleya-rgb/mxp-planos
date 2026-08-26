@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.U';
+  var APP_VERSION = 'v23.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4310,7 +4310,8 @@ window.MAXPOWER_SUPABASE = {
   }
   // soldar esquinas cercanas (union-find): la pared V manda en X, la H en Y
   function weldCorners(walls) {
-    var i, j, MD = 8;
+    // MD 12: los escaneos REALES dejan esquinas a 8-12" (los sintéticos a 2-3)
+    var i, j, MD = 12;
     walls.forEach(function (w) {
       if (!w._o) w._o = Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1) ? 'H' : 'V';
     });
@@ -4344,7 +4345,7 @@ window.MAXPOWER_SUPABASE = {
   // cuartos vecinos: la MISMA pared escaneada desde los dos lados llega como
   // dos paredes paralelas casi encimadas — aquí se fusionan en una sola
   function mergeParallelWalls(walls) {
-    var GAP = 10, i, j;
+    var GAP = 14, i, j;
     for (i = 0; i < walls.length; i++) {
       var a = walls[i];
       if (!a || a._dead) continue;
@@ -4359,7 +4360,7 @@ window.MAXPOWER_SUPABASE = {
         var b1 = H ? Math.min(b.x1, b.x2) : Math.min(b.y1, b.y2);
         var b2 = H ? Math.max(b.x1, b.x2) : Math.max(b.y1, b.y2);
         var over = Math.min(a2, b2) - Math.max(a1, b1);
-        if (over < 0.4 * Math.min(a2 - a1, b2 - b1)) continue;
+        if (over < 0.25 * Math.min(a2 - a1, b2 - b1)) continue;
         // fusionar: eje promedio, extensión unión, y la pared queda interior
         var ax2 = Math.round((axA + axB) / 2), lo = Math.min(a1, b1), hi = Math.max(a2, b2);
         if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
@@ -4372,24 +4373,133 @@ window.MAXPOWER_SUPABASE = {
     walls.length = 0;
     out.forEach(function (w) { walls.push(w); });
   }
-  // uniones en T: una pared que muere cerca del cuerpo de otra se suelda a ella
+  // uniones en T: una pared que muere cerca del cuerpo de otra se suelda a
+  // ella (TOL 16 por los huecos de escaneos reales; el extremo se lleva al
+  // cuerpo y se recorta al tramo de la otra pared)
   function snapTJunctions(walls) {
-    var TOL = 10;
+    var TOL = 16, TOL_FREE = 30;
+    // extremo LIBRE = no toca ninguna otra pared: puede estirarse más
+    // lejos por su propio eje hasta encontrar la pared que cruza
+    // (extend-to-meet); un extremo ya conectado solo se ajusta fino
+    function d2s(px, py, x1, y1, x2, y2) {
+      var dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+      var t = L ? ((px - x1) * dx + (py - y1) * dy) / L : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+    }
     walls.forEach(function (w) {
       ['1', '2'].forEach(function (e) {
         var px = w['x' + e], py = w['y' + e];
+        var free = true;
+        for (var k = 0; k < walls.length && free; k++) {
+          if (walls[k] !== w && d2s(px, py, walls[k].x1, walls[k].y1, walls[k].x2, walls[k].y2) < 3) free = false;
+        }
+        var tol = free ? TOL_FREE : TOL;
+        // elegir la pared cruzada MÁS CERCANA (no la última que coincida)
+        var best = null, bestD = Infinity;
         walls.forEach(function (h) {
           if (h === w || h._o === w._o) return;
+          var d;
           if (h._o === 'H') {
             var lo = Math.min(h.x1, h.x2), hi = Math.max(h.x1, h.x2);
-            if (Math.abs(py - h.y1) < TOL && px > lo - 2 && px < hi + 2) w['y' + e] = h.y1;
+            d = Math.abs(py - h.y1);
+            if (d < tol && d < bestD && px > lo - 8 && px < hi + 8) { best = h; bestD = d; }
           } else {
             var lo2 = Math.min(h.y1, h.y2), hi2 = Math.max(h.y1, h.y2);
-            if (Math.abs(px - h.x1) < TOL && py > lo2 - 2 && py < hi2 + 2) w['x' + e] = h.x1;
+            d = Math.abs(px - h.x1);
+            if (d < tol && d < bestD && py > lo2 - 8 && py < hi2 + 8) { best = h; bestD = d; }
           }
         });
+        if (best) {
+          if (best._o === 'H') {
+            w['y' + e] = best.y1;
+            w['x' + e] = Math.max(Math.min(best.x1, best.x2), Math.min(Math.max(best.x1, best.x2), px));
+          } else {
+            w['x' + e] = best.x1;
+            w['y' + e] = Math.max(Math.min(best.y1, best.y2), Math.min(Math.max(best.y1, best.y2), py));
+          }
+        }
       });
     });
+  }
+  // esquinas en L donde AMBAS paredes se quedan cortas (ninguna alcanza el
+  // cuerpo de la otra): se extienden las dos hasta su intersección
+  function closeLCorners(walls) {
+    var MAX = 32;
+    function d2s(px, py, o) {
+      var dx = o.x2 - o.x1, dy = o.y2 - o.y1, L = dx * dx + dy * dy;
+      var t = L ? ((px - o.x1) * dx + (py - o.y1) * dy) / L : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (o.x1 + dx * t), py - (o.y1 + dy * t));
+    }
+    var eps = [];
+    walls.forEach(function (w) {
+      ['1', '2'].forEach(function (e) {
+        var px = w['x' + e], py = w['y' + e], free = true;
+        for (var k = 0; k < walls.length && free; k++) {
+          if (walls[k] !== w && d2s(px, py, walls[k]) < 3) free = false;
+        }
+        if (free) eps.push({ w: w, e: e, x: px, y: py });
+      });
+    });
+    eps.forEach(function (a) {
+      if (a.done || a.w._o !== 'V') return;
+      var best = null, bestD = Infinity;
+      eps.forEach(function (b) {
+        if (b.done || b.w._o !== 'H') return;
+        var ix = a.x, iy = b.y;                    // intersección V×H
+        var dA = Math.abs(a.y - iy), dB = Math.abs(b.x - ix);
+        if (dA > MAX || dB > MAX) return;
+        // solo EXTENDER (no atravesar la pared hacia atrás)
+        var ay0 = a.e === '1' ? a.w.y2 : a.w.y1;
+        var bx0 = b.e === '1' ? b.w.x2 : b.w.x1;
+        if ((iy - ay0) * (a.y - ay0) < 0 || Math.abs(iy - ay0) < Math.abs(a.y - ay0) - 2) return;
+        if ((ix - bx0) * (b.x - bx0) < 0 || Math.abs(ix - bx0) < Math.abs(b.x - bx0) - 2) return;
+        var d = dA + dB;
+        if (d < bestD) { best = { b: b, ix: ix, iy: iy }; bestD = d; }
+      });
+      if (best) {
+        a.w['x' + a.e] = best.ix; a.w['y' + a.e] = best.iy;
+        best.b.w['x' + best.b.e] = best.ix; best.b.w['y' + best.b.e] = best.iy;
+        a.done = true; best.b.done = true;
+      }
+    });
+  }
+  // tramos COLINEALES fragmentados: un muro real llega partido en pedazos
+  // con huecos de pulgadas (defecto de escaneo, no un pasillo — los pasos
+  // reales miden 24"+ y vienen como openings) — se puentean y fusionan
+  function bridgeCollinear(walls) {
+    var MAXGAP = 18, AXTOL = 7, i, j, changed = true, guard = 0;
+    while (changed && guard++ < 6) {
+      changed = false;
+      for (i = 0; i < walls.length; i++) {
+        var a = walls[i];
+        if (!a || a._dead) continue;
+        for (j = i + 1; j < walls.length; j++) {
+          var b = walls[j];
+          if (!b || b._dead || a._o !== b._o) continue;
+          var H = a._o === 'H';
+          var axA = H ? a.y1 : a.x1, axB = H ? b.y1 : b.x1;
+          if (Math.abs(axA - axB) > AXTOL) continue;
+          var a1 = H ? Math.min(a.x1, a.x2) : Math.min(a.y1, a.y2);
+          var a2 = H ? Math.max(a.x1, a.x2) : Math.max(a.y1, a.y2);
+          var b1 = H ? Math.min(b.x1, b.x2) : Math.min(b.y1, b.y2);
+          var b2 = H ? Math.max(b.x1, b.x2) : Math.max(b.y1, b.y2);
+          var gap = Math.max(a1, b1) - Math.min(a2, b2);   // >0 = hueco entre tramos
+          if (gap > MAXGAP) continue;
+          if (gap < -2) continue;                            // encimados: eso es de mergeParallel
+          var ax2 = Math.round((axA + axB) / 2), lo = Math.min(a1, b1), hi = Math.max(a2, b2);
+          if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
+          else { a.x1 = ax2; a.x2 = ax2; a.y1 = lo; a.y2 = hi; }
+          a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
+          b._dead = true;
+          changed = true;
+        }
+      }
+    }
+    var out = walls.filter(function (w) { return !w._dead; });
+    walls.length = 0;
+    out.forEach(function (w) { walls.push(w); });
   }
   // etiquetas de habitación que manda el escaneo (kitchen, bedroom…)
   var SECTION_NAMES = {
@@ -4504,6 +4614,54 @@ window.MAXPOWER_SUPABASE = {
         x < (poly[j][0] - poly[i][0]) * (y - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0]) inside = !inside;
     }
     return inside;
+  }
+  // post-proceso con los polígonos de piso REALES de Apple (rooms[].floors):
+  // área exacta por cuarto, nombre en su centro y tipo de pared por lados —
+  // no depende de que el grafo de paredes cierre perfecto
+  function scanRoomsFromPolys(newWalls, polys, ox, oy) {
+    var names = [];
+    var rl = polys.map(function (rp) {
+      var pts = rp.pts.map(function (p) { return [p.cx + ox, p.cy + oy]; });
+      var area = 0, cx = 0, cy = 0;
+      for (var i = 0; i < pts.length; i++) {
+        var q = pts[(i + 1) % pts.length];
+        area += pts[i][0] * q[1] - q[0] * pts[i][1];
+        cx += pts[i][0]; cy += pts[i][1];
+      }
+      return {
+        pts: pts, sqft: Math.round(Math.abs(area / 2) / 144),
+        cx: cx / pts.length, cy: cy / pts.length, name: rp.name
+      };
+    }).filter(function (r) { return r.sqft >= 5; });
+    // tipo de pared: se prueba a 9" de cada lado en 3 puntos del muro;
+    // si un lado da FUERA de todos los cuartos en 2+ puntos → exterior (block)
+    function insideAny(x, y) {
+      for (var i = 0; i < rl.length; i++) if (ptInPoly(x, y, rl[i].pts)) return true;
+      return false;
+    }
+    newWalls.forEach(function (w) {
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
+      var nx = -dy / L, ny = dx / L, OFF = 9, votes = 0;
+      [0.25, 0.5, 0.75].forEach(function (t) {
+        var mx = w.x1 + dx * t, my = w.y1 + dy * t;
+        var a = insideAny(mx + nx * OFF, my + ny * OFF);
+        var b = insideAny(mx - nx * OFF, my - ny * OFF);
+        if (a !== b) votes++;
+      });
+      if (votes >= 2) { w.type = 'block'; w.t = 8; }
+    });
+    rl.forEach(function (r) {
+      var small = r.sqft < 120;
+      var ls = small ? 7 : 10, as2 = small ? 4.5 : 6;
+      if (r.name) {
+        state.texts.push({ id: uid(), x: Math.round(r.cx - String(r.name).length * ls * 0.29), y: Math.round(r.cy), text: r.name, size: ls });
+        state.texts.push({ id: uid(), x: Math.round(r.cx - as2 * 0.55 * String(r.sqft + ' SQ FT').length / 2), y: Math.round(r.cy + ls * 1.3), text: r.sqft + ' SQ FT', size: as2 });
+        names.push(String(r.name).toUpperCase());
+      } else {
+        state.texts.push({ id: uid(), x: Math.round(r.cx - 3.2 * String(r.sqft + ' SQ FT').length / 2), y: Math.round(r.cy), text: r.sqft + ' SQ FT', size: 6 });
+      }
+    });
+    return names;
   }
   // post-proceso pro del escaneo: nombres en su cuarto + sq ft + tipo de pared
   function scanRoomsPost(newWalls, labels, offX, offY) {
@@ -4657,11 +4815,17 @@ window.MAXPOWER_SUPABASE = {
 
   function importRoomScan(o, opts) {
     opts = opts || {};
-    if (o.floors) return importOP3D(o);
+    // OJO: el CapturedStructure REAL de Apple también trae "floors" (las
+    // superficies de piso). Solo es un proyecto OpenPlan3D si sus pisos
+    // traen paredes con start/end — si no, sigue el camino RoomPlan.
+    if (o.floors && o.floors[0] && o.floors[0].walls) return importOP3D(o);
     // nombres puestos EN EL SITIO desde MXP Scan (mxpMeta.rooms, centro en
     // metros) — se capturan ANTES del aplanado de CapturedStructure
     var metaRooms = (o.mxpMeta && Array.isArray(o.mxpMeta.rooms))
       ? o.mxpMeta.rooms.filter(function (r) { return r && r.name; }) : [];
+    // rooms[] originales (con sus pisos) ANTES de cualquier aplanado
+    var srcRooms = Array.isArray(o.rooms) ? o.rooms : [];
+    var metaAll = (o.mxpMeta && Array.isArray(o.mxpMeta.rooms)) ? o.mxpMeta.rooms : [];
     function flat(t) { return Array.isArray(t[0]) ? [].concat(t[0], t[1], t[2], t[3]) : t; }
     function seg(s) {
       var f = flat(s.transform);
@@ -4687,9 +4851,14 @@ window.MAXPOWER_SUPABASE = {
     // dibuja UN piso ya recolectado y devuelve los conteos
     function buildFloor(fd) {
       if (!fd.walls.length) return;
-      var rot = redrawScan(fd.walls, fd.drs.concat(fd.wins, fd.labels, fd.furn));
+      // los puntos de los polígonos de cuarto giran junto con las paredes
+      var polyPts = [];
+      (fd.polys || []).forEach(function (rp) { polyPts = polyPts.concat(rp.pts); });
+      var rot = redrawScan(fd.walls, fd.drs.concat(fd.wins, fd.labels, fd.furn, polyPts));
       mergeParallelWalls(fd.walls);
+      bridgeCollinear(fd.walls);
       snapTJunctions(fd.walls);
+      closeLCorners(fd.walls);
       weldCorners(fd.walls);
       var minx = Infinity, miny = Infinity;
       fd.walls.forEach(function (w) { minx = Math.min(minx, w.x1, w.x2); miny = Math.min(miny, w.y1, w.y2); });
@@ -4719,7 +4888,11 @@ window.MAXPOWER_SUPABASE = {
       }
       attach(fd.drs, false); attach(fd.wins, true);
       // habitaciones: nombre + sq ft en el centro, y tipo de pared (exterior=block)
-      totals.names = totals.names.concat(scanRoomsPost(newWalls, fd.labels, ox, oy));
+      if (fd.polys && fd.polys.length) {
+        totals.names = totals.names.concat(scanRoomsFromPolys(newWalls, fd.polys, ox, oy));
+      } else {
+        totals.names = totals.names.concat(scanRoomsPost(newWalls, fd.labels, ox, oy));
+      }
       if (opts.furniture) {
         fd.furn.forEach(function (fo) {
           var ang = fo.ang + rot;
@@ -4782,13 +4955,39 @@ window.MAXPOWER_SUPABASE = {
     var APPLE_DOOR = { door: 'door', doubleDoor: 'double', french: 'double', slidingDoor: 'slider', foldingDoor: 'bifold', garage: 'garage', opening: 'opening' };
     (o.doors || []).forEach(function (s) {
       var g = seg(s);
-      fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: APPLE_DOOR[catKey(s.category)] || 'door', pid: s.parentIdentifier });
+      var ty = APPLE_DOOR[catKey(s.category)] || 'door';
+      // Apple marca "door" hasta pasos de 6-19 ft: una puerta abatible de
+      // ese ancho no existe — >100" es un paso abierto, >60" corredera
+      // (así no salen arcos de abatir gigantes cruzando el plano)
+      if (ty === 'door' && g.w > 100) ty = 'opening';
+      else if (ty === 'door' && g.w > 60) ty = 'slider';
+      fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: ty, pid: s.parentIdentifier });
     });
     (o.openings || []).forEach(function (s) { var g = seg(s); fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'opening', pid: s.parentIdentifier }); });
     (o.windows || []).forEach(function (s) { var g = seg(s); fl(s).wins.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'window', pid: s.parentIdentifier }); });
+    // polígonos de piso REALES por cuarto (rooms[].floors[].polygonCorners):
+    // la fuente más fiel de área, centro y nombre — cuando existen, mandan
+    var polyCount = 0;
+    srcRooms.forEach(function (rm, ri) {
+      var fsur = rm && rm.floors && rm.floors[0];
+      if (!fsur || !Array.isArray(fsur.polygonCorners) || fsur.polygonCorners.length < 3 || !fsur.transform) return;
+      var f = flat(fsur.transform);
+      var pts = fsur.polygonCorners.map(function (c) {
+        var wx = f[0] * c[0] + f[4] * c[1] + f[8] * c[2] + f[12];
+        var wz = f[2] * c[0] + f[6] * c[1] + f[10] * c[2] + f[14];
+        return { cx: wx * M2IN, cy: wz * M2IN };
+      });
+      var st = typeof fsur.story === 'number' ? fsur.story : 0;
+      var g = floors[st] = floors[st] || { walls: [], drs: [], wins: [], labels: [], furn: [] };
+      var nm = metaAll[ri] && metaAll[ri].name ? String(metaAll[ri].name).toUpperCase() : null;
+      (g.polys = g.polys || []).push({ name: nm, pts: pts });
+      polyCount++;
+    });
     // los nombres que Edgar puso en el teléfono MANDAN sobre las
-    // adivinanzas de Apple (sections): si vienen, las sections se ignoran
-    if (metaRooms.length) {
+    // adivinanzas de Apple (sections): si vienen, las sections se ignoran;
+    // y si hay polígonos de cuarto, los nombres ya viajan con ellos
+    if (polyCount) { /* nombres y áreas salen de los polígonos */ }
+    else if (metaRooms.length) {
       metaRooms.forEach(function (r) {
         fl(r).labels.push({ cx: (r.cx || 0) * M2IN, cy: (r.cz || 0) * M2IN, text: String(r.name).toUpperCase() });
       });
