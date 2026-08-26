@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.T';
+  var APP_VERSION = 'v23.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4658,6 +4658,10 @@ window.MAXPOWER_SUPABASE = {
   function importRoomScan(o, opts) {
     opts = opts || {};
     if (o.floors) return importOP3D(o);
+    // nombres puestos EN EL SITIO desde MXP Scan (mxpMeta.rooms, centro en
+    // metros) — se capturan ANTES del aplanado de CapturedStructure
+    var metaRooms = (o.mxpMeta && Array.isArray(o.mxpMeta.rooms))
+      ? o.mxpMeta.rooms.filter(function (r) { return r && r.name; }) : [];
     function flat(t) { return Array.isArray(t[0]) ? [].concat(t[0], t[1], t[2], t[3]) : t; }
     function seg(s) {
       var f = flat(s.transform);
@@ -4782,7 +4786,13 @@ window.MAXPOWER_SUPABASE = {
     });
     (o.openings || []).forEach(function (s) { var g = seg(s); fl(s).drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'opening', pid: s.parentIdentifier }); });
     (o.windows || []).forEach(function (s) { var g = seg(s); fl(s).wins.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'window', pid: s.parentIdentifier }); });
-    (o.sections || []).forEach(function (s) {
+    // los nombres que Edgar puso en el teléfono MANDAN sobre las
+    // adivinanzas de Apple (sections): si vienen, las sections se ignoran
+    if (metaRooms.length) {
+      metaRooms.forEach(function (r) {
+        fl(r).labels.push({ cx: (r.cx || 0) * M2IN, cy: (r.cz || 0) * M2IN, text: String(r.name).toUpperCase() });
+      });
+    } else (o.sections || []).forEach(function (s) {
       var name = s.displayName || SECTION_NAMES[s.label];
       if (name === undefined) name = String(s.label || '').toUpperCase();
       if (!name) return;
