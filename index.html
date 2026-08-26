@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.V';
+  var APP_VERSION = 'v23.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4298,10 +4298,17 @@ window.MAXPOWER_SUPABASE = {
     }
     for (i = 0; i < walls.length; i++) { rp(walls[i], 'x1', 'y1'); rp(walls[i], 'x2', 'y2'); }
     (anchors || []).forEach(function (p) { rp(p, 'cx', 'cy'); });
-    // clasificar H/V y poner candado de eje
+    // clasificar H/V y poner candado de eje — SOLO si la pared está a menos
+    // de 15° de un eje; una diagonal real (pared en ángulo de la casa) se
+    // respeta tal cual en vez de aplastarla y romper el circuito del cuarto
     for (i = 0; i < walls.length; i++) {
       w = walls[i];
-      w._o = Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1) ? 'H' : 'V';
+      dx = w.x2 - w.x1; dy = w.y2 - w.y1;
+      var aa = Math.atan2(dy, dx);
+      var dev = Math.abs(aa % (Math.PI / 2));
+      dev = Math.min(dev, Math.PI / 2 - dev);
+      if (dev > 0.26) { w._o = 'D'; continue; }
+      w._o = Math.abs(dx) >= Math.abs(dy) ? 'H' : 'V';
       if (w._o === 'H') { var my = Math.round((w.y1 + w.y2) / 2); w.y1 = my; w.y2 = my; w.x1 = Math.round(w.x1); w.x2 = Math.round(w.x2); }
       else { var mx = Math.round((w.x1 + w.x2) / 2); w.x1 = mx; w.x2 = mx; w.y1 = Math.round(w.y1); w.y2 = Math.round(w.y2); }
     }
@@ -4349,6 +4356,7 @@ window.MAXPOWER_SUPABASE = {
     for (i = 0; i < walls.length; i++) {
       var a = walls[i];
       if (!a || a._dead) continue;
+      if (a._o === 'D') continue;
       for (j = i + 1; j < walls.length; j++) {
         var b = walls[j];
         if (!b || b._dead || a._o !== b._o) continue;
@@ -4399,6 +4407,7 @@ window.MAXPOWER_SUPABASE = {
         var best = null, bestD = Infinity;
         walls.forEach(function (h) {
           if (h === w || h._o === w._o) return;
+          if (h._o !== 'H' && h._o !== 'V') return;
           var d;
           if (h._o === 'H') {
             var lo = Math.min(h.x1, h.x2), hi = Math.max(h.x1, h.x2);
@@ -4475,6 +4484,7 @@ window.MAXPOWER_SUPABASE = {
       for (i = 0; i < walls.length; i++) {
         var a = walls[i];
         if (!a || a._dead) continue;
+        if (a._o === 'D') continue;
         for (j = i + 1; j < walls.length; j++) {
           var b = walls[j];
           if (!b || b._dead || a._o !== b._o) continue;
@@ -4850,6 +4860,56 @@ window.MAXPOWER_SUPABASE = {
     }
     // dibuja UN piso ya recolectado y devuelve los conteos
     function buildFloor(fd) {
+      // cuadrar CADA huella por su propio ángulo (la deriva del AR gira
+      // cada cuarto un poco distinto): rotación propia + vértices a
+      // escuadra SIN romper el circuito; una diagonal real (>18°) se deja
+      function squarePoly(pts) {
+        var n = pts.length, i;
+        if (n < 3) return;
+        // OJO: sin rotación propia por cuarto — girar cada uno por su lado
+        // los despega entre sí; todos se cuadran contra los MISMOS ejes
+        function passes(k) {
+          for (var pass = 0; pass < k; pass++) {
+            for (i = 0; i < n; i++) {
+              var p1 = pts[i], p2 = pts[(i + 1) % n];
+              var dx2 = p2.cx - p1.cx, dy2 = p2.cy - p1.cy;
+              var ang2 = Math.atan2(dy2, dx2);
+              var dev2 = Math.abs(ang2 % (Math.PI / 2));
+              dev2 = Math.min(dev2, Math.PI / 2 - dev2);
+              if (dev2 > 0.32) continue;
+              if (Math.abs(dx2) >= Math.abs(dy2)) { var my2 = (p1.cy + p2.cy) / 2; p1.cy = my2; p2.cy = my2; }
+              else { var mx2 = (p1.cx + p2.cx) / 2; p1.cx = mx2; p2.cx = mx2; }
+            }
+          }
+        }
+        passes(3);
+        // (colapsar picos diagonales cortos se probó y EMPEORA: cada
+        // colapso inclina a los vecinos en cascada — no repetir)
+      }
+      // paredes desde la huella del piso (ver polysComplete arriba)
+      if (fd.polyWalls && fd.polys && fd.polys.length) {
+        fd.polys.forEach(function (rp) { squarePoly(rp.pts); });
+        var pw = [];
+        fd.polys.forEach(function (rp) {
+          var pts = rp.pts, n = pts.length;
+          // quitar vértices casi colineales (ruido del borde del piso)
+          var keep = [];
+          for (var i = 0; i < n; i++) {
+            var p0 = pts[(i + n - 1) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
+            var ax = p1.cx - p0.cx, ay = p1.cy - p0.cy;
+            var bx = p2.cx - p1.cx, by = p2.cy - p1.cy;
+            var la = Math.hypot(ax, ay) || 1, lb = Math.hypot(bx, by) || 1;
+            if (Math.abs(ax * by - ay * bx) / (la * lb) > 0.08) keep.push(p1);
+          }
+          if (keep.length < 3) keep = pts;
+          for (var k = 0; k < keep.length; k++) {
+            var a = keep[k], b = keep[(k + 1) % keep.length];
+            if (Math.hypot(b.cx - a.cx, b.cy - a.cy) < 4) continue;
+            pw.push({ x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy, t: 4.5 });
+          }
+        });
+        if (pw.length >= 3) fd.walls = pw;
+      }
       if (!fd.walls.length) return;
       // los puntos de los polígonos de cuarto giran junto con las paredes
       var polyPts = [];
@@ -4983,6 +5043,11 @@ window.MAXPOWER_SUPABASE = {
       (g.polys = g.polys || []).push({ name: nm, pts: pts });
       polyCount++;
     });
+    // si TODOS los cuartos traen su huella de piso, las PAREDES se dibujan
+    // desde la huella (no desde los muros escaneados): los muros llegan
+    // cortados por gabinetes, sofitos y dobles alturas — la huella del piso
+    // siempre cierra el cuarto completo (lo que se ve en el 3D del iPhone)
+    var polysComplete = polyCount > 0 && polyCount === srcRooms.length;
     // los nombres que Edgar puso en el teléfono MANDAN sobre las
     // adivinanzas de Apple (sections): si vienen, las sections se ignoran;
     // y si hay polígonos de cuarto, los nombres ya viajan con ellos
@@ -5011,6 +5076,7 @@ window.MAXPOWER_SUPABASE = {
     if (!keys.length) return totals;
     keys.forEach(function (st, i) {
       if (i > 0) addSheet('PISO-' + (i + 1));
+      floors[st].polyWalls = polysComplete;
       buildFloor(floors[st]);
     });
     totals.floors = keys.length;
