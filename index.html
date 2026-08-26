@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.A';
+  var APP_VERSION = 'v24.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4381,6 +4381,8 @@ window.MAXPOWER_SUPABASE = {
     walls.length = 0;
     out.forEach(function (w) { walls.push(w); });
   }
+  // (fusionar duplicados diagonales se probó y COME paredes buenas en
+  // cadena — no repetir; el merge H/V cubre los casos que importan)
   // uniones en T: una pared que muere cerca del cuerpo de otra se suelda a
   // ella (TOL 16 por los huecos de escaneos reales; el extremo se lleva al
   // cuerpo y se recorta al tramo de la otra pared)
@@ -4654,8 +4656,13 @@ window.MAXPOWER_SUPABASE = {
   // post-proceso con los polígonos de piso REALES de Apple (rooms[].floors):
   // área exacta por cuarto, nombre en su centro y tipo de pared por lados —
   // no depende de que el grafo de paredes cierre perfecto
-  function scanRoomsFromPolys(newWalls, polys, ox, oy) {
+  function scanRoomsFromPolys(newWalls, polys, ox, oy, outer) {
     var names = [];
+    // huella exterior global (si viene): lo de "afuera" se mide contra
+    // ELLA — un clóset sin huella propia ya no marca block a sus paredes
+    var outPolys = (outer || []).map(function (op) {
+      return op.map(function (p) { return [p.cx + ox, p.cy + oy]; });
+    });
     var rl = polys.map(function (rp) {
       var pts = rp.pts.map(function (p) { return [p.cx + ox, p.cy + oy]; });
       var area = 0, cx = 0, cy = 0;
@@ -4672,6 +4679,10 @@ window.MAXPOWER_SUPABASE = {
     // tipo de pared: se prueba a 9" de cada lado en 3 puntos del muro;
     // si un lado da FUERA de todos los cuartos en 2+ puntos → exterior (block)
     function insideAny(x, y) {
+      if (outPolys.length) {
+        for (var j = 0; j < outPolys.length; j++) if (ptInPoly(x, y, outPolys[j])) return true;
+        return false;
+      }
       for (var i = 0; i < rl.length; i++) if (ptInPoly(x, y, rl[i].pts)) return true;
       return false;
     }
@@ -4886,35 +4897,97 @@ window.MAXPOWER_SUPABASE = {
     }
     // dibuja UN piso ya recolectado y devuelve los conteos
     function buildFloor(fd) {
-      // cuadrar CADA huella por su propio ángulo (la deriva del AR gira
-      // cada cuarto un poco distinto): rotación propia + vértices a
-      // escuadra SIN romper el circuito; una diagonal real (>18°) se deja
-      function squarePoly(pts) {
+      /* FAMILIAS DE DIRECCIÓN (lo que hace un CAD de verdad): las paredes
+         de una casa siguen POCAS direcciones (los ejes + el ángulo real del
+         bay). Se detectan las dominantes (mod 90°, ponderadas por longitud)
+         y cada pared se alinea EXACTA a su familia más cercana (±10°).
+         Así: nada de paredes "casi rectas" inclinadas, y las diagonales
+         reales salen paralelas perfectas entre sí — no una "curva". */
+      function dirClusters(segs) {
+        var cl = [];
+        segs.forEach(function (s) {
+          var dx = s.x2 - s.x1, dy = s.y2 - s.y1, L = Math.hypot(dx, dy);
+          if (L < 12) return;
+          var a = Math.atan2(dy, dx) % (Math.PI / 2);
+          if (a < 0) a += Math.PI / 2;
+          var hit = null, hd = 1;
+          cl.forEach(function (c) {
+            var d = Math.abs(c.a - a);
+            d = Math.min(d, Math.PI / 2 - d);
+            if (d < 0.1 && d < hd) { hit = c; hd = d; }
+          });
+          if (hit) {
+            var da = a - hit.a;
+            if (da > Math.PI / 4) da -= Math.PI / 2;
+            if (da < -Math.PI / 4) da += Math.PI / 2;
+            hit.a += da * L / (hit.w + L);
+            hit.w += L;
+          } else cl.push({ a: a, w: L });
+        });
+        cl.sort(function (x, y) { return y.w - x.w; });
+        var top = cl.length ? cl[0].w : 0;
+        return cl.filter(function (c) { return c.w > Math.max(120, top * 0.1); })
+          .map(function (c) { return c.a; });
+      }
+      // delta del ángulo de un tramo a su familia más cercana (o null)
+      function clusterDelta(ang, clusters) {
+        var am = ang % (Math.PI / 2);
+        if (am < 0) am += Math.PI / 2;
+        var best = null;
+        clusters.forEach(function (c) {
+          var d = am - c;
+          if (d > Math.PI / 4) d -= Math.PI / 2;
+          if (d < -Math.PI / 4) d += Math.PI / 2;
+          if (Math.abs(d) < 0.17 && (best === null || Math.abs(d) < Math.abs(best))) best = d;
+        });
+        return best;
+      }
+      // cuadrar la huella contra las familias SIN romper el circuito:
+      // cada arista se proyecta sobre la línea de su familia (4 pasadas)
+      function squarePoly(pts, clusters) {
         var n = pts.length, i;
         if (n < 3) return;
-        // OJO: sin rotación propia por cuarto — girar cada uno por su lado
-        // los despega entre sí; todos se cuadran contra los MISMOS ejes
-        function passes(k) {
-          for (var pass = 0; pass < k; pass++) {
-            for (i = 0; i < n; i++) {
-              var p1 = pts[i], p2 = pts[(i + 1) % n];
-              var dx2 = p2.cx - p1.cx, dy2 = p2.cy - p1.cy;
-              var ang2 = Math.atan2(dy2, dx2);
-              var dev2 = Math.abs(ang2 % (Math.PI / 2));
-              dev2 = Math.min(dev2, Math.PI / 2 - dev2);
-              if (dev2 > 0.14) continue;            // >8°: angulo real, no se aplana
-              if (Math.abs(dx2) >= Math.abs(dy2)) { var my2 = (p1.cy + p2.cy) / 2; p1.cy = my2; p2.cy = my2; }
-              else { var mx2 = (p1.cx + p2.cx) / 2; p1.cx = mx2; p2.cx = mx2; }
-            }
+        for (var pass = 0; pass < 4; pass++) {
+          for (i = 0; i < n; i++) {
+            var p1 = pts[i], p2 = pts[(i + 1) % n];
+            var dx2 = p2.cx - p1.cx, dy2 = p2.cy - p1.cy;
+            if (Math.hypot(dx2, dy2) < 1) continue;
+            var ang2 = Math.atan2(dy2, dx2);
+            var del = clusterDelta(ang2, clusters);
+            if (del === null) continue;
+            var t2 = ang2 - del;
+            var ux = Math.cos(t2), uy = Math.sin(t2);
+            var mx2 = (p1.cx + p2.cx) / 2, my2 = (p1.cy + p2.cy) / 2;
+            var d1 = (p1.cx - mx2) * ux + (p1.cy - my2) * uy;
+            var d2 = (p2.cx - mx2) * ux + (p2.cy - my2) * uy;
+            p1.cx = mx2 + ux * d1; p1.cy = my2 + uy * d1;
+            p2.cx = mx2 + ux * d2; p2.cy = my2 + uy * d2;
           }
         }
-        passes(3);
-        // (colapsar picos diagonales cortos se probó y EMPEORA: cada
-        // colapso inclina a los vecinos en cascada — no repetir)
+      }
+      // alinear una pared suelta (partición) a su familia
+      function snapWallDir(w, clusters) {
+        var ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
+        var del = clusterDelta(ang, clusters);
+        if (del === null) return;
+        var t2 = ang - del;
+        var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) / 2;
+        var mx2 = (w.x1 + w.x2) / 2, my2 = (w.y1 + w.y2) / 2;
+        w.x1 = mx2 - Math.cos(t2) * L; w.y1 = my2 - Math.sin(t2) * L;
+        w.x2 = mx2 + Math.cos(t2) * L; w.y2 = my2 + Math.sin(t2) * L;
       }
       // paredes desde la huella del piso (ver polysComplete arriba)
       if (fd.polyWalls && fd.polys && fd.polys.length) {
-        fd.polys.forEach(function (rp) { squarePoly(rp.pts); });
+        var clSegs = [];
+        fd.polys.forEach(function (rp) {
+          for (var ci = 0; ci < rp.pts.length; ci++) {
+            var ca = rp.pts[ci], cb = rp.pts[(ci + 1) % rp.pts.length];
+            clSegs.push({ x1: ca.cx, y1: ca.cy, x2: cb.cx, y2: cb.cy });
+          }
+        });
+        fd.walls.forEach(function (w0) { clSegs.push(w0); });
+        var clusters = dirClusters(clSegs);
+        fd.polys.forEach(function (rp) { squarePoly(rp.pts, clusters); });
         var pw = [];
         fd.polys.forEach(function (rp) {
           var pts = rp.pts, n = pts.length;
@@ -4959,15 +5032,24 @@ window.MAXPOWER_SUPABASE = {
               if (dAng > 0.18) continue;
               if (dW(w0.x1, w0.y1, pwl) < 12 && dW(w0.x2, w0.y2, pwl) < 12) return;
             }
+            snapWallDir(w0, clusters);
             pw.push(w0);
           });
           fd.walls = pw;
         }
       }
       if (!fd.walls.length) return;
-      // los puntos de los polígonos de cuarto giran junto con las paredes
+      // los puntos de los polígonos de cuarto (y la huella exterior)
+      // giran junto con las paredes
       var polyPts = [];
       (fd.polys || []).forEach(function (rp) { polyPts = polyPts.concat(rp.pts); });
+      (fd.outer || []).forEach(function (op) {
+        if (fd.polyWalls) squarePoly(op, dirClusters(op.map(function (p, pi) {
+          var q = op[(pi + 1) % op.length];
+          return { x1: p.cx, y1: p.cy, x2: q.cx, y2: q.cy };
+        })));
+        polyPts = polyPts.concat(op);
+      });
       var rot = redrawScan(fd.walls, fd.drs.concat(fd.wins, fd.labels, fd.furn, polyPts));
       mergeParallelWalls(fd.walls);
       bridgeCollinear(fd.walls);
@@ -5004,7 +5086,7 @@ window.MAXPOWER_SUPABASE = {
       attach(fd.drs, false); attach(fd.wins, true);
       // habitaciones: nombre + sq ft en el centro, y tipo de pared (exterior=block)
       if (fd.polys && fd.polys.length) {
-        totals.names = totals.names.concat(scanRoomsFromPolys(newWalls, fd.polys, ox, oy));
+        totals.names = totals.names.concat(scanRoomsFromPolys(newWalls, fd.polys, ox, oy, fd.outer));
       } else {
         totals.names = totals.names.concat(scanRoomsPost(newWalls, fd.labels, ox, oy));
       }
@@ -5172,6 +5254,21 @@ window.MAXPOWER_SUPABASE = {
         }
       }
       g.polys = g.polys.filter(function (p) { return !p._dup; });
+    });
+    // huella EXTERIOR global (o.floors de la estructura): el contorno de
+    // TODO lo escaneado — con ella el tipo de pared es fiable: block solo
+    // lo que da a la calle, no un clóset sin huella propia
+    (o.floors || []).forEach(function (fsur) {
+      if (!fsur || !Array.isArray(fsur.polygonCorners) || fsur.polygonCorners.length < 3 || !fsur.transform) return;
+      var f2 = flat(fsur.transform);
+      var pts2 = fsur.polygonCorners.map(function (c) {
+        var wx = f2[0] * c[0] + f2[4] * c[1] + f2[8] * c[2] + f2[12];
+        var wz = f2[2] * c[0] + f2[6] * c[1] + f2[10] * c[2] + f2[14];
+        return { cx: wx * M2IN, cy: wz * M2IN };
+      });
+      var st2 = typeof fsur.story === 'number' ? fsur.story : 0;
+      var g2 = floors[st2] = floors[st2] || { walls: [], drs: [], wins: [], labels: [], furn: [] };
+      (g2.outer = g2.outer || []).push(pts2);
     });
     // si TODOS los cuartos traen su huella de piso, las PAREDES se dibujan
     // desde la huella (no desde los muros escaneados): los muros llegan
