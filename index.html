@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v23.M';
+  var APP_VERSION = 'v23.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4242,6 +4242,71 @@ window.MAXPOWER_SUPABASE = {
     setHint('Proyecto guardado (archivo descargado)');
   });
 
+  /* --- FASE 5: importar un escaneo de casa (Apple RoomPlan / MXP Scan) ---
+     RoomPlan entrega paredes/puertas/ventanas como planos 3D: matriz de
+     transformación 4x4 (column-major, metros) + dimensiones [ancho,alto].
+     Aquí se proyecta al plano 2D (x,z) y nacen como paredes DE VERDAD. */
+  var M2IN = 39.3701;
+  function looksLikeRoomScan(o) {
+    if (o && o.app === 'mxp-scan') return true;
+    return !!(o && Array.isArray(o.walls) && o.walls.length && o.walls[0] &&
+      o.walls[0].transform && o.walls[0].dimensions);
+  }
+  function importRoomScan(o) {
+    function flat(t) { return Array.isArray(t[0]) ? [].concat(t[0], t[1], t[2], t[3]) : t; }
+    function seg(s) {
+      var f = flat(s.transform);
+      var L = ((s.dimensions && s.dimensions[0]) || 0) * M2IN;
+      var cx = f[12] * M2IN, cy = f[14] * M2IN;
+      var dx = f[0], dz = f[2], dl = Math.hypot(dx, dz) || 1;
+      dx /= dl; dz /= dl;
+      return { x1: cx - dx * L / 2, y1: cy - dz * L / 2, x2: cx + dx * L / 2, y2: cy + dz * L / 2, cx: cx, cy: cy, w: L };
+    }
+    var walls = [], drs = [], wins = [];
+    if (o.app === 'mxp-scan' && o.walls && o.walls[0] && o.walls[0].x1 != null) {
+      // formato simple de nuestra app nativa (pulgadas o metros)
+      var k = o.units === 'm' ? M2IN : 1;
+      o.walls.forEach(function (w) { walls.push({ x1: w.x1 * k, y1: w.y1 * k, x2: w.x2 * k, y2: w.y2 * k, t: w.t || 4.5 }); });
+      (o.doors || []).forEach(function (d) { drs.push({ cx: d.x * k, cy: d.y * k, w: (d.w || 36 / k) * k, type: d.type || 'door' }); });
+      (o.windows || []).forEach(function (d) { wins.push({ cx: d.x * k, cy: d.y * k, w: (d.w || 36 / k) * k, type: 'window' }); });
+    } else {
+      // JSON nativo de Apple RoomPlan (CapturedRoom)
+      (o.walls || []).forEach(function (s) { var g = seg(s); if (g.w > 6) walls.push({ x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2, t: 4.5 }); });
+      (o.doors || []).forEach(function (s) { var g = seg(s); drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'door' }); });
+      (o.openings || []).forEach(function (s) { var g = seg(s); drs.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'opening' }); });
+      (o.windows || []).forEach(function (s) { var g = seg(s); wins.push({ cx: g.cx, cy: g.cy, w: g.w, type: 'window' }); });
+    }
+    if (!walls.length) return { walls: 0, doors: 0, windows: 0 };
+    // llevar todo a coordenadas positivas con un margen
+    var minx = Infinity, miny = Infinity;
+    walls.forEach(function (w) { minx = Math.min(minx, w.x1, w.x2); miny = Math.min(miny, w.y1, w.y2); });
+    var ox = 24 - minx, oy = 24 - miny;
+    var newWalls = walls.map(function (w) {
+      return { id: uid(), x1: Math.round(w.x1 + ox), y1: Math.round(w.y1 + oy), x2: Math.round(w.x2 + ox), y2: Math.round(w.y2 + oy), type: 'drywall', t: w.t || 4.5 };
+    });
+    state.walls = state.walls.concat(newWalls);
+    var counts = { doors: 0, windows: 0 };
+    function attach(list, isWin) {
+      list.forEach(function (d) {
+        var px = d.cx + ox, py = d.cy + oy, best = null;
+        newWalls.forEach(function (w) {
+          var r = distToSeg(px, py, w.x1, w.y1, w.x2, w.y2);
+          if (!best || r.d < best.r.d) best = { w: w, r: r };
+        });
+        if (!best || best.r.d > 18) return;
+        var len = Math.hypot(best.w.x2 - best.w.x1, best.w.y2 - best.w.y1);
+        var wdt = Math.max(18, Math.round(d.w || 36));
+        if (len < wdt + 4) return;
+        var pos = Math.max(wdt / 2 + 1, Math.min(len - wdt / 2 - 1, Math.round(best.r.t * len)));
+        state.openings.push({ id: uid(), wallId: best.w.id, type: d.type || (isWin ? 'window' : 'door'), pos: pos, w: wdt, swing: 1, hinge: 0 });
+        if (isWin) counts.windows++; else counts.doors++;
+      });
+    }
+    attach(drs, false); attach(wins, true);
+    refresh(); zoomFit();
+    return { walls: newWalls.length, doors: counts.doors, windows: counts.windows };
+  }
+
   function restoreProject(o) {
     Object.assign(state, o.state);
     state.areas = o.state.areas || [];
@@ -4276,12 +4341,22 @@ window.MAXPOWER_SUPABASE = {
     rd.onload = function () {
       try {
         var o = JSON.parse(rd.result);
-        if (o.app !== 'mxp-planos') throw new Error('formato');
-        pushUndo();
-        restoreProject(o);
-        setHint('Proyecto abierto: ' + (state.project.name || f.name));
+        if (o.app === 'mxp-planos') {
+          pushUndo();
+          restoreProject(o);
+          setHint('Proyecto abierto: ' + (state.project.name || f.name));
+          return;
+        }
+        // escaneo de casa: formato MXP Scan o el JSON nativo de Apple RoomPlan
+        if (looksLikeRoomScan(o)) {
+          pushUndo();
+          var n = importRoomScan(o);
+          setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' puertas, ' + n.windows + ' ventanas — a escala real, listo para símbolos y medidas');
+          return;
+        }
+        throw new Error('formato');
       } catch (e) {
-        uiAlert('Ese archivo no es un proyecto de MXP Planos (.mxp.json).\n\nSi es un PLANO (PDF o foto), úsalo con el botón 🖼 Subir Fondo — o vuelve a elegirlo aquí mismo, que ahora los planos también entran por Abrir.');
+        uiAlert('Ese archivo no es un proyecto de MXP Planos (.mxp.json) ni un escaneo de casa (RoomPlan/MXP Scan).\n\nSi es un PLANO (PDF o foto), vuelve a elegirlo aquí mismo, que también entran por Abrir.');
       }
     };
     rd.readAsText(f);
