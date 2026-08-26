@@ -1212,7 +1212,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.D';
+  var APP_VERSION = 'v24.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5070,7 +5070,17 @@ window.MAXPOWER_SUPABASE = {
       }
       var minx = Infinity, miny = Infinity;
       fd.walls.forEach(function (w) { minx = Math.min(minx, w.x1, w.x2); miny = Math.min(miny, w.y1, w.y2); });
-      var ox = 24 - minx, oy = 24 - miny;
+      // si la hoja YA tiene un escaneo, el nuevo se monta AL LADO (no
+      // encima): dos zonas escaneadas por separado quedan una junto a la
+      // otra — ambas enderezadas a los mismos ejes, solo falta arrastrar
+      var baseX = 24, baseY = 24;
+      if (state.walls.length) {
+        var pmx = -Infinity, pmy = Infinity;
+        state.walls.forEach(function (w) { pmx = Math.max(pmx, w.x1, w.x2); pmy = Math.min(pmy, w.y1, w.y2); });
+        baseX = pmx + 72;
+        baseY = Math.max(24, pmy);
+      }
+      var ox = baseX - minx, oy = baseY - miny;
       var byRid = {};
       var newWalls = fd.walls.map(function (w) {
         var nw = { id: uid(), x1: Math.round(w.x1 + ox), y1: Math.round(w.y1 + oy), x2: Math.round(w.x2 + ox), y2: Math.round(w.y2 + oy), type: 'drywall', t: w.t || 4.5 };
