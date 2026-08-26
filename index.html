@@ -555,6 +555,7 @@ body.touch #main { position: relative; }
             <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
             <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
           </div>
+          <div class="sub"><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
           <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
           <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
           <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
@@ -1212,7 +1213,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.F';
+  var APP_VERSION = 'v24.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3829,6 +3830,66 @@ window.MAXPOWER_SUPABASE = {
     renderBg(); updateOvUI(); scheduleAutosave();
     setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca 🎯 Alinear para cuadrarlo por 2 puntos de control.');
   }
+  // 🧲 SOLDAR ARMADO: tras arrastrar cada cuarto (pieza) a su sitio, este
+  // botón une todo: fusiona las paredes dobladas donde dos piezas empatan,
+  // suelda esquinas, reconecta las aberturas a su pared sobreviviente y
+  // re-tipa automáticamente (lo que da a la calle = block 8", lo interior
+  // = drywall) — la respuesta a "¿cómo se quita el block y queda drywall?"
+  $('#btnWeld').addEventListener('click', function () {
+    if (!state.walls.length) { uiAlert('No hay paredes en esta hoja.'); return; }
+    pushUndo();
+    state.walls.forEach(function (w) {
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+      var dev = Math.abs(Math.atan2(dy, dx) % (Math.PI / 2));
+      dev = Math.min(dev, Math.PI / 2 - dev);
+      w._o = dev > 0.14 ? 'D' : (Math.abs(dx) >= Math.abs(dy) ? 'H' : 'V');
+    });
+    // posición absoluta de cada abertura ANTES de mover paredes
+    var opPts = state.openings.map(function (op) {
+      var w = null;
+      for (var i = 0; i < state.walls.length; i++) if (state.walls[i].id === op.wallId) { w = state.walls[i]; break; }
+      if (!w) return null;
+      var len = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1;
+      var t = op.pos / len;
+      return { op: op, x: w.x1 + (w.x2 - w.x1) * t, y: w.y1 + (w.y2 - w.y1) * t };
+    });
+    var antes = state.walls.length;
+    mergeParallelWalls(state.walls);
+    bridgeCollinear(state.walls);
+    snapTJunctions(state.walls);
+    weldCorners(state.walls);
+    // reconectar aberturas a la pared más cercana sobreviviente
+    opPts.forEach(function (r) {
+      if (!r) return;
+      var best = null;
+      state.walls.forEach(function (w) {
+        var res = distToSeg(r.x, r.y, w.x1, w.y1, w.x2, w.y2);
+        if (!best || res.d < best.res.d) best = { w: w, res: res };
+      });
+      if (best && best.res.d < 24) {
+        r.op.wallId = best.w.id;
+        var len2 = Math.hypot(best.w.x2 - best.w.x1, best.w.y2 - best.w.y1);
+        r.op.pos = Math.round(best.res.t * len2);
+      }
+    });
+    state.openings = state.openings.filter(function (op) {
+      return state.walls.some(function (w) { return w.id === op.wallId; });
+    });
+    // re-tipar por cuartos cerrados: interior (entre 2 cuartos) = drywall,
+    // el resto (da a la calle) = block
+    var rooms = detectRoomPolys(state.walls);
+    if (rooms.length) {
+      var ext = rooms[0]._ext;
+      state.walls.forEach(function (w) {
+        if (ext.has(w)) { w.type = 'block'; w.t = 8; }
+        else { w.type = 'drywall'; w.t = 4.5; }
+      });
+    }
+    refresh(); refreshCounts();
+    setHint('🧲 Armado soldado: ' + antes + '→' + state.walls.length + ' paredes, ' + rooms.length +
+      ' cuarto(s) cerrados · calle=block, interior=drywall · (si una pieza quedó sin pegar, arrástrala y vuelve a soldar)');
+  });
+
   $('#btnOv').addEventListener('click', function () {
     if (!state.bg) { uiAlert('Primero sube el plano BASE con "Subir Fondo". Después cargas el plano a comparar.'); return; }
     $('#fileBg2').click();
