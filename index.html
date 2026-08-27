@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.M';
+  var APP_VERSION = 'v24.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1977,6 +1977,17 @@ window.MAXPOWER_SUPABASE = {
     var sy = (s.scale || 1) * (s.sy || 1) * k;
     return 'translate(' + s.x + ' ' + s.y + ') rotate(' + (s.rot || 0) + ') scale(' + sx + ' ' + sy + ')';
   }
+  // esquinas del símbolo en coordenadas de mundo (para las asas de estirar)
+  function symCorners(e) {
+    var def = SYMBOLS[e.key];
+    if (!def) return null;
+    var k = symK(def);
+    var hx = def.w / 2 * (e.scale || 1) * (e.sx || 1) * k;
+    var hy = def.h / 2 * (e.scale || 1) * (e.sy || 1) * k;
+    var r = (e.rot || 0) * Math.PI / 180, cr = Math.cos(r), sr = Math.sin(r);
+    function P(lx, ly) { return [e.x + lx * cr - ly * sr, e.y + lx * sr + ly * cr]; }
+    return [P(-hx, -hy), P(hx, -hy), P(hx, hy), P(-hx, hy)];
+  }
   function wirePath(w) {
     var st = w.style || 'dashed';
     if (st === 'straight' || st === 'straightdashed' || st === 'conduit') {
@@ -2315,6 +2326,13 @@ window.MAXPOWER_SUPABASE = {
           var def = SYMBOLS[e.key];
           s += '<g transform="' + symTransform(e) + '"><rect class="sel" x="' + (-def.w / 2 - 3) + '" y="' + (-def.h / 2 - 3) +
             '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
+          if (def.layer === 'furniture') {
+            // asas de ESQUINA: jala una y el objeto se estira a la medida
+            var scs = symCorners(e), shr = 5 / view.z + 2;
+            scs.forEach(function (c5) {
+              s += '<circle class="handle" cx="' + c5[0] + '" cy="' + c5[1] + '" r="' + shr + '"/>';
+            });
+          }
         } else if (sel.kind === 'opening') {
           var w = state.walls.find(function (x) { return x.id === e.wallId; });
           if (w) {
@@ -2794,6 +2812,21 @@ window.MAXPOWER_SUPABASE = {
         if (Math.hypot(p[0] - JB[0], p[1] - JB[1]) < jr2) { drag = { mode: 'openJamb', open: op, wall: hw, end: 1, snap: snapshot(), moved: false }; return; }
       }
     }
+    // asas de esquina de un objeto a tamaño real: estirar jalando
+    if (sel && sel.kind === 'symbol') {
+      var se = findSel();
+      var sdef = se && SYMBOLS[se.key];
+      if (se && sdef && sdef.layer === 'furniture') {
+        var cs = symCorners(se);
+        var cr3 = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
+        for (var ci = 0; ci < 4; ci++) {
+          if (Math.hypot(p[0] - cs[ci][0], p[1] - cs[ci][1]) < cr3) {
+            drag = { mode: 'symResize', e: se, opp: cs[(ci + 2) % 4], snap: snapshot(), moved: false };
+            return;
+          }
+        }
+      }
+    }
     if (!h) {
       // sin nada debajo: inicia el rectángulo de selección múltiple
       sel = null; selGroup = null; renderSel(); showProps();
@@ -2888,6 +2921,23 @@ window.MAXPOWER_SUPABASE = {
       drag.moved = true;
       renderWalls(); renderSel(); return;
     }
+    if (drag.mode === 'symResize') {
+      var e4 = drag.e, d4 = SYMBOLS[e4.key], k4 = symK(d4);
+      var r4 = (e4.rot || 0) * Math.PI / 180, c4 = Math.cos(r4), s4 = Math.sin(r4);
+      var vx = p[0] - drag.opp[0], vy = p[1] - drag.opp[1];
+      // la diagonal, vista en el marco local del objeto (rotación incluida)
+      var lw = vx * c4 + vy * s4, lh = -vx * s4 + vy * c4;
+      var W4 = Math.max(6, Math.round(Math.abs(lw)));
+      var H4 = Math.max(6, Math.round(Math.abs(lh)));
+      e4.sx = W4 / (d4.w * (e4.scale || 1) * k4);
+      e4.sy = H4 / (d4.h * (e4.scale || 1) * k4);
+      e4.x = drag.opp[0] + vx / 2;
+      e4.y = drag.opp[1] + vy / 2;
+      drag.moved = true;
+      setHint('↔ ' + fmtFtIn(W4) + ' × ' + fmtFtIn(H4));
+      refresh(); renderSel();
+      return;
+    }
     if (drag.mode === 'move') {
       var dx = p[0] - drag.start[0], dy = p[1] - drag.start[1];
       if (Math.hypot(dx, dy) < 2 / view.z) return;
@@ -2945,7 +2995,7 @@ window.MAXPOWER_SUPABASE = {
       pushUndo(drag.snap);
       refreshCounts();
     }
-    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd') && drag.moved) {
+    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
     }
