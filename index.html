@@ -968,6 +968,13 @@ window.MAXPOWER_SUPABASE = {
   S.lavatory = { name: 'Vanity Sink', cat: 'plumbing', layer: 'furniture', w: 26, h: 22,
     svg: R(-13, -10.5, 26, 21) + '<ellipse cx="0" cy="0.5" rx="7.5" ry="5.5"/>' + C(0, -7, 1) };
 
+  // vanity DOBLE (dos lavamanos, 60x22 tipico) — estirable a la medida
+  // real con Ancho/Fondo, como todos los de tamano real
+  S.lavatory2 = { name: 'Double Vanity Sink', short: 'Vanity 2', cat: 'plumbing', layer: 'furniture', w: 60, h: 22,
+    svg: R(-30, -10.5, 60, 21) +
+      '<ellipse cx="-15" cy="0.5" rx="7.5" ry="5.5"/>' + C(-15, -7, 1) +
+      '<ellipse cx="15" cy="0.5" rx="7.5" ry="5.5"/>' + C(15, -7, 1) };
+
   S.sink_pedestal = { name: 'Pedestal Sink', cat: 'plumbing', layer: 'furniture', w: 22, h: 20,
     svg: '<ellipse cx="0" cy="0" rx="10" ry="8.5"/>' + '<ellipse cx="0" cy="0.5" rx="6.5" ry="5"/>' + C(0, -5.5, 1) };
 
@@ -1213,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.L';
+  var APP_VERSION = 'v24.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
