@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.O';
+  var APP_VERSION = 'v24.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1393,6 +1393,8 @@ window.MAXPOWER_SUPABASE = {
   var measure = null;                 // medición transitoria
   var sel = null;                     // {kind,id}
   var selGroup = null;                // [{kind,id},…] selección múltiple (marquee)
+  // cuadrícula de importación: dónde cae la próxima pieza de escaneo
+  var gridX = 24, gridY = 24, gridRowH = 0;
   var clipboard = null;               // portapapeles interno (Ctrl+C/V)
   var lastMouseWorld = [0, 0];
   var tool = 'select';
@@ -5313,13 +5315,25 @@ window.MAXPOWER_SUPABASE = {
       // si la hoja YA tiene un escaneo, el nuevo se monta AL LADO (no
       // encima): dos zonas escaneadas por separado quedan una junto a la
       // otra — ambas enderezadas a los mismos ejes, solo falta arrastrar
-      var baseX = 24, baseY = 24;
-      if (state.walls.length) {
-        var pmx = -Infinity, pmy = Infinity;
-        state.walls.forEach(function (w) { pmx = Math.max(pmx, w.x1, w.x2); pmy = Math.min(pmy, w.y1, w.y2); });
-        baseX = pmx + 72;
-        baseY = Math.max(24, pmy);
+      // CUADRÍCULA: con 13 piezas (casa completa) una fila sola queda
+      // kilométrica; las nuevas se acomodan en filas que se envuelven al
+      // pasar de ~110 ft de ancho — cómodo de armar en el iPad
+      var baseX = 24, baseY = 24, ANCHO_MAX = 110 * 12, SEP = 72;
+      if (!state.walls.length) { gridX = 24; gridY = 24; gridRowH = 0; }
+      var pieMaxX = -Infinity, pieMaxY = -Infinity;
+      fd.walls.forEach(function (w) {
+        pieMaxX = Math.max(pieMaxX, w.x1, w.x2);
+        pieMaxY = Math.max(pieMaxY, w.y1, w.y2);
+      });
+      var anchoPieza = pieMaxX - minx, altoPieza = pieMaxY - miny;
+      if (state.walls.length && gridX + anchoPieza > ANCHO_MAX) {
+        gridX = 24;                          // se acabó la fila: baja una
+        gridY = gridY + gridRowH + SEP;
+        gridRowH = 0;
       }
+      baseX = gridX; baseY = gridY;
+      gridX += anchoPieza + SEP;
+      gridRowH = Math.max(gridRowH, altoPieza);
       var ox = baseX - minx, oy = baseY - miny;
       var byRid = {};
       var newWalls = fd.walls.map(function (w) {
