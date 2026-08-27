@@ -1213,7 +1213,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.H';
+  var APP_VERSION = 'v24.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3231,12 +3231,10 @@ window.MAXPOWER_SUPABASE = {
   // girar la pieza seleccionada completa (para armar el rompecabezas):
   // paredes, textos, cotas, areas y simbolos rotan alrededor del centro
   // del grupo; las aberturas viajan solas con su pared
-  function rotateGroup(deg) {
-    if (!selGroup) return;
-    pushUndo();
+  function rotateRefs(refs, deg) {
     var rad = deg * Math.PI / 180, cr = Math.cos(rad), sr = Math.sin(rad);
     var xs = [], ys = [];
-    selGroup.forEach(function (r) {
+    refs.forEach(function (r) {
       var e = entityOf(r);
       if (!e) return;
       if (e.pts) e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
@@ -3250,7 +3248,7 @@ window.MAXPOWER_SUPABASE = {
       var ox = x - cx, oy = y - cy;
       return [Math.round(cx + ox * cr - oy * sr), Math.round(cy + ox * sr + oy * cr)];
     }
-    selGroup.forEach(function (r) {
+    refs.forEach(function (r) {
       var e = entityOf(r);
       if (!e) return;
       if (e.pts) e.pts = e.pts.map(function (q) { return rot(q[0], q[1]); });
@@ -3264,6 +3262,11 @@ window.MAXPOWER_SUPABASE = {
         if (r.kind === 'symbol') e.rot = (((e.rot || 0) + deg) % 360 + 360) % 360;
       }
     });
+  }
+  function rotateGroup(deg) {
+    if (!selGroup) return;
+    pushUndo();
+    rotateRefs(selGroup, deg);
     refresh(); renderSel();
     setHint('↻ Pieza girada ' + deg + '° — arrastrala a su sitio y 🧲 Soldar armado');
   }
@@ -3419,6 +3422,12 @@ window.MAXPOWER_SUPABASE = {
       }
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     }
+    if (sel && /^(wall|dim|wire|area|leader)$/.test(sel.kind)) {
+      html += '<div style="display:flex;gap:6px;margin-top:6px">' +
+        '<button id="prRotSelL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
+        '<button id="prRotSelR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
+        '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>';
+    }
     body.innerHTML = html;
 
     // cada control captura su propio nodo (n) para no leer el valor de otro
@@ -3427,6 +3436,9 @@ window.MAXPOWER_SUPABASE = {
       if (n) n.addEventListener(evt, function () { fn(n); });
     }
     on('prDelete', 'click', deleteSelected);
+    on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
+    on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
+    on('prRotSel45', 'click', function () { pushUndo(); rotateRefs([sel], 45); refresh(); renderSel(); });
     on('prWallType', 'change', function (n) {
       if (!WALL_TYPES[n.value]) return;
       pushUndo(); e.type = n.value; e.t = WALL_TYPES[n.value].t; refresh();
@@ -6146,17 +6158,34 @@ window.MAXPOWER_SUPABASE = {
         // primero cierra cualquier modal abierto (Panel Schedule, Lot…)
         var openMod = $$('.modal').find(function (m) { return !m.hidden && m.id !== 'askModal'; });
         if (openMod) { openMod.hidden = true; break; }
-        if (drawing) { drawing = null; G.prev.innerHTML = ''; }
-        else if (tool === 'place') setTool('select');
-        else { sel = null; selGroup = null; measure = null; renderSel(); renderAnnot(); showProps(); }
+        // pedido de Edgar: Escape SIEMPRE cancela lo que este a medias y
+        // devuelve a Select — como en un CAD de verdad
+        if (drawing) {
+          drawing = null; G.prev.innerHTML = '';
+          measure = null; renderAnnot();
+          setTool('select');
+        } else if (tool !== 'select') {
+          measure = null; renderAnnot();
+          setTool('select');
+        } else { sel = null; selGroup = null; measure = null; renderSel(); renderAnnot(); showProps(); }
         break;
       case 'Delete': case 'Backspace':
         if (selGroup) { ev.preventDefault(); deleteGroup(); }
         else if (sel) { ev.preventDefault(); deleteSelected(); }
+        else if (tool !== 'select' && tool !== 'pan') {
+          // recien dibujaste una pared/medida/etc y sigues en la
+          // herramienta: Delete la quita al instante (deshace lo ultimo)
+          ev.preventDefault();
+          if (drawing) { drawing = null; G.prev.innerHTML = ''; }
+          undo();
+          setHint('🗑 Último elemento eliminado (deshacer) — sigue dibujando o Esc para Select');
+        }
         break;
       case 'r': case 'R':
         if (tool === 'place') { placingRot = (placingRot + 45) % 360; }
         else if (sel && sel.kind === 'symbol') { var e = findSel(); pushUndo(); e.rot = ((e.rot || 0) + 45) % 360; refresh(); }
+        else if (sel) { pushUndo(); rotateRefs([sel], 45); refresh(); renderSel(); }
+        else if (selGroup) { rotateGroup(90); }
         break;
       case 'v': case 'V': setTool('select'); break;
       case 'h': case 'H': setTool('pan'); break;
