@@ -1213,7 +1213,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.K';
+  var APP_VERSION = 'v24.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1966,7 +1966,9 @@ window.MAXPOWER_SUPABASE = {
   }
   function symTransform(s) {
     var k = symK(SYMBOLS[s.key]);
-    return 'translate(' + s.x + ' ' + s.y + ') rotate(' + (s.rot || 0) + ') scale(' + ((s.scale || 1) * k) + ')';
+    var sx = (s.scale || 1) * (s.sx || 1) * k;
+    var sy = (s.scale || 1) * (s.sy || 1) * k;
+    return 'translate(' + s.x + ' ' + s.y + ') rotate(' + (s.rot || 0) + ') scale(' + sx + ' ' + sy + ')';
   }
   function wirePath(w) {
     var st = w.style || 'dashed';
@@ -2367,10 +2369,12 @@ window.MAXPOWER_SUPABASE = {
     for (i = 0; i < ordered.length; i++) {
       e = ordered[i]; def = SYMBOLS[e.key];
       if (!layerVisible[def.layer]) continue;
-      var rot = -(e.rot || 0) * Math.PI / 180, sc = (e.scale || 1) * symK(def);
+      var rot = -(e.rot || 0) * Math.PI / 180, kk = symK(def);
+      var scx = (e.scale || 1) * (e.sx || 1) * kk;
+      var scy = (e.scale || 1) * (e.sy || 1) * kk;
       var dx = p[0] - e.x, dy = p[1] - e.y;
-      var lx = (dx * Math.cos(rot) - dy * Math.sin(rot)) / sc;
-      var ly = (dx * Math.sin(rot) + dy * Math.cos(rot)) / sc;
+      var lx = (dx * Math.cos(rot) - dy * Math.sin(rot)) / scx;
+      var ly = (dx * Math.sin(rot) + dy * Math.cos(rot)) / scy;
       var pad = 4 / view.z + 2;
       if (Math.abs(lx) <= def.w / 2 + pad && Math.abs(ly) <= def.h / 2 + pad) return { kind: 'symbol', id: e.id };
     }
@@ -3347,7 +3351,14 @@ window.MAXPOWER_SUPABASE = {
       var def = SYMBOLS[e.key];
       html += '<div><b>' + esc(def.name) + '</b></div>';
       html += '<div class="row"><label>Rotación</label><input id="prRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
+      var def2 = SYMBOLS[e.key];
       html += '<div class="row"><label>Escala</label><input id="prScale" type="number" step="0.1" min="0.2" value="' + (e.scale || 1) + '"></div>';
+      if (def2 && def2.layer === 'furniture') {
+        // pedido de Edgar: estirar a la MEDIDA real (un shower 36x60, una
+        // tina a la medida...) — ancho y fondo independientes, en ft-in
+        html += '<div class="row"><label>Ancho</label><input id="prSymW" value="' + fmtFtIn(def2.w * (e.scale || 1) * (e.sx || 1)) + '"></div>';
+        html += '<div class="row"><label>Fondo</label><input id="prSymH" value="' + fmtFtIn(def2.h * (e.scale || 1) * (e.sy || 1)) + '"></div>';
+      }
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'text') {
@@ -3473,6 +3484,16 @@ window.MAXPOWER_SUPABASE = {
     on('prRot', 'change', function (n) { pushUndo(); e.rot = parseFloat(n.value) || 0; refresh(); });
     on('prRot45', 'click', function () { pushUndo(); e.rot = ((e.rot || 0) + 45) % 360; refresh(); });
     on('prScale', 'change', function (n) { pushUndo(); e.scale = Math.max(0.2, parseFloat(n.value) || 1); refresh(); });
+    on('prSymW', 'change', function (n) {
+      var v = parseDist(n.value), d2 = SYMBOLS[e.key];
+      if (!v || v < 4 || !d2) return;
+      pushUndo(); e.sx = v / (d2.w * (e.scale || 1)); refresh(); showProps();
+    });
+    on('prSymH', 'change', function (n) {
+      var v = parseDist(n.value), d2 = SYMBOLS[e.key];
+      if (!v || v < 4 || !d2) return;
+      pushUndo(); e.sy = v / (d2.h * (e.scale || 1)); refresh(); showProps();
+    });
     on('prDup', 'click', function () {
       pushUndo();
       var c = JSON.parse(JSON.stringify(e)); c.id = uid(); c.x += 24; c.y += 24;
