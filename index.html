@@ -1213,7 +1213,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.G';
+  var APP_VERSION = 'v24.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3228,6 +3228,46 @@ window.MAXPOWER_SUPABASE = {
     refresh();
   }
 
+  // girar la pieza seleccionada completa (para armar el rompecabezas):
+  // paredes, textos, cotas, areas y simbolos rotan alrededor del centro
+  // del grupo; las aberturas viajan solas con su pared
+  function rotateGroup(deg) {
+    if (!selGroup) return;
+    pushUndo();
+    var rad = deg * Math.PI / 180, cr = Math.cos(rad), sr = Math.sin(rad);
+    var xs = [], ys = [];
+    selGroup.forEach(function (r) {
+      var e = entityOf(r);
+      if (!e) return;
+      if (e.pts) e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
+      else if (e.x1 != null) { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
+      else if (e.x != null) { xs.push(e.x); ys.push(e.y); }
+    });
+    if (!xs.length) return;
+    var cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2;
+    var cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+    function rot(x, y) {
+      var ox = x - cx, oy = y - cy;
+      return [Math.round(cx + ox * cr - oy * sr), Math.round(cy + ox * sr + oy * cr)];
+    }
+    selGroup.forEach(function (r) {
+      var e = entityOf(r);
+      if (!e) return;
+      if (e.pts) e.pts = e.pts.map(function (q) { return rot(q[0], q[1]); });
+      else if (e.x1 != null) {
+        var a = rot(e.x1, e.y1), b = rot(e.x2, e.y2);
+        e.x1 = a[0]; e.y1 = a[1]; e.x2 = b[0]; e.y2 = b[1];
+      } else if (e.x != null) {
+        var p = rot(e.x, e.y);
+        e.x = p[0]; e.y = p[1];
+        if (e.tx != null) { var t2 = rot(e.tx, e.ty); e.tx = t2[0]; e.ty = t2[1]; }
+        if (r.kind === 'symbol') e.rot = (((e.rot || 0) + deg) % 360 + 360) % 360;
+      }
+    });
+    refresh(); renderSel();
+    setHint('↻ Pieza girada ' + deg + '° — arrastrala a su sitio y 🧲 Soldar armado');
+  }
+
   function deleteGroup() {
     if (!selGroup) return;
     pushUndo();
@@ -3250,9 +3290,17 @@ window.MAXPOWER_SUPABASE = {
       body.className = 'pbody';
       body.innerHTML = '<div><b>' + selGroup.length + ' elementos seleccionados</b></div>' +
         '<div class="muted small">Arrastra cualquiera para mover el grupo completo</div>' +
+        '<div style="display:flex;gap:6px;margin:6px 0">' +
+        '<button id="prRotL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
+        '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
+        '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
         '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
+      var bl = $('#prRotL'), br = $('#prRotR'), b8 = $('#prRot180');
+      if (bl) bl.addEventListener('click', function () { rotateGroup(-90); });
+      if (br) br.addEventListener('click', function () { rotateGroup(90); });
+      if (b8) b8.addEventListener('click', function () { rotateGroup(180); });
       return;
     }
     var e = findSel();
