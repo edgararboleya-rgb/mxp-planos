@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.N';
+  var APP_VERSION = 'v24.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5082,6 +5082,15 @@ window.MAXPOWER_SUPABASE = {
     // rooms[] originales (con sus pisos) ANTES de cualquier aplanado
     var srcRooms = Array.isArray(o.rooms) ? o.rooms : [];
     var metaAll = (o.mxpMeta && Array.isArray(o.mxpMeta.rooms)) ? o.mxpMeta.rooms : [];
+    // si el cuarto se escaneó sin ponerle nombre con los chips, se usa el
+    // NOMBRE DEL ARCHIVO (Edgar los nombra descriptivos: "Caroline_office")
+    if (opts.fileName && metaAll.length === 1 && !metaAll[0].name) {
+      var fnm = String(opts.fileName).replace(/\.[^.]*$/, '')
+        .replace(/^[0-9a-f]{6,}[-_]/i, '')
+        .replace(/^caroline[-_\s]*/i, '')
+        .replace(/[-_]+/g, ' ').trim();
+      if (fnm) metaAll[0].name = fnm.toUpperCase();
+    }
     // CUARTOS SUELTOS (arquitectura de Edgar): cada cuarto se escaneó por
     // separado, SIN el entrelazado automático de Apple (ahí era donde se
     // desfasaba todo en casas complejas). Cada uno se importa solo —
@@ -5660,7 +5669,7 @@ window.MAXPOWER_SUPABASE = {
           var nObj = scanFurnCount(o);
           var doImport = function (withFurn) {
             pushUndo();
-            var n = importRoomScan(o, { furniture: withFurn });
+            var n = importRoomScan(o, { furniture: withFurn, fileName: f.name });
             setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' aberturas, ' +
               n.windows + ' ventanas' + (n.floors > 1 ? ' en ' + n.floors + ' pisos' : '') +
               (withFurn && n.furn ? ' + ' + n.furn + ' muebles de referencia' : ' — plano limpio, sin muebles') +
