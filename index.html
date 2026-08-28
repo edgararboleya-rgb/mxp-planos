@@ -555,6 +555,7 @@ body.touch #main { position: relative; }
             <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
             <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
           </div>
+          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Revisa el plano y te dice qué está mal y cómo arreglarlo">🤖 Asistente: revisar el plano</button></div>
           <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí">📋 Recibo del último escaneo importado</button></div>
           <div class="sub"><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
           <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
@@ -653,6 +654,17 @@ body.touch #main { position: relative; }
 </div>
 
 <!-- ======= BUSCADOR DE PROPIEDAD / LOTE ======= -->
+<!-- ======= ASISTENTE MXP (revisión del plano) ======= -->
+<div id="aiModal" class="modal" hidden style="z-index:75">
+  <div class="modalBox" style="width:min(760px,96vw)">
+    <div class="modalHead">
+      <b>🤖 ASISTENTE MXP — revisión del plano</b>
+      <div class="mbtns"><button id="aiClose">✕ Cerrar</button></div>
+    </div>
+    <div id="aiBody" class="pbody"></div>
+  </div>
+</div>
+
 <div id="lotModal" class="modal" hidden>
   <div class="modalBox" style="width:min(580px,94vw)">
     <div class="modalHead">
@@ -1221,7 +1233,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.U';
+  var APP_VERSION = 'v24.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4213,6 +4225,373 @@ window.MAXPOWER_SUPABASE = {
   // suelda esquinas, reconecta las aberturas a su pared sobreviviente y
   // re-tipa automáticamente (lo que da a la calle = block 8", lo interior
   // = drywall) — la respuesta a "¿cómo se quita el block y queda drywall?"
+  /* ======================= 🤖 ASISTENTE MXP =======================
+     Edgar: "el escáner de Apple no es infalible… ¿cómo mejoramos lo que nos
+     da? Que la app tenga un botón donde yo te pida ayuda, y si yo tomo una
+     medida a mano tú me rectifiques el plano".
+
+     Esto es ese cerebro, y vive DENTRO de la app: no llama a ningún
+     servidor, no cuesta nada y funciona en la obra sin señal. Lee la
+     geometría real del plano y saca conclusiones — igual que las saco yo
+     cuando miro tus capturas, pero al instante y sobre TODO el plano.
+  =================================================================== */
+  function angMod90(w) {
+    var a = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+    return ((a % 90) + 135) % 90 - 45;
+  }
+  function largo(w) { return Math.hypot(w.x2 - w.x1, w.y2 - w.y1); }
+  // ¿qué es este cuarto? El dato que más manda no es el tamaño: es si tiene
+  // VENTANA. El código exige ventana de escape en todo cuarto habitable, así
+  // que un espacio sin ventana casi nunca es un dormitorio — es clóset,
+  // pasillo, baño o lavandería. Ese es el mismo razonamiento que usa un
+  // plans examiner mirando el plano.
+  function adivinaCuarto(r) {
+    var xs = r.poly.map(function (p) { return p[0]; });
+    var ys = r.poly.map(function (p) { return p[1]; });
+    var an = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+    var al = Math.max.apply(null, ys) - Math.min.apply(null, ys);
+    var lar = Math.max(an, al) / 12, cor = Math.min(an, al) / 12;   // pies
+    var prop = cor > 0 ? lar / cor : 9;
+    var sq = r.sqft, vent = 0, puertas = 0;
+    (r.walls || []).forEach(function (w) {
+      state.openings.forEach(function (o) {
+        if (o.wallId !== w.id) return;
+        if (o.type === 'window' || o.type === 'slider') vent++; else puertas++;
+      });
+    });
+    var conV = vent > 0 ? ' y tiene ventana' : ' y NO tiene ventana';
+    if (prop >= 3 && cor <= 6) return { n: 'HALLWAY', pq: 'largo y estrecho, ' + cor.toFixed(1) + ' ft de ancho' };
+    if (sq <= 25) return { n: 'CLOSET', pq: sq + ' sq ft' + conV };
+    if (sq <= 55) return vent > 0
+      ? { n: 'BATHROOM', pq: sq + ' sq ft con ventana' }
+      : { n: 'CLOSET', pq: sq + ' sq ft sin ventana — un cuarto habitable necesita ventana de escape' };
+    if (sq <= 95) return vent > 0
+      ? { n: 'BATHROOM', pq: sq + ' sq ft con ventana' }
+      : { n: 'WALK-IN CLOSET ó LAUNDRY', pq: sq + ' sq ft sin ventana' };
+    if (sq <= 140) return vent > 0
+      ? { n: 'BEDROOM', pq: sq + ' sq ft con ventana de escape' }
+      : { n: 'WALK-IN CLOSET ó LAUNDRY', pq: sq + ' sq ft sin ventana — sin ventana no puede ser dormitorio' };
+    if (sq <= 220) return { n: 'BEDROOM', pq: sq + ' sq ft' + conV };
+    if (sq <= 340) return vent > 0
+      ? { n: 'MASTER BEDROOM', pq: sq + ' sq ft con ventana' }
+      : { n: 'GARAGE ó BONUS', pq: sq + ' sq ft sin ventana' };
+    return { n: 'LIVING / GREAT ROOM', pq: sq + ' sq ft' + conV };
+  }
+  // distancia perpendicular de un punto a la RECTA de una pared
+  function perpRecta(px, py, w) {
+    var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
+    return Math.abs((px - w.x1) * dy - (py - w.y1) * dx) / L;
+  }
+  function analizarPlano() {
+    var av = [];
+    var W = state.walls;
+    var roomsPre = detectRoomPolys(W);
+    // ¿este punto cae DENTRO de un cuarto? (para no confundir un pasillo —
+    // que también son dos paredes paralelas — con una pieza sin pegar)
+    function dentroDeCuarto(x, y) {
+      for (var k = 0; k < roomsPre.length; k++) if (ptInPoly(x, y, roomsPre[k].poly)) return true;
+      return false;
+    }
+    // PIEZAS: grupos de paredes que se tocan entre sí. Dos paredes de la
+    // MISMA pieza nunca son "una pieza sin pegar" — serán un pasillo, un
+    // chase o dos muros de verdad. Solo tiene sentido avisar cuando las dos
+    // vienen de piezas distintas.
+    var pieza = {};
+    (function () {
+      var par = {};
+      W.forEach(function (w) { par[w.id] = w.id; });
+      function find(k) { while (par[k] !== k) { par[k] = par[par[k]]; k = par[k]; } return k; }
+      for (var i2 = 0; i2 < W.length; i2++) for (var j2 = i2 + 1; j2 < W.length; j2++) {
+        var A = W[i2], B = W[j2], toca = false;
+        [[A.x1, A.y1], [A.x2, A.y2]].forEach(function (q) {
+          if (distToSeg(q[0], q[1], B.x1, B.y1, B.x2, B.y2).d < 24) toca = true;
+        });
+        [[B.x1, B.y1], [B.x2, B.y2]].forEach(function (q) {
+          if (distToSeg(q[0], q[1], A.x1, A.y1, A.x2, A.y2).d < 24) toca = true;
+        });
+        if (toca) par[find(A.id)] = find(B.id);
+      }
+      W.forEach(function (w) { pieza[w.id] = find(w.id); });
+    })();
+    // ——— 1. paredes casi rectas pero torcidas (ruido del escáner) ———
+    var torcidas = W.filter(function (w) {
+      var a = Math.abs(angMod90(w));
+      return largo(w) >= 24 && a > 0.6 && a <= 4.5;
+    });
+    if (torcidas.length) {
+      av.push({
+        sev: 2, tit: torcidas.length + ' pared(es) casi rectas pero torcidas',
+        txt: 'Están a menos de 4½° del eje. En una casa real eso no existe: es ruido del escáner. La más torcida va a ' +
+          torcidas.map(function (w) { return Math.abs(angMod90(w)); }).sort(function (a, b) { return b - a; })[0].toFixed(1) + '°.',
+        accion: 'Ponerlas rectas', refs: torcidas.map(function (w) { return { kind: 'wall', id: w.id }; }),
+        fix: function () {
+          pushUndo();
+          torcidas.forEach(function (w) {
+            var dx = Math.abs(w.x2 - w.x1), dy = Math.abs(w.y2 - w.y1);
+            if (dx >= dy) { var y = Math.round((w.y1 + w.y2) / 2); w.y1 = y; w.y2 = y; }
+            else { var x = Math.round((w.x1 + w.x2) / 2); w.x1 = x; w.x2 = x; }
+          });
+          weldCorners(state.walls, 8);
+          refresh();
+        }
+      });
+    }
+    // ——— 2. piezas que NO pegaron (paredes gemelas separadas) ———
+    var sinPegar = [];
+    for (var i = 0; i < W.length; i++) for (var j = i + 1; j < W.length; j++) {
+      var a = W[i], b = W[j];
+      if (largo(a) < 48 || largo(b) < 48) continue;
+      var da = Math.abs(angMod90(a) - angMod90(b));
+      if (da > 4) continue;
+      var sep = Math.max(perpRecta(b.x1, b.y1, a), perpRecta(b.x2, b.y2, a));
+      if (sep <= 24 || sep > 84) continue;         // ≤24 ya las une el imán
+      // ¿se pisan a lo largo?
+      var dx = (a.x2 - a.x1) / largo(a), dy = (a.y2 - a.y1) / largo(a);
+      var t1 = (b.x1 - a.x1) * dx + (b.y1 - a.y1) * dy;
+      var t2 = (b.x2 - a.x1) * dx + (b.y2 - a.y1) * dy;
+      var sol = Math.min(largo(a), Math.max(t1, t2)) - Math.max(0, Math.min(t1, t2));
+      if (sol < 0.7 * Math.min(largo(a), largo(b))) continue;
+      // si el hueco entre las dos es un ESPACIO REAL (pasillo, chase), ahí
+      // hay cuarto detectado en medio: no son una pieza sin pegar
+      var mx = ((a.x1 + a.x2) / 2 + (b.x1 + b.x2) / 2) / 2;
+      var my = ((a.y1 + a.y2) / 2 + (b.y1 + b.y2) / 2) / 2;
+      if (dentroDeCuarto(mx, my)) continue;
+      if (pieza[a.id] === pieza[b.id]) continue;    // misma pieza: no es un empate
+      sinPegar.push({ a: a, b: b, sep: sep });
+    }
+    sinPegar.sort(function (x, y) { return x.sep - y.sep; });
+    sinPegar.slice(0, 4).forEach(function (par) {
+      av.push({
+        sev: 1, tit: 'Dos paredes gemelas separadas ' + fmtFtIn(par.sep) + ' — el imán no las une',
+        txt: 'Son paralelas, se pisan casi enteras y NO están conectadas entre sí: o son dos piezas que no pegaron, ' +
+          'o un pedazo suelto del mismo escaneo. Están a ' + fmtFtIn(par.sep) + ' y el imán solo une hasta 2 pies. ' +
+          'Acércalas (selecciona una y arrástrala, o con las flechas del teclado: cada una mueve 1") y vuelve a 🧲 Soldar. ' +
+          'Si de verdad son dos paredes distintas de la casa, ignora este aviso.',
+        accion: 'Enseñármelas', refs: [{ kind: 'wall', id: par.a.id }, { kind: 'wall', id: par.b.id }],
+        fix: null
+      });
+    });
+    // ——— 3. paredes que DIVERGEN: el escaneo derivó ———
+    var divergen = [];
+    for (i = 0; i < W.length; i++) for (j = i + 1; j < W.length; j++) {
+      var p = W[i], q = W[j];
+      if (largo(p) < 100 || largo(q) < 100) continue;
+      var ap = Math.atan2(p.y2 - p.y1, p.x2 - p.x1) * 180 / Math.PI;
+      var aq = Math.atan2(q.y2 - q.y1, q.x2 - q.x1) * 180 / Math.PI;
+      var d = Math.abs(ap - aq) % 180; if (d > 90) d = 180 - d;
+      if (d < 6 || d > 30) continue;               // paralelas o esquina real
+      // deberían ser paralelas: los dos muros largos de un mismo cuarto
+      var cxp = (p.x1 + p.x2) / 2, cyp = (p.y1 + p.y2) / 2;
+      var cxq = (q.x1 + q.x2) / 2, cyq = (q.y1 + q.y2) / 2;
+      var dist = Math.hypot(cxp - cxq, cyp - cyq);
+      if (dist > Math.max(largo(p), largo(q)) * 1.1) continue;
+      divergen.push({ a: p, b: q, d: d });
+      if (divergen.length > 40) break;
+    }
+    divergen.sort(function (x, y) { return y.d - x.d; });
+    divergen.slice(0, 3).forEach(function (par) {
+      av.push({
+        sev: 0, tit: 'Dos muros largos se abren ' + par.d.toFixed(0) + '° entre sí',
+        txt: 'Miden ' + fmtFtIn(largo(par.a)) + ' y ' + fmtFtIn(largo(par.b)) + ' y en vez de ir paralelos se abren como un embudo. ' +
+          'Eso NO es una casa torcida: es que el escaneo derivó en ese cuarto (gabinetes, reflejos, se caminó rápido). ' +
+          'Girar el plano no lo arregla. Lo mejor es REPETIR ese cuarto despacio; si no, endereza cada muro a mano (selecciónalo → 📐 Enderezar) y cuadra las esquinas.',
+        accion: 'Enseñármelos', refs: [{ kind: 'wall', id: par.a.id }, { kind: 'wall', id: par.b.id }],
+        fix: null
+      });
+    });
+    // ——— 4. extremos sueltos cerca de otra pared ———
+    var sueltos = [];
+    W.forEach(function (w) {
+      ['1', '2'].forEach(function (e) {
+        var px = w['x' + e], py = w['y' + e], best = null;
+        W.forEach(function (o) {
+          if (o === w) return;
+          var r = distToSeg(px, py, o.x1, o.y1, o.x2, o.y2);
+          if (!best || r.d < best.d) best = { d: r.d, o: o };
+        });
+        if (best && best.d > 3 && best.d < 40) sueltos.push({ w: w, e: e, d: best.d });
+      });
+    });
+    if (sueltos.length) {
+      av.push({
+        sev: 1, tit: sueltos.length + ' esquina(s) sin cerrar',
+        txt: 'Hay extremos de pared que se quedaron en el aire a menos de 3 pies de otra pared. Un cuarto que no cierra no calcula superficie ni sabe si su pared da a la calle.',
+        accion: 'Cerrarlas', refs: sueltos.map(function (x) { return { kind: 'wall', id: x.w.id }; }),
+        fix: function () { pushUndo(); snapTJunctions(state.walls); weldCorners(state.walls, 12); refresh(); }
+      });
+    }
+    // ——— 5. cuartos sin nombre: qué son ———
+    var rooms = roomsPre;
+    var conNombre = state.texts.filter(function (t) { return !/SQ FT/i.test(t.text); });
+    var anon = rooms.filter(function (r) {
+      return !conNombre.some(function (t) { return ptInPoly(t.x, t.y, r.poly); });
+    });
+    if (anon.length) {
+      var lineas = anon.slice(0, 8).map(function (r) {
+        var g = adivinaCuarto(r);
+        return '   • ' + r.sqft + ' sq ft → probablemente ' + g.n + ' (' + g.pq + ')';
+      });
+      av.push({
+        sev: 2, tit: anon.length + ' cuarto(s) sin nombre — lo que creo que son',
+        txt: lineas.join('\n') + '\n\nSe ponen con la herramienta Text encima de cada uno; el nombre sale en el permit.',
+        accion: 'Escribir estos nombres', refs: null,
+        fix: function () {
+          pushUndo();
+          anon.forEach(function (r) {
+            var g = adivinaCuarto(r);
+            var nm = g.n.split(' ó ')[0];
+            state.texts.push({ id: uid(), x: Math.round(r.cx - nm.length * 2.9), y: Math.round(r.cy), text: nm, size: r.sqft < 120 ? 7 : 10 });
+          });
+          refresh();
+        }
+      });
+    }
+    // ——— 6. pedacitos de pared ———
+    var micro = W.filter(function (w) { return largo(w) < 7; });
+    if (micro.length) {
+      av.push({
+        sev: 2, tit: micro.length + ' pedacito(s) de pared de menos de 7"',
+        txt: 'Basura del escáner: tramos más cortos que un ladrillo. No son paredes de verdad y ensucian el conteo de materiales.',
+        accion: 'Borrarlos', refs: micro.map(function (w) { return { kind: 'wall', id: w.id }; }),
+        fix: function () {
+          pushUndo();
+          var ids = {}; micro.forEach(function (w) { ids[w.id] = 1; });
+          state.openings = state.openings.filter(function (o) { return !ids[o.wallId]; });
+          state.walls = state.walls.filter(function (w) { return !ids[w.id]; });
+          refresh();
+        }
+      });
+    }
+    // ——— 7. aberturas encimadas ———
+    var dobles = [];
+    state.openings.forEach(function (o, k) {
+      for (var m = 0; m < k; m++) {
+        var q2 = state.openings[m];
+        if (q2.wallId === o.wallId && Math.abs(q2.pos - o.pos) < 10) dobles.push(o);
+      }
+    });
+    if (dobles.length) {
+      av.push({
+        sev: 1, tit: dobles.length + ' abertura(s) encimadas',
+        txt: 'La misma puerta escaneada desde los dos cuartos quedó dos veces en la misma pared. En el permit sale doble y en el estimado también.',
+        accion: 'Dejar una sola', refs: null,
+        fix: function () {
+          pushUndo();
+          var fuera = {}; dobles.forEach(function (o) { fuera[o.id] = 1; });
+          state.openings = state.openings.filter(function (o) { return !fuera[o.id]; });
+          refresh();
+        }
+      });
+    }
+    av.sort(function (x, y) { return x.sev - y.sev; });
+    return { av: av, rooms: rooms.length, paredes: W.length };
+  }
+
+  function abrirAsistente() {
+    if (!state.walls.length) { uiAlert('Todavía no hay paredes en la hoja. Importa un escaneo o dibuja algo y te lo reviso.'); return; }
+    var r = analizarPlano();
+    window.__aiFix = r.av;
+    var h = '<div class="muted small" style="margin-bottom:10px">' + r.paredes + ' paredes · ' + r.rooms +
+      ' cuarto(s) cerrados · revisado ahora mismo, sin internet</div>';
+    if (!r.av.length) {
+      h += '<div style="padding:14px;background:#eafaf0;border-radius:8px;font-size:13px">✅ <b>No le veo nada raro.</b> ' +
+        'Las paredes están a escuadra, los cuartos cierran y las aberturas están cada una en su sitio.</div>';
+    } else {
+      r.av.forEach(function (a, i) {
+        var col = a.sev === 0 ? '#c62828' : (a.sev === 1 ? '#ef6c00' : '#1c5fa8');
+        var bg = a.sev === 0 ? '#fdecea' : (a.sev === 1 ? '#fff4e5' : '#eaf3ff');
+        h += '<div style="border-left:4px solid ' + col + ';background:' + bg + ';padding:10px 12px;margin-bottom:10px;border-radius:0 8px 8px 0">' +
+          '<div style="font-weight:700;font-size:13px;color:' + col + '">' + (a.sev === 0 ? '⛔ ' : (a.sev === 1 ? '⚠️ ' : 'ℹ️ ')) + esc(a.tit) + '</div>' +
+          '<div style="font-size:12px;margin:5px 0;white-space:pre-wrap;line-height:1.45">' + esc(a.txt) + '</div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          (a.fix ? '<button class="aiFix" data-i="' + i + '" style="padding:5px 12px;border:none;background:' + col + ';color:#fff;border-radius:6px;cursor:pointer;font-size:11.5px;font-weight:700">✔ ' + esc(a.accion) + '</button>' : '') +
+          (a.refs ? '<button class="aiSel" data-i="' + i + '" style="padding:5px 12px;border:1px solid #c9c9c3;background:#fff;border-radius:6px;cursor:pointer;font-size:11.5px">👁 Enseñármelo en el plano</button>' : '') +
+          '</div></div>';
+      });
+    }
+    h += '<div style="border-top:1px solid #e3e1da;margin-top:12px;padding-top:12px">' +
+      '<div style="font-weight:700;font-size:12.5px;margin-bottom:4px">📏 Tomé una medida en la obra y no cuadra</div>' +
+      '<div class="muted small" style="margin-bottom:6px">Selecciona la pared en el plano, escribe aquí la medida REAL y se corrige arrastrando lo que tenga pegado (la esquina no se abre).</div>' +
+      '<div style="display:flex;gap:6px"><input id="aiMed" placeholder="ej: 12\' 4 1/2&quot;" style="flex:1;padding:7px;border:1px solid #ccc;border-radius:6px">' +
+      '<button id="aiMedOk" style="padding:7px 14px;border:none;background:#1e2530;color:#fff;border-radius:6px;cursor:pointer;font-weight:700">Corregir</button></div>' +
+      '<div id="aiMedMsg" class="muted small" style="margin-top:5px"></div></div>';
+    $('#aiBody').innerHTML = h;
+    $('#aiModal').hidden = false;
+    $$('.aiFix').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = window.__aiFix[+b.dataset.i];
+        if (a && a.fix) { a.fix(); $('#aiModal').hidden = true; setHint('🤖 ' + a.accion + ': hecho — Ctrl+Z lo deshace'); }
+      });
+    });
+    $$('.aiSel').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = window.__aiFix[+b.dataset.i];
+        if (!a || !a.refs) return;
+        sel = null; selGroup = a.refs.slice();
+        $('#aiModal').hidden = true;
+        refresh(); renderSel(); zoomSel();
+        setHint('🤖 Ahí está lo que te decía — seleccionado en azul');
+      });
+    });
+    var mb = $('#aiMedOk');
+    if (mb) mb.addEventListener('click', corregirMedida);
+  }
+  // acercar la vista a lo seleccionado
+  function zoomSel() {
+    var refs = selGroup || (sel ? [sel] : null);
+    var bb = refs && refsBBox(refs);
+    if (!bb) return;
+    var r = svg.getBoundingClientRect();
+    var an = Math.max(60, bb.x2 - bb.x1), al = Math.max(60, bb.y2 - bb.y1);
+    view.z = Math.max(0.15, Math.min(6, Math.min(r.width / (an * 1.8), r.height / (al * 1.8))));
+    view.tx = r.width / 2 - bb.cx * view.z;
+    view.ty = r.height / 2 - bb.cy * view.z;
+    applyView();
+  }
+  // 📏 la medida real manda: se corrige la pared Y se arrastra lo pegado
+  function corregirMedida() {
+    var msg = $('#aiMedMsg');
+    var e = sel && sel.kind === 'wall' ? findSel() : null;
+    if (!e) { msg.textContent = '⚠️ Primero selecciona en el plano la pared que mediste (cierra esto, tócala, y vuelve a abrir el asistente).'; return; }
+    var v = parseDist($('#aiMed').value);
+    if (!v || v < 2) { msg.textContent = '⚠️ Escribe la medida, por ejemplo 12\' 4 1/2" o 148.5'; return; }
+    var L0 = largo(e);
+    pushUndo();
+    // ¿qué extremo está más "suelto"? ese es el que se mueve
+    function pegados(px, py) {
+      var n = 0;
+      state.walls.forEach(function (o) {
+        if (o === e) return;
+        var r = distToSeg(px, py, o.x1, o.y1, o.x2, o.y2);
+        if (r.d < 6) n++;
+      });
+      return n;
+    }
+    var n1 = pegados(e.x1, e.y1), n2 = pegados(e.x2, e.y2);
+    var mueve2 = n2 <= n1;                       // se mueve el extremo con menos pegado
+    var ux = (e.x2 - e.x1) / L0, uy = (e.y2 - e.y1) / L0;
+    var d = v - L0;
+    var ax, ay, bx, by;
+    if (mueve2) { ax = e.x2; ay = e.y2; bx = Math.round(e.x2 + ux * d); by = Math.round(e.y2 + uy * d); e.x2 = bx; e.y2 = by; }
+    else { ax = e.x1; ay = e.y1; bx = Math.round(e.x1 - ux * d); by = Math.round(e.y1 - uy * d); e.x1 = bx; e.y1 = by; }
+    // arrastrar lo que estaba pegado a ese extremo (la esquina no se abre)
+    var movidas = 0;
+    state.walls.forEach(function (o) {
+      if (o === e) return;
+      ['1', '2'].forEach(function (k) {
+        if (Math.hypot(o['x' + k] - ax, o['y' + k] - ay) < 6) {
+          o['x' + k] = bx; o['y' + k] = by; movidas++;
+        }
+      });
+    });
+    refresh(); renderSel();
+    msg.textContent = '✅ Corregida: ' + fmtFtIn(L0) + ' → ' + fmtFtIn(v) +
+      (movidas ? ' · se arrastraron ' + movidas + ' extremo(s) pegado(s) para no abrir la esquina' : '') + ' · Ctrl+Z lo deshace';
+    setHint('📏 Pared corregida a ' + fmtFtIn(v) + ' — la medida de la obra manda sobre el escáner');
+  }
+  $('#btnAI').addEventListener('click', abrirAsistente);
+  $('#aiClose').addEventListener('click', function () { $('#aiModal').hidden = true; });
+
   $('#btnRecibo').addEventListener('click', function () {
     if (!ultimoRecibo) {
       uiAlert('Todavía no has importado ningún escaneo en esta sesión.\n\nAbre un JSON de MXP Scan y aquí te queda el recibo: lo que trae el archivo contra lo que se dibujó, línea por línea.');
