@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.J';
+  var APP_VERSION = 'v25.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5866,6 +5866,15 @@ window.MAXPOWER_SUPABASE = {
     // la punta; volver a micro-soldar es inofensivo (mueve ≤4.5") y sella
     // el inglete de la esquina
     microSolda(trabajo);
+    // red de seguridad: los recortes en cadena pueden dejar una pared
+    // colapsada en un punto (medido 28/08: dos de 0" en la casa de 13
+    // piezas). Una pared de menos de 2" no es una pared.
+    var puntos = state.walls.filter(function (w) {
+      return Math.hypot(w.x2 - w.x1, w.y2 - w.y1) < 2;
+    });
+    if (puntos.length) state.walls = state.walls.filter(function (w) {
+      return Math.hypot(w.x2 - w.x1, w.y2 - w.y1) >= 2;
+    });
     limpiaHuerfanas();
     refresh(); refreshCounts();
     setHint('🧲 ' + (soloSel ? 'Soldadas solo las paredes seleccionadas' : 'Armado soldado') + ': ' +
