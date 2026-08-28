@@ -1233,7 +1233,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.W';
+  var APP_VERSION = 'v24.X';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4509,6 +4509,19 @@ window.MAXPOWER_SUPABASE = {
           '</div></div>';
       });
     }
+    // ——— preguntarle a Claude (el cerebro, si está conectado) ———
+    var cfg = cerebroCfg();
+    h += '<div style="border-top:1px solid #e3e1da;margin-top:12px;padding-top:12px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div style="font-weight:700;font-size:12.5px">💬 Pregúntale a Claude sobre este plano</div>' +
+      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">⚙ Ajustes</button></div>' +
+      (cfg.url
+        ? '<div class="muted small" style="margin:4px 0 6px">Va con el plano entero y el diagnóstico de arriba. Cuesta unos 9 centavos por pregunta.</div>' +
+          '<textarea id="aiPreg" rows="2" placeholder="ej: ¿cómo armo estas 13 piezas? · ¿este cuarto puede ser dormitorio? · ¿qué circuitos necesita esta cocina?" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-family:inherit;font-size:12.5px"></textarea>' +
+          '<button id="aiPregOk" style="margin-top:5px;padding:7px 16px;border:none;background:#0b84ff;color:#fff;border-radius:6px;cursor:pointer;font-weight:700">Preguntar</button>' +
+          '<div id="aiResp" style="margin-top:8px;font-size:12.5px;white-space:pre-wrap;line-height:1.5"></div>'
+        : '<div class="muted small" style="margin:4px 0">Sin conectar. El asistente de arriba funciona igual (mide la geometría, no cuesta nada y va sin internet). Conectando el cerebro puedes además PREGUNTARLE a Claude sobre el plano. Ver <b>mxp-brain/README.md</b> — 10 minutos.</div>') +
+      '</div>';
     h += '<div style="border-top:1px solid #e3e1da;margin-top:12px;padding-top:12px">' +
       '<div style="font-weight:700;font-size:12.5px;margin-bottom:4px">📏 Tomé una medida en la obra y no cuadra</div>' +
       '<div class="muted small" style="margin-bottom:6px">Selecciona la pared en el plano, escribe aquí la medida REAL y se corrige arrastrando lo que tenga pegado (la esquina no se abre).</div>' +
@@ -4535,6 +4548,84 @@ window.MAXPOWER_SUPABASE = {
     });
     var mb = $('#aiMedOk');
     if (mb) mb.addEventListener('click', corregirMedida);
+    var cb = $('#aiCfgBtn');
+    if (cb) cb.addEventListener('click', configurarCerebro);
+    var pb = $('#aiPregOk');
+    if (pb) pb.addEventListener('click', preguntarCerebro);
+  }
+
+  /* ——— EL CEREBRO: Claude dentro de la app (ver mxp-brain/README.md) ———
+     El asistente de arriba mide y no cuesta nada. Esto es lo otro: poder
+     PREGUNTARLE. Va por un worker propio que guarda la clave — meterla en
+     esta página sería regalarla. Si no está conectado, todo lo demás
+     funciona igual. */
+  function cerebroCfg() {
+    try {
+      return {
+        url: localStorage.getItem('mxpCerebroUrl') || '',
+        tok: localStorage.getItem('mxpCerebroTok') || ''
+      };
+    } catch (e) { return { url: '', tok: '' }; }
+  }
+  function configurarCerebro() {
+    var c = cerebroCfg();
+    uiPrompt('Dirección del cerebro (el worker de Cloudflare).\n\nEj: https://cerebro-mxp.tucuenta.workers.dev\n\nDéjalo vacío para desconectarlo.', c.url, function (u) {
+      if (u === null) return;
+      try { localStorage.setItem('mxpCerebroUrl', u.trim()); } catch (e) {}
+      if (!u.trim()) { abrirAsistente(); return; }
+      uiPrompt('Tu MXP_TOKEN (la contraseña que pusiste al desplegar el worker):', c.tok, function (t) {
+        if (t !== null) { try { localStorage.setItem('mxpCerebroTok', t.trim()); } catch (e) {} }
+        abrirAsistente();
+      });
+    });
+  }
+  // resumen COMPACTO del plano: números ya medidos, no el JSON crudo
+  function planoResumen() {
+    var L = [];
+    L.push('PAREDES (x1,y1,x2,y2 en pulgadas · tipo):');
+    state.walls.forEach(function (w, i) {
+      L.push(' w' + i + ' ' + Math.round(w.x1) + ',' + Math.round(w.y1) + ' → ' +
+        Math.round(w.x2) + ',' + Math.round(w.y2) + '  ' + Math.round(largo(w)) + '" ' + w.type);
+    });
+    if (state.openings.length) {
+      L.push('ABERTURAS (pared · tipo · ancho):');
+      state.openings.forEach(function (o) {
+        var iw = state.walls.findIndex(function (w) { return w.id === o.wallId; });
+        L.push(' w' + iw + ' ' + o.type + ' ' + Math.round(o.w) + '"');
+      });
+    }
+    var rooms = detectRoomPolys(state.walls);
+    if (rooms.length) {
+      L.push('CUARTOS CERRADOS:');
+      rooms.forEach(function (r) {
+        var nom = state.texts.filter(function (t) { return !/SQ FT/i.test(t.text) && ptInPoly(t.x, t.y, r.poly); })[0];
+        L.push(' ' + (nom ? nom.text : '(sin nombre)') + ' — ' + r.sqft + ' sq ft');
+      });
+    }
+    var an = analizarPlano();
+    if (an.av.length) {
+      L.push('DIAGNÓSTICO YA MEDIDO POR LA APP:');
+      an.av.forEach(function (a) { L.push(' [' + (a.sev === 0 ? 'GRAVE' : a.sev === 1 ? 'AVISO' : 'nota') + '] ' + a.tit); });
+    }
+    return L.join('\n');
+  }
+  function preguntarCerebro() {
+    var c = cerebroCfg(), out = $('#aiResp'), q = ($('#aiPreg').value || '').trim();
+    if (!q) { out.textContent = '⚠️ Escribe la pregunta.'; return; }
+    out.textContent = '⏳ Pensando…';
+    var btn = $('#aiPregOk'); if (btn) btn.disabled = true;
+    fetch(c.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-mxp-token': c.tok },
+      body: JSON.stringify({ origen: 'planos', pregunta: q, datos: planoResumen() })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (btn) btn.disabled = false;
+      if (d.error) { out.textContent = '⚠️ ' + d.error + (d.detalle ? '\n' + d.detalle : ''); return; }
+      out.textContent = d.texto + (d.uso ? '\n\n— ' + d.uso.centavos + ' centavos' : '');
+    }).catch(function (e) {
+      if (btn) btn.disabled = false;
+      out.textContent = '⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en ⚙ Ajustes?';
+    });
   }
   // acercar la vista a lo seleccionado
   function zoomSel() {
