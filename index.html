@@ -386,6 +386,20 @@ body.touch .sw { width: 28px; height: 28px; }
 body.touch .handle { r: 9; }
 body.touch #main { position: relative; }
 
+/* ═══ AUDITORÍA 08/28 · toques con el dedo en el iPad ═══
+   Medido en un iPad Pro 11: btnEst y btnCsv salían de 18 px de alto, y el
+   selector de tipo de pared y la paleta de 29. Con el dedo eso se falla.
+   En pantalla táctil todo lo que se toca sube a 36 px. */
+body.touch button,
+body.touch select,
+body.touch #catTabs button,
+body.touch .cat,
+body.touch .tmItem { min-height: 36px; }
+body.touch #catTabs button { padding: 8px 12px; font-size: 12.5px; }
+body.touch .sub button { padding: 9px 10px !important; font-size: 12px !important; }
+body.touch #btnEst, body.touch #btnCsv { padding: 8px 12px !important; font-size: 12px !important; }
+body.touch #btnPal, body.touch #stAdd { min-width: 40px; }
+
 </style>
 </head>
 <body>
@@ -1233,7 +1247,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.A';
+  var APP_VERSION = 'v25.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1435,7 +1449,14 @@ window.MAXPOWER_SUPABASE = {
   }
   function pushUndo(snap) {
     undoStack.push(snap || snapshot());
-    if (undoStack.length > 80) undoStack.shift();
+    // AUDITORÍA 08/28: 80 instantáneas × 51 KB (casa entera) = ~4 MB en
+    // memoria. Se recorta por PESO, no por número: en planos chicos siguen
+    // cabiendo muchas, y en uno grande no se dispara.
+    var peso = 0;
+    for (var i = undoStack.length - 1; i >= 0; i--) {
+      peso += undoStack[i].length;
+      if (peso > 6e6 || undoStack.length - i > 80) { undoStack.splice(0, i + 1); break; }
+    }
     redoStack.length = 0;
     scheduleAutosave();
   }
@@ -1491,6 +1512,7 @@ window.MAXPOWER_SUPABASE = {
     state.panels = o.panels || [];
     if (state.bg && o.bgMeta) { state.bg.x = o.bgMeta.x; state.bg.y = o.bgMeta.y; state.bg.w = o.bgMeta.w; state.bg.h = o.bgMeta.h; state.bg.opacity = o.bgMeta.opacity; }
     if (state.bg2 && o.bg2Meta) { state.bg2.x = o.bg2Meta.x; state.bg2.y = o.bg2Meta.y; state.bg2.w = o.bg2Meta.w; state.bg2.h = o.bg2Meta.h; state.bg2.opacity = o.bg2Meta.opacity; }
+    limpiaHuerfanas();      // aberturas cuya pared ya no existe
     sel = null;
     refresh();
   }
@@ -3881,6 +3903,13 @@ window.MAXPOWER_SUPABASE = {
       return state.walls.some(function (w) { return w.id === o.wallId; });
     });
   }
+  // ...y de paso se tiran: una abertura sin pared no se dibuja, no se puede
+  // seleccionar y no sirve para nada. Se limpia al abrir y al soldar.
+  function limpiaHuerfanas() {
+    var n = state.openings.length;
+    state.openings = aberturasVivas();
+    return n - state.openings.length;
+  }
   function refreshCounts() {
     var body = $('#countsBody');
     var rows = '';
@@ -4354,71 +4383,7 @@ window.MAXPOWER_SUPABASE = {
     }
     return false;
   }
-  function familiasDir(W) {
-    var bins = [], i;
-    for (i = 0; i < 180; i++) bins[i] = 0;          // medio grado
-    W.forEach(function (w) {
-      var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
-      bins[Math.round(t * 2) % 180] += largo(w);
-    });
-    var suav = [], top = 0;
-    for (i = 0; i < 180; i++) {
-      var v = 0;
-      for (var k = -6; k <= 6; k++) v += bins[(i + k + 180) % 180];
-      suav[i] = v; top = Math.max(top, v);
-    }
-    var orden = [];
-    for (i = 0; i < 180; i++) orden.push([suav[i], i]);
-    orden.sort(function (a, b) { return b[0] - a[0]; });
-    var picos = [];
-    orden.forEach(function (p) {
-      if (p[0] < top * 0.12) return;
-      var g = p[1] / 2;
-      for (var j = 0; j < picos.length; j++) {
-        var d = Math.abs(picos[j].a - g); d = Math.min(d, 90 - d);
-        if (d < 7) return;
-      }
-      picos.push({ a: g, w: p[0] });
-    });
-    return picos;
-  }
   function dist90(a, b) { var d = Math.abs(a - b) % 90; return Math.min(d, 90 - d); }
-  function rectificarPiezas(W) {
-    var fams = familiasDir(W);
-    if (!fams.length) return null;
-    var base = fams[0].a;
-    var dest = fams.map(function (f) {
-      // OJO: la cuenta va en el espacio mod 90. Restar los ángulos crudos
-      // daba correcciones de 90° (giraba paredes buenas media vuelta).
-      var d = f.a - base;
-      while (d > 45) d -= 90;
-      while (d < -45) d += 90;
-      var k = Math.round(d / 45);            // 0 = paralela · ±1 = corte de 45°
-      return { origen: f.a, sep: d, corr: k * 45 - d };
-    });
-    // si ya está todo a escuadra, no se toca nada
-    var hayQue = dest.some(function (d) { return Math.abs(d.corr) >= 1.2; });
-    if (!hayQue) return { fams: fams, dest: dest, girada: 0, maxG: 0, yaEstaba: true };
-    var girada = 0, maxG = 0;
-    W.forEach(function (w) {
-      var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
-      var best = null;
-      dest.forEach(function (d) {
-        var dd = dist90(t, d.origen);
-        if (!best || dd < best.dd) best = { dd: dd, d: d };
-      });
-      if (!best || best.dd > 14) return;      // ángulo que no es de ninguna familia: no se toca
-      if (Math.abs(best.d.corr) < 0.05) return;
-      if (Math.abs(best.d.corr) > 25) return; // candado: nunca media vuelta
-      var giro = best.d.corr * Math.PI / 180;
-      var a0 = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) + giro;
-      var l = largo(w) / 2, mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
-      w.x1 = Math.round(mx - Math.cos(a0) * l); w.y1 = Math.round(my - Math.sin(a0) * l);
-      w.x2 = Math.round(mx + Math.cos(a0) * l); w.y2 = Math.round(my + Math.sin(a0) * l);
-      girada++; maxG = Math.max(maxG, Math.abs(best.d.corr));
-    });
-    return { fams: fams, dest: dest, girada: girada, maxG: maxG };
-  }
   /* La poligonal cerrada, como la cierra un topógrafo.
      Girar cada pared sobre su punto medio deja el cuarto "a escuadra" en los
      números pero DESPEGADO en el dibujo (probado: se ve roto). Lo correcto es
@@ -4427,77 +4392,6 @@ window.MAXPOWER_SUPABASE = {
      cierre. Ese error se reparte entre todos los vértices en proporción a lo
      que llevas andado (regla de Bowditch, la de toda la vida en topografía).
      El cuarto sale cerrado, a escuadra, y con los largos del sensor. */
-  function cadenaCerrada(W, usadas) {
-    var TOL = 32;
-    function ptos(w) { return [[w.x1, w.y1], [w.x2, w.y2]]; }
-    for (var i = 0; i < W.length; i++) {
-      if (usadas[W[i].id]) continue;
-      var ciclo = [{ w: W[i], flip: false }];
-      var marca = {}; marca[W[i].id] = 1;
-      var ini = [W[i].x1, W[i].y1], fin = [W[i].x2, W[i].y2];
-      var seguro = 0;
-      while (seguro++ < 200) {
-        var sig = null;
-        for (var j = 0; j < W.length; j++) {
-          var o = W[j];
-          if (marca[o.id] || usadas[o.id]) continue;
-          var p = ptos(o);
-          if (Math.hypot(p[0][0] - fin[0], p[0][1] - fin[1]) < TOL) { sig = { w: o, flip: false, np: p[1] }; break; }
-          if (Math.hypot(p[1][0] - fin[0], p[1][1] - fin[1]) < TOL) { sig = { w: o, flip: true, np: p[0] }; break; }
-        }
-        if (!sig) break;
-        ciclo.push({ w: sig.w, flip: sig.flip });
-        marca[sig.w.id] = 1;
-        fin = sig.np;
-        if (Math.hypot(fin[0] - ini[0], fin[1] - ini[1]) < TOL && ciclo.length >= 4) {
-          ciclo.forEach(function (c) { usadas[c.w.id] = 1; });
-          return ciclo;                       // ¡cerró!
-        }
-      }
-    }
-    return null;
-  }
-  function rectificarBucle(ciclo, dest) {
-    var n = ciclo.length, i;
-    var pasos = [];
-    for (i = 0; i < n; i++) {
-      var w = ciclo[i].w, f = ciclo[i].flip;
-      var ax = f ? w.x2 : w.x1, ay = f ? w.y2 : w.y1;
-      var bx = f ? w.x1 : w.x2, by = f ? w.y1 : w.y2;
-      var L = Math.hypot(bx - ax, by - ay);
-      var a = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
-      var corr = w._corr || 0;
-      if (f) corr = -corr;                       // la pared va al revés en el circuito
-      pasos.push({ L: L, a: (a + corr) * Math.PI / 180 });
-    }
-    // encadenar desde el punto de partida original.
-    // (se repite 3 veces: repartir el error vuelve a torcer un pelo los
-    //  ángulos, y volver a cuadrarlos acerca más el cierre)
-    var p0 = ciclo[0].flip ? [ciclo[0].w.x2, ciclo[0].w.y2] : [ciclo[0].w.x1, ciclo[0].w.y1];
-    var pts = [p0.slice()], total = 0;
-    for (i = 0; i < n; i++) {
-      var q = pts[i];
-      pts.push([q[0] + Math.cos(pasos[i].a) * pasos[i].L, q[1] + Math.sin(pasos[i].a) * pasos[i].L]);
-      total += pasos[i].L;
-    }
-    // error de cierre y reparto de Bowditch
-    var ex = pts[n][0] - pts[0][0], ey = pts[n][1] - pts[0][1];
-    var cierre = Math.hypot(ex, ey);
-    var acum = 0;
-    for (i = 1; i <= n; i++) {
-      acum += pasos[i - 1].L;
-      var f2 = acum / (total || 1);
-      pts[i][0] -= ex * f2; pts[i][1] -= ey * f2;
-    }
-    // escribir las paredes
-    for (i = 0; i < n; i++) {
-      var c = ciclo[i], A = pts[i], B = pts[(i + 1) % (n + 1)];
-      if (i === n - 1) B = pts[0];
-      if (c.flip) { c.w.x2 = Math.round(A[0]); c.w.y2 = Math.round(A[1]); c.w.x1 = Math.round(B[0]); c.w.y1 = Math.round(B[1]); }
-      else { c.w.x1 = Math.round(A[0]); c.w.y1 = Math.round(A[1]); c.w.x2 = Math.round(B[0]); c.w.y2 = Math.round(B[1]); }
-    }
-    return { cierre: cierre, perim: total };
-  }
   function rectificarYcerrar(W) {
     var L0 = {};
     W.forEach(function (w) { if (!w.id) w.id = uid(); L0[w.id] = largo(w); });
@@ -4991,6 +4885,25 @@ window.MAXPOWER_SUPABASE = {
   $('#btnAI').addEventListener('click', abrirAsistente);
   $('#aiClose').addEventListener('click', function () { $('#aiModal').hidden = true; });
 
+  // cuántas piezas sueltas hay en la hoja (grupos de paredes que se tocan)
+  function contarPiezas(W) {
+    var par = {}, i, j;
+    W.forEach(function (w) { par[w.id] = w.id; });
+    function find(k) { while (par[k] !== k) { par[k] = par[par[k]]; k = par[k]; } return k; }
+    for (i = 0; i < W.length; i++) for (j = i + 1; j < W.length; j++) {
+      var A = W[i], B = W[j], toca = false;
+      [[A.x1, A.y1], [A.x2, A.y2]].forEach(function (q) {
+        if (distToSeg(q[0], q[1], B.x1, B.y1, B.x2, B.y2).d < 30) toca = true;
+      });
+      if (!toca) [[B.x1, B.y1], [B.x2, B.y2]].forEach(function (q) {
+        if (distToSeg(q[0], q[1], A.x1, A.y1, A.x2, A.y2).d < 30) toca = true;
+      });
+      if (toca) par[find(A.id)] = find(B.id);
+    }
+    var raiz = {};
+    W.forEach(function (w) { raiz[find(w.id)] = 1; });
+    return Object.keys(raiz).length;
+  }
   $('#btnRecibo').addEventListener('click', function () {
     if (!ultimoRecibo) {
       uiAlert('Todavía no has importado ningún escaneo en esta sesión.\n\nAbre un JSON de MXP Scan y aquí te queda el recibo: lo que trae el archivo contra lo que se dibujó, línea por línea.');
@@ -5004,7 +4917,21 @@ window.MAXPOWER_SUPABASE = {
     // Si hay una SELECCIÓN de paredes, se suelda SOLO eso. Con 13 piezas en
     // la hoja, soldar todo de golpe encadena errores; de dos en dos se ve
     // lo que pasa y se puede deshacer una sola unión.
+    // AUDITORÍA 08/28: con las 13 piezas cargadas, soldar todo de golpe hizo
+    // que el candado tuviera que revertir 24 de 141 paredes — el imán pelea
+    // demasiado. Se avisa antes, porque de dos en dos sale mucho mejor.
     var soloSel = null;
+    if (!selGroup && state.walls.length > 60) {
+      var piezasSueltas = contarPiezas(state.walls);
+      if (piezasSueltas >= 4 && !window.__weldOK) {
+        uiConfirm('Vas a soldar ' + piezasSueltas + ' piezas sueltas de una vez (' +
+          state.walls.length + ' paredes).\n\nSale MUCHO mejor de dos en dos: seleccionas dos ' +
+          'piezas con el marco y le das a 🧲 — así ves lo que pasa en cada unión y Ctrl+Z ' +
+          'deshace solo ésa.\n\nOK = soldar todo igual · Cancelar = mejor lo hago de dos en dos',
+          function (ok) { if (ok) { window.__weldOK = 1; $('#btnWeld').click(); window.__weldOK = 0; } });
+        return;
+      }
+    }
     if (selGroup) {
       var idsSel = {};
       selGroup.forEach(function (r) { if (r.kind === 'wall') idsSel[r.id] = 1; });
@@ -5143,6 +5070,7 @@ window.MAXPOWER_SUPABASE = {
         else { w.type = 'drywall'; w.t = 4.5; }
       });
     }
+    limpiaHuerfanas();
     refresh(); refreshCounts();
     setHint('🧲 ' + (soloSel ? 'Soldadas solo las paredes seleccionadas' : 'Armado soldado') + ': ' +
       antes + '→' + state.walls.length + ' paredes' + (soloSel ? '' : ', ' + rooms.length + ' cuarto(s) cerrados') +
@@ -5566,8 +5494,16 @@ window.MAXPOWER_SUPABASE = {
     handleBgFile(f);
   });
 
+  // AUDITORÍA 08/28: _o, _fus y demás marcas de trabajo se guardaban dentro
+  // del .mxp.json. Solo ensucian y pueden confundir a una versión futura.
+  function limpiaMarcas() {
+    state.walls.forEach(function (w) {
+      delete w._o; delete w._fus; delete w._dead; delete w._corr;
+    });
+    state.openings.forEach(function (o) { delete o._fuera; });
+  }
   $('#btnSave').addEventListener('click', function () {
-    syncSheet();
+    syncSheet(); limpiaMarcas();
     var data = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
     saveFile((state.project.name || 'proyecto').replace(/[^\w\-. ]+/g, '') + '.mxp.json', data);
     setHint('Proyecto guardado (archivo descargado)');
@@ -6604,153 +6540,23 @@ window.MAXPOWER_SUPABASE = {
          y cada pared se alinea EXACTA a su familia más cercana (±10°).
          Así: nada de paredes "casi rectas" inclinadas, y las diagonales
          reales salen paralelas perfectas entre sí — no una "curva". */
-      function dirClusters(segs) {
-        var cl = [];
-        segs.forEach(function (s) {
-          var dx = s.x2 - s.x1, dy = s.y2 - s.y1, L = Math.hypot(dx, dy);
-          if (L < 12) return;
-          var a = Math.atan2(dy, dx) % (Math.PI / 2);
-          if (a < 0) a += Math.PI / 2;
-          var hit = null, hd = 1;
-          cl.forEach(function (c) {
-            var d = Math.abs(c.a - a);
-            d = Math.min(d, Math.PI / 2 - d);
-            if (d < 0.1 && d < hd) { hit = c; hd = d; }
-          });
-          if (hit) {
-            var da = a - hit.a;
-            if (da > Math.PI / 4) da -= Math.PI / 2;
-            if (da < -Math.PI / 4) da += Math.PI / 2;
-            hit.a += da * L / (hit.w + L);
-            hit.w += L;
-          } else cl.push({ a: a, w: L });
-        });
-        cl.sort(function (x, y) { return y.w - x.w; });
-        var top = cl.length ? cl[0].w : 0;
-        return cl.filter(function (c) { return c.w > Math.max(120, top * 0.1); })
-          .map(function (c) { return c.a; });
-      }
-      // delta del ángulo de un tramo a su familia más cercana (o null)
-      function clusterDelta(ang, clusters) {
-        var am = ang % (Math.PI / 2);
-        if (am < 0) am += Math.PI / 2;
-        var best = null;
-        clusters.forEach(function (c) {
-          var d = am - c;
-          if (d > Math.PI / 4) d -= Math.PI / 2;
-          if (d < -Math.PI / 4) d += Math.PI / 2;
-          if (Math.abs(d) < 0.17 && (best === null || Math.abs(d) < Math.abs(best))) best = d;
-        });
-        return best;
-      }
       // cuadrar la huella contra las familias SIN romper el circuito:
-      // cada arista se proyecta sobre la línea de su familia (4 pasadas)
-      function squarePoly(pts, clusters) {
-        var n = pts.length, i;
-        if (n < 3) return;
-        for (var pass = 0; pass < 4; pass++) {
-          for (i = 0; i < n; i++) {
-            var p1 = pts[i], p2 = pts[(i + 1) % n];
-            var dx2 = p2.cx - p1.cx, dy2 = p2.cy - p1.cy;
-            if (Math.hypot(dx2, dy2) < 1) continue;
-            var ang2 = Math.atan2(dy2, dx2);
-            var del = clusterDelta(ang2, clusters);
-            if (del === null) continue;
-            var t2 = ang2 - del;
-            var ux = Math.cos(t2), uy = Math.sin(t2);
-            var mx2 = (p1.cx + p2.cx) / 2, my2 = (p1.cy + p2.cy) / 2;
-            var d1 = (p1.cx - mx2) * ux + (p1.cy - my2) * uy;
-            var d2 = (p2.cx - mx2) * ux + (p2.cy - my2) * uy;
-            p1.cx = mx2 + ux * d1; p1.cy = my2 + uy * d1;
-            p2.cx = mx2 + ux * d2; p2.cy = my2 + uy * d2;
-          }
-        }
-      }
-      // alinear una pared suelta (partición) a su familia
-      function snapWallDir(w, clusters) {
-        var ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
-        var del = clusterDelta(ang, clusters);
-        if (del === null) return;
-        var t2 = ang - del;
-        var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) / 2;
-        var mx2 = (w.x1 + w.x2) / 2, my2 = (w.y1 + w.y2) / 2;
-        w.x1 = mx2 - Math.cos(t2) * L; w.y1 = my2 - Math.sin(t2) * L;
-        w.x2 = mx2 + Math.cos(t2) * L; w.y2 = my2 + Math.sin(t2) * L;
-      }
       // paredes desde la huella del piso (ver polysComplete arriba)
-      if (fd.polyWalls && fd.polys && fd.polys.length) {
-        var clSegs = [];
-        fd.polys.forEach(function (rp) {
-          for (var ci = 0; ci < rp.pts.length; ci++) {
-            var ca = rp.pts[ci], cb = rp.pts[(ci + 1) % rp.pts.length];
-            clSegs.push({ x1: ca.cx, y1: ca.cy, x2: cb.cx, y2: cb.cy });
-          }
-        });
-        fd.walls.forEach(function (w0) { clSegs.push(w0); });
-        var clusters = dirClusters(clSegs);
-        fd.polys.forEach(function (rp) { squarePoly(rp.pts, clusters); });
-        var pw = [];
-        fd.polys.forEach(function (rp) {
-          var pts = rp.pts, n = pts.length;
-          // quitar vértices casi colineales (ruido del borde del piso)
-          var keep = [];
-          for (var i = 0; i < n; i++) {
-            var p0 = pts[(i + n - 1) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
-            var ax = p1.cx - p0.cx, ay = p1.cy - p0.cy;
-            var bx = p2.cx - p1.cx, by = p2.cy - p1.cy;
-            var la = Math.hypot(ax, ay) || 1, lb = Math.hypot(bx, by) || 1;
-            if (Math.abs(ax * by - ay * bx) / (la * lb) > 0.08) keep.push(p1);
-          }
-          if (keep.length < 3) keep = pts;
-          for (var k = 0; k < keep.length; k++) {
-            var a = keep[k], b = keep[(k + 1) % keep.length];
-            if (Math.hypot(b.cx - a.cx, b.cy - a.cy) < 4) continue;
-            pw.push({ x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy, t: 4.5 });
-          }
-        });
-        if (pw.length >= 3) {
-          // muros escaneados que NINGUNA huella cubre: son las particiones
-          // interiores cuando se camina la casa ENTERA de una sola pasada
-          // (la huella solo trae el contorno). Solo tramos largos (>30"),
-          // los fragmentos cortos sueltos son ruido
-          function dW(px, py, w2) {
-            var dx3 = w2.x2 - w2.x1, dy3 = w2.y2 - w2.y1, L3 = dx3 * dx3 + dy3 * dy3;
-            var t3 = L3 ? ((px - w2.x1) * dx3 + (py - w2.y1) * dy3) / L3 : 0;
-            t3 = Math.max(0, Math.min(1, t3));
-            return Math.hypot(px - (w2.x1 + dx3 * t3), py - (w2.y1 + dy3 * t3));
-          }
-          var pwN = pw.length;
-          fd.walls.forEach(function (w0) {
-            if (Math.hypot(w0.x2 - w0.x1, w0.y2 - w0.y1) < 24) return;
-            // se bota SOLO si es duplicado de una arista de la huella:
-            // paralelo (±10°) y con AMBOS extremos pegados (<12") a ella.
-            // Una partición que muere EN la pared (perpendicular) se queda.
-            var ang0 = Math.atan2(w0.y2 - w0.y1, w0.x2 - w0.x1);
-            for (var pwi = 0; pwi < pwN; pwi++) {
-              var pwl = pw[pwi];
-              var dAng = Math.abs(ang0 - Math.atan2(pwl.y2 - pwl.y1, pwl.x2 - pwl.x1)) % Math.PI;
-              dAng = Math.min(dAng, Math.PI - dAng);
-              if (dAng > 0.18) continue;
-              if (dW(w0.x1, w0.y1, pwl) < 12 && dW(w0.x2, w0.y2, pwl) < 12) return;
-            }
-            snapWallDir(w0, clusters);
-            pw.push(w0);
-          });
-          fd.walls = pw;
-        }
-      }
+      /* AUDITORÍA 08/28 — AQUÍ HABÍA CÓDIGO MUERTO Y PELIGROSO.
+         Un bloque de 60 líneas reconstruía las paredes desde la HUELLA DEL
+         PISO (no desde los muros escaneados) y las cuadraba contra "familias
+         de dirección". Estaba desactivado porque su bandera `fd.polyWalls`
+         NO SE ASIGNABA EN NINGÚN SITIO — nunca corrió. Se borra: si se
+         hubiera despertado, habría reemplazado el escaneo fiel de Edgar por
+         una versión "arreglada" del contorno, que es justo lo que él pidió
+         que no se hiciera. Con él se van dirClusters/clusterDelta/
+         squarePoly/snapWallDir, que solo vivían ahí. */
       if (!fd.walls.length) return;
       // los puntos de los polígonos de cuarto (y la huella exterior)
       // giran junto con las paredes
       var polyPts = [];
       (fd.polys || []).forEach(function (rp) { polyPts = polyPts.concat(rp.pts); });
-      (fd.outer || []).forEach(function (op) {
-        if (fd.polyWalls) squarePoly(op, dirClusters(op.map(function (p, pi) {
-          var q = op[(pi + 1) % op.length];
-          return { x1: p.cx, y1: p.cy, x2: q.cx, y2: q.cy };
-        })));
-        polyPts = polyPts.concat(op);
-      });
+      (fd.outer || []).forEach(function (op) { polyPts = polyPts.concat(op); });
       var rot = redrawScan(fd.walls, fd.drs.concat(fd.wins, fd.labels, fd.furn, polyPts), fd.faithful);
       if (fd.faithful) {
         // MODO FIEL (pedido de Edgar, y tiene razon): las paredes se
@@ -7651,14 +7457,6 @@ window.MAXPOWER_SUPABASE = {
     var c = allCounties()[parseInt($('#lotCounty').value, 10) || 0];
     if (c) lotOpen(c[1]);
   });
-  function countyDomain(url) {
-    try {
-      var h = new URL(url).hostname.replace(/^www\./, '');
-      var parts = h.split('.');
-      if (/\.fl\.us$/.test(h)) return parts.slice(-3).join('.');
-      return parts.slice(-2).join('.');
-    } catch (e) { return ''; }
-  }
   $('#lotDirect').addEventListener('click', function () {
     var a = ($('#lotAddr').value || '').trim();
     if (!a) { uiAlert('Escribe primero la dirección o el folio.'); return; }
