@@ -419,14 +419,14 @@ body.touch #main { position: relative; }
 
     <div class="tgroup">
       <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟ 90°</button>
-      <select id="wallType" title="Tipo de pared al dibujar">
+      <select id="wallType" title="Tipo de pared al dibujar (drywall por defecto: en una casa solo el contorno es de bloque)">
+        <option value="drywall" selected>Drywall 4½"</option>
+        <option value="drywall25">Drywall 2½"</option>
+        <option value="drywall35">Drywall 3½"</option>
+        <option value="drywall6">Drywall 6"</option>
         <option value="block">8" Block</option>
         <option value="block12">12" Block</option>
         <option value="blockdry">8" Block + Drywall</option>
-        <option value="drywall25">Drywall 2½"</option>
-        <option value="drywall35">Drywall 3½"</option>
-        <option value="drywall">Drywall 4½"</option>
-        <option value="drywall6">Drywall 6"</option>
       </select>
     </div>
 
@@ -555,6 +555,7 @@ body.touch #main { position: relative; }
             <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
             <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
           </div>
+          <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí">📋 Recibo del último escaneo importado</button></div>
           <div class="sub"><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
           <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
           <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
@@ -1220,7 +1221,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.T';
+  var APP_VERSION = 'v24.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4212,6 +4213,13 @@ window.MAXPOWER_SUPABASE = {
   // suelda esquinas, reconecta las aberturas a su pared sobreviviente y
   // re-tipa automáticamente (lo que da a la calle = block 8", lo interior
   // = drywall) — la respuesta a "¿cómo se quita el block y queda drywall?"
+  $('#btnRecibo').addEventListener('click', function () {
+    if (!ultimoRecibo) {
+      uiAlert('Todavía no has importado ningún escaneo en esta sesión.\n\nAbre un JSON de MXP Scan y aquí te queda el recibo: lo que trae el archivo contra lo que se dibujó, línea por línea.');
+      return;
+    }
+    uiAlert(ultimoRecibo);
+  });
   $('#btnWeld').addEventListener('click', function () {
     if (!state.walls.length) { uiAlert('No hay paredes en esta hoja.'); return; }
     pushUndo();
@@ -5351,6 +5359,128 @@ window.MAXPOWER_SUPABASE = {
   // post-proceso con los polígonos de piso REALES de Apple (rooms[].floors):
   // área exacta por cuarto, nombre en su centro y tipo de pared por lados —
   // no depende de que el grafo de paredes cierre perfecto
+  // 📋 RECIBO: lo que el archivo TRAE vs lo que el plano DIBUJÓ. Edgar:
+  // "quiero ver si el dibujo tuvo alguna diferencia con el documento que
+  // exporta" — aquí es donde se pierde información entre las dos apps, así
+  // que en vez de confiar, se cuenta y se compara.
+  var reciboDib = [];      // [{name, sqft}] de cada cuarto que se dibujó
+  var ultimoRecibo = null; // texto del último recibo (botón 📋 Recibo)
+  // lo que el ARCHIVO trae, contado sin tocar el dibujo
+  function contarArchivo(o) {
+    var M = 39.3700787;
+    var r = { cuartos: 0, paredes: 0, puertas: 0, ventanas: 0, aberturas: 0, pies: 0, sqft: 0, nombres: [] };
+    function sumaSup(list, campo) {
+      (list || []).forEach(function (s2) {
+        r[campo]++;
+        if (campo === 'paredes') r.pies += ((s2.dimensions && s2.dimensions[0]) || 0) * M / 12;
+      });
+    }
+    function unCuarto(rm) {
+      sumaSup(rm.walls, 'paredes');
+      sumaSup(rm.doors, 'puertas');
+      sumaSup(rm.windows, 'ventanas');
+      sumaSup(rm.openings, 'aberturas');
+      return unCuarto2(rm);
+    }
+    function unCuarto2(rm) {          // solo la superficie del piso
+      var mejor = 0;
+      (rm.floors || []).forEach(function (f) {
+        var pc = f.polygonCorners;
+        if (!Array.isArray(pc) || pc.length < 3) return;
+        var a = 0;
+        for (var i = 0; i < pc.length; i++) {
+          var p1 = pc[i], p2 = pc[(i + 1) % pc.length];
+          var x1 = p1[0] * M, z1 = (p1[2] != null ? p1[2] : p1[1]) * M;
+          var x2 = p2[0] * M, z2 = (p2[2] != null ? p2[2] : p2[1]) * M;
+          a += x1 * z2 - x2 * z1;
+        }
+        mejor = Math.max(mejor, Math.abs(a / 2) / 144);
+      });
+      return Math.round(mejor);
+    }
+    var meta = (o.mxpMeta && Array.isArray(o.mxpMeta.rooms)) ? o.mxpMeta.rooms : [];
+    // IMPORTANTE: hay que contar de DONDE LEE el importador, si no el recibo
+    // miente. El archivo trae las dos cosas: las paredes de raíz (las que ya
+    // pasaron por el StructureBuilder de Apple) y las crudas de cada cuarto.
+    // Si hay paredes de raíz, ésas son las que se dibujan.
+    var cuartos = (!o.walls && Array.isArray(o.rooms) && o.rooms.length && o.rooms[0] && o.rooms[0].walls) ? o.rooms : null;
+    if (cuartos) {
+      cuartos.forEach(function (rm, i) {
+        r.cuartos++;
+        var sq = unCuarto(rm);
+        var nm = (meta[i] && meta[i].name) ? String(meta[i].name).toUpperCase() : '(sin nombre)';
+        if (meta[i] && meta[i].sqft) sq = Math.round(meta[i].sqft);
+        r.nombres.push({ name: nm, sqft: sq });
+        r.sqft += sq;
+      });
+    } else {
+      // paredes/puertas de raíz (un solo set), pero la superficie y los
+      // nombres salen cuarto por cuarto
+      sumaSup(o.walls, 'paredes');
+      sumaSup(o.doors, 'puertas');
+      sumaSup(o.windows, 'ventanas');
+      sumaSup(o.openings, 'aberturas');
+      var lista = (Array.isArray(o.rooms) && o.rooms.length) ? o.rooms : [o];
+      lista.forEach(function (rm, i) {
+        r.cuartos++;
+        var sq = unCuarto2(rm) || unCuarto2(o);
+        var nm = (meta[i] && meta[i].name) ? String(meta[i].name).toUpperCase() : '(sin nombre)';
+        if (meta[i] && meta[i].sqft) sq = Math.round(meta[i].sqft);
+        r.nombres.push({ name: nm, sqft: sq });
+        r.sqft += sq;
+      });
+    }
+    r.pies = Math.round(r.pies);
+    return r;
+  }
+  // compara ARCHIVO vs DIBUJO y arma el texto del recibo
+  function reciboImport(o, dib) {
+    var A = contarArchivo(o);
+    var pies = 0;
+    dib.walls.forEach(function (w) { pies += Math.hypot(w.x2 - w.x1, w.y2 - w.y1) / 12; });
+    pies = Math.round(pies);
+    var sqDib = 0;
+    reciboDib.forEach(function (c) { sqDib += c.sqft || 0; });
+    var lin = [], fallas = 0;
+    function fila(rot, a, b, uni, tol, nota) {
+      // tol 0 = tiene que cuadrar EXACTO (cuartos, puertas, ventanas)
+      var lim = tol ? Math.max(1, a * tol) : 0;
+      var ok = Math.abs(a - b) <= lim;
+      if (!ok) fallas++;
+      var dif = a !== b ? '  (' + (b > a ? '+' : '') + (b - a) + ')' : '';
+      lin.push((ok ? '✅ ' : '⚠️ ') + rot.padEnd(16) +
+        'archivo ' + String(a + (uni || '')).padStart(9) +
+        '   plano ' + String(b + (uni || '')).padStart(9) + dif + (nota || ''));
+    }
+    fila('CUARTOS', A.cuartos, reciboDib.length, '', 0);
+    // OJO con PAREDES: el escáner de Apple manda la misma pared partida en
+    // pedazos y duplicada. Que bajen no es perder: lo que NO puede bajar son
+    // los PIES DE PARED. Por eso el conteo de paredes solo avisa si además
+    // se perdieron pies.
+    var piesOk = Math.abs(A.pies - pies) <= Math.max(1, A.pies * 0.03);
+    fila('PAREDES', A.paredes, dib.walls.length, '',
+      piesOk ? 1 : 0.02,
+      (piesOk && A.paredes !== dib.walls.length)
+        ? '  ← pedazos y duplicados unidos (los pies cuadran)' : '');
+    fila('PUERTAS+ABERT.', A.puertas + A.aberturas, dib.doors, '', 0);
+    fila('VENTANAS', A.ventanas, dib.windows, '', 0);
+    fila('PIES DE PARED', A.pies, pies, ' ft', 0.03);
+    fila('SUPERFICIE', A.sqft, sqDib, ' sf', 0.04);
+    var txt = '📋 RECIBO DE IMPORTACIÓN — MXP Scan → MXP Planos\n\n' + lin.join('\n');
+    if (fallas) {
+      txt += '\n\n⚠️ HAY DIFERENCIAS. Cuarto por cuarto:\n';
+      A.nombres.forEach(function (a) {
+        var d = reciboDib.filter(function (x) { return x.name === a.name; })[0];
+        txt += (d ? (Math.abs(d.sqft - a.sqft) <= Math.max(4, a.sqft * 0.06) ? '   ✅ ' : '   ⚠️ ') +
+          a.name + ': ' + a.sqft + ' sf en el archivo → ' + d.sqft + ' sf dibujado'
+          : '   ❌ ' + a.name + ': ' + a.sqft + ' sf — NO SE DIBUJÓ') + '\n';
+      });
+      txt += '\nSi falta un cuarto, ese escaneo llegó incompleto: vuelve a exportarlo desde MXP Scan.';
+    } else {
+      txt += '\n\n✅ Todo lo que trae el archivo está en el plano. Nada se perdió.';
+    }
+    return { txt: txt, fallas: fallas };
+  }
   function scanRoomsFromPolys(newWalls, polys, ox, oy, outer, noType) {
     var names = [];
     // huella exterior global (si viene): lo de "afuera" se mide contra
@@ -5381,7 +5511,12 @@ window.MAXPOWER_SUPABASE = {
       for (var i = 0; i < rl.length; i++) if (ptInPoly(x, y, rl[i].pts)) return true;
       return false;
     }
-    if (!noType) newWalls.forEach(function (w) {
+    // OJO: aquí NO se pone block nunca. En CUARTOS SUELTOS cada cuarto llega
+    // solo, así que TODAS sus paredes parecen exteriores y salían de bloque —
+    // Edgar: "realmente solo el contorno de la casa es de bloque, y es más
+    // fácil editar 4 paredes que 30". El block lo pone 🧲 Soldar armado, que
+    // es el único momento en que se sabe qué da de verdad a la calle.
+    if (false) newWalls.forEach(function (w) {
       var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
       var nx = -dy / L, ny = dx / L, OFF = 9, votes = 0;
       [0.25, 0.5, 0.75].forEach(function (t) {
@@ -5393,6 +5528,7 @@ window.MAXPOWER_SUPABASE = {
       if (votes >= 2) { w.type = 'block'; w.t = 8; }
     });
     rl.forEach(function (r) {
+      reciboDib.push({ name: r.name ? String(r.name).toUpperCase() : '(sin nombre)', sqft: r.sqft });
       var small = r.sqft < 120;
       var ls = small ? 7 : 10, as2 = small ? 4.5 : 6;
       if (r.name) {
@@ -5410,11 +5546,8 @@ window.MAXPOWER_SUPABASE = {
     var rooms = detectRoomPolys(newWalls);
     var names = [];
     if (rooms.length) {
-      // pared exterior (da a la calle) = block 8"; interior = drywall
-      var ext = rooms[0]._ext;
-      newWalls.forEach(function (w) {
-        if (ext.has(w)) { w.type = 'block'; w.t = 8; }
-      });
+      // (el tipo de pared NO se decide al importar — ver nota en
+      // scanRoomsFromPolys; todo entra en drywall y el block lo pone 🧲 Soldar)
       var claimed = new Set();
       (labels || []).forEach(function (l) {
         var lx = l.cx + offX, ly = l.cy + offY;
@@ -5437,11 +5570,13 @@ window.MAXPOWER_SUPABASE = {
         var ls = small ? 7 : 10, as2 = small ? 4.5 : 6;
         state.texts.push({ id: uid(), x: Math.round(tx - String(l.text).length * ls * 0.29), y: Math.round(ty), text: l.text, size: ls });
         if (room) state.texts.push({ id: uid(), x: Math.round(tx - as2 * 0.55 * String(room.sqft + ' SQ FT').length / 2), y: Math.round(ty + ls * 1.3), text: room.sqft + ' SQ FT', size: as2 });
+        reciboDib.push({ name: String(l.text).toUpperCase(), sqft: room ? room.sqft : 0 });
         names.push(String(l.text).toUpperCase());
       });
       // cuartos sin nombre: solo su área
       rooms.forEach(function (r, i) {
         if (claimed.has(i)) return;
+        reciboDib.push({ name: '(sin nombre)', sqft: r.sqft });
         state.texts.push({ id: uid(), x: Math.round(r.cx - 3.2 * String(r.sqft + ' SQ FT').length / 2), y: Math.round(r.cy), text: r.sqft + ' SQ FT', size: 6 });
       });
     } else {
@@ -6167,11 +6302,22 @@ window.MAXPOWER_SUPABASE = {
           var nObj = scanFurnCount(o);
           var doImport = function (withFurn) {
             pushUndo();
+            reciboDib = [];
+            var wAntes = state.walls.length;
             var n = importRoomScan(o, { furniture: withFurn, fileName: f.name });
+            var rec = reciboImport(o, {
+              walls: state.walls.slice(wAntes),
+              doors: n.doors, windows: n.windows
+            });
+            ultimoRecibo = rec.txt;
             setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' aberturas, ' +
               n.windows + ' ventanas' + (n.floors > 1 ? ' en ' + n.floors + ' pisos' : '') +
               (withFurn && n.furn ? ' + ' + n.furn + ' muebles de referencia' : ' — plano limpio, sin muebles') +
-              ' · a escala real, listo para símbolos y medidas');
+              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — botón 📋 Recibo en Capas'
+                          : ' · 📋 recibo: todo llegó completo') +
+              ' · a escala real, en drywall (el block lo pone 🧲 Soldar)');
+            // si algo se perdió, se enseña en la cara: es el punto débil
+            if (rec.fallas) uiAlert(rec.txt);
             scanNecTips(n.names);
           };
           if (nObj > 0) {
