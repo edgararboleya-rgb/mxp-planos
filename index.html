@@ -1247,7 +1247,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.B';
+  var APP_VERSION = 'v25.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1416,6 +1416,9 @@ window.MAXPOWER_SUPABASE = {
     project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }
   };
   window.__mxpState = state;
+  // ganchos SOLO para las pruebas automáticas (no los usa la app)
+  window.__zf = function () { try { zoomFit(); } catch (e) {} };
+  window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
   var view = { tx: 120, ty: 90, z: 1 };
   var measure = null;                 // medición transitoria
   var sel = null;                     // {kind,id}
@@ -1623,6 +1626,32 @@ window.MAXPOWER_SUPABASE = {
   // que corre el mouse y se apaga el imán de la rejilla — para cuadrar al
   // cuarto de pulgada sin que se vaya de un salto
   var FINO = 0.15;
+  var calceOn = true;              // 🧲 imán entre piezas al armar el rompecabezas
+  // corre lo seleccionado sin tocar nada más (el calce lo usa al soltar)
+  function moveRefs(refs, dx, dy) {
+    dx = Math.round(dx); dy = Math.round(dy);
+    if (!dx && !dy) return;
+    refs.forEach(function (r) {
+      var e = entityOf(r);
+      if (!e) return;
+      if (e.pts) e.pts = e.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
+      else if (e.x1 != null) { e.x1 += dx; e.y1 += dy; e.x2 += dx; e.y2 += dy; }
+      else if (e.x != null) { e.x += dx; e.y += dy; if (e.tx != null) { e.tx += dx; e.ty += dy; } }
+    });
+  }
+  // deja lo seleccionado calzado contra las piezas ya puestas
+  function aplicarCalce(refs, c) {
+    if (!c) return;
+    if (Math.abs(c.deg) > 0.01) rotateRefs(refs, c.deg, c.cx, c.cy);
+    moveRefs(refs, c.dx, c.dy);
+  }
+  // las paredes que se mueven y las que se quedan quietas
+  function partirParedes(refs) {
+    var ids = {}, mv = [], fj = [];
+    refs.forEach(function (r) { if (r.kind === 'wall') ids[r.id] = 1; });
+    state.walls.forEach(function (w) { (ids[w.id] ? mv : fj).push(w); });
+    return { mv: mv, fj: fj };
+  }
   function finoOn(ev) { return !!(ev && ev.altKey); }
   function finoPt(ev, start, ox, oy, p) {
     return [ox + (p[0] - start[0]) * FINO, oy + (p[1] - start[1]) * FINO];
@@ -2829,6 +2858,7 @@ window.MAXPOWER_SUPABASE = {
     if (inGroup(h)) {
       drag = {
         mode: 'groupmove', start: p, snap: snapshot(), moved: false,
+        refs: selGroup.slice(), calce: null,
         items: selGroup.map(function (r) { return { ref: r, e: entityOf(r), orig: JSON.parse(JSON.stringify(entityOf(r))) }; })
       };
       return;
@@ -2939,6 +2969,29 @@ window.MAXPOWER_SUPABASE = {
       if (finoOn(ev)) { gdx *= FINO; gdy *= FINO; setHint('🐢 Fino (Alt): el grupo se mueve poquito a poquito'); }
       if (wantOrtho(ev)) { if (Math.abs(gdx) >= Math.abs(gdy)) gdy = 0; else gdx = 0; }
       applyGroupDelta(drag.items, gdx, gdy);
+      // 🧲 CALCE: ¿esta pieza pega con alguna de las ya puestas? Se enseña
+      // en vivo y se aplica al soltar. Con Alt (fino) el imán se apaga:
+      // si está ajustando al milímetro, no queremos que salte.
+      drag.calce = null; G.prev.innerHTML = '';
+      if (calceOn && !finoOn(ev)) {
+        var pw = partirParedes(drag.refs);
+        if (pw.mv.length && pw.mv.length <= 140 && pw.fj.length) {
+          var cc = calcePropuesta(pw.mv, pw.fj);
+          if (cc) {
+            drag.calce = cc;
+            var gg = 3 / view.z;
+            G.prev.innerHTML = '<g class="preview">' +
+              '<line x1="' + cc.wr.x1 + '" y1="' + cc.wr.y1 + '" x2="' + cc.wr.x2 + '" y2="' + cc.wr.y2 +
+              '" stroke="#12b886" stroke-width="' + gg + '" stroke-linecap="round" opacity="0.85"/>' +
+              '<line x1="' + cc.wm.x1 + '" y1="' + cc.wm.y1 + '" x2="' + cc.wm.x2 + '" y2="' + cc.wm.y2 +
+              '" stroke="#12b886" stroke-width="' + (gg * 0.7) + '" stroke-dasharray="' + (gg * 3) + ' ' + (gg * 2) + '"/>' +
+              '</g>';
+            setHint('🧲 Calza aquí — suelta y se pega exacta (' + fmtFtIn(cc.solape) +
+              ' de pared en común' + (Math.abs(cc.deg) >= 0.1 ? ', endereza ' + Math.abs(cc.deg).toFixed(1) + '°' : '') +
+              ') · Alt para apagar el imán');
+          }
+        }
+      }
       renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
       return;
     }
@@ -3089,6 +3142,12 @@ window.MAXPOWER_SUPABASE = {
       refreshCounts(); showProps();
     }
     if (drag.mode === 'groupmove' && drag.moved) {
+      G.prev.innerHTML = '';
+      if (drag.calce) {
+        aplicarCalce(drag.refs, drag.calce);
+        setHint('🧲 Calzada — ' + fmtFtIn(drag.calce.solape) + ' de pared en común. Ahora 🧲 Soldar une las dos en una sola.');
+        refresh();
+      }
       pushUndo(drag.snap);
       refreshCounts();
     }
@@ -3586,6 +3645,168 @@ window.MAXPOWER_SUPABASE = {
     setHint('📐 Enderezado ' + (-a).toFixed(1) + '° — ya está a escuadra');
   }
 
+  /* ══════════ CALCE: armar el rompecabezas pieza por pieza ══════════
+     Cada cuarto se escanea suelto, así que llegan 13 piezas sueltas y hay
+     que armarlas. Lo que estaba DISEÑADO para armarlas solas no funciona,
+     y está medido con los 13 escaneos de Caroline (28/08):
+
+       · BRÚJULA — se captura un rumbo por cuarto. Si sirviera, girando cada
+         pieza por su rumbo todas apuntarían al mismo norte. Medido:
+         concentración R = 0.257 (1 = perfecto, 0 = azar) y desviaciones de
+         hasta ±44°. Dentro de una casa el magnetómetro se lo comen el
+         refuerzo, los electrodomésticos y el cableado. NO SIRVE para orientar.
+
+       · ANCHO DE PUERTA — la idea era emparejar aberturas del mismo ancho.
+         Medido: de 49 aberturas, 30 miden entre 29" y 32". 109 de los 136
+         pares de cuartos posibles tienen "candidato". NO IDENTIFICA nada.
+
+     Lo que SÍ es información fiable es la que pone Edgar: él sabe qué cuarto
+     va pegado a cuál, porque caminó la casa. Lo que la máquina puede aportar
+     es la EXACTITUD: él acerca la pieza a ojo y ella la deja pegada perfecta
+     — paralela, a ras y alineada. Imán de verdad, no adivinanza.
+
+     calcePropuesta(mov, fij, opts) → el giro y el corrimiento que dejan una
+     pared de la pieza que se mueve pegada a una pared de las ya puestas.
+     Sin estado: se puede probar sola. */
+  function _cpDir(w) {
+    var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
+    return { ux: dx / L, uy: dy / L, L: L, mx: (w.x1 + w.x2) / 2, my: (w.y1 + w.y2) / 2 };
+  }
+  // piezas de un conjunto: paredes que se tocan entre sí (punta con punta)
+  function _cpPiezas(W, tol) {
+    tol = tol || 18;
+    var pad = W.map(function () { return -1; }), np = 0;
+    function toca(a, b) {
+      var pa = [[a.x1, a.y1], [a.x2, a.y2]], pb = [[b.x1, b.y1], [b.x2, b.y2]];
+      for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++)
+        if (Math.hypot(pa[i][0] - pb[j][0], pa[i][1] - pb[j][1]) < tol) return true;
+      return false;
+    }
+    for (var i = 0; i < W.length; i++) {
+      if (pad[i] >= 0) continue;
+      var id = np++, pila = [i]; pad[i] = id;
+      while (pila.length) {
+        var k = pila.pop();
+        for (var j = 0; j < W.length; j++)
+          if (pad[j] < 0 && toca(W[k], W[j])) { pad[j] = id; pila.push(j); }
+      }
+    }
+    return { pad: pad, n: np };
+  }
+  // distancia más corta entre dos paredes (segmento a segmento)
+  function segDist(a, b) {
+    function pt2seg(px, py, x1, y1, x2, y2) {
+      var dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+      var t = L2 ? ((px - x1) * dx + (py - y1) * dy) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+    }
+    return Math.min(
+      pt2seg(a.x1, a.y1, b.x1, b.y1, b.x2, b.y2), pt2seg(a.x2, a.y2, b.x1, b.y1, b.x2, b.y2),
+      pt2seg(b.x1, b.y1, a.x1, a.y1, a.x2, a.y2), pt2seg(b.x2, b.y2, a.x1, a.y1, a.x2, a.y2));
+  }
+  function calcePropuesta(mov, fij, opts) {
+    opts = opts || {};
+    var MAXROT = opts.maxRot == null ? 15 : opts.maxRot;   // giro que se permite
+    var SNAP = opts.snap == null ? 36 : opts.snap;         // acercamiento máximo
+    var MINL = opts.minL == null ? 30 : opts.minL;         // paredes cortas no calzan
+    if (!mov || !mov.length || !fij || !fij.length) return null;
+    var M = mov.filter(function (w) { return Math.hypot(w.x2 - w.x1, w.y2 - w.y1) >= MINL; });
+    var F = fij.filter(function (w) { return Math.hypot(w.x2 - w.x1, w.y2 - w.y1) >= MINL; });
+    if (!M.length || !F.length) return null;
+    // centro de la pieza que se mueve (se gira alrededor de él)
+    var cx = 0, cy = 0, tl = 0;
+    mov.forEach(function (w) {
+      var d = _cpDir(w); cx += d.mx * d.L; cy += d.my * d.L; tl += d.L;
+    });
+    if (!tl) return null;
+    cx /= tl; cy /= tl;
+    // centro de la pieza fija a la que pertenece cada pared quieta
+    var pz = _cpPiezas(fij), cent = [];
+    for (var q = 0; q < pz.n; q++) cent.push({ x: 0, y: 0, L: 0 });
+    fij.forEach(function (w, i) {
+      var d = _cpDir(w), c = cent[pz.pad[i]];
+      c.x += d.mx * d.L; c.y += d.my * d.L; c.L += d.L;
+    });
+    cent.forEach(function (c) { if (c.L) { c.x /= c.L; c.y /= c.L; } });
+    var idxF = {}; fij.forEach(function (w, i) { idxF[w.id != null ? w.id : i] = i; });
+    var best = null;
+    M.forEach(function (wm) {
+      var dm = _cpDir(wm);
+      var am = Math.atan2(dm.uy, dm.ux) * 180 / Math.PI;
+      F.forEach(function (wr, fi) {
+        var dr = _cpDir(wr);
+        var ar = Math.atan2(dr.uy, dr.ux) * 180 / Math.PI;
+        // dos formas de quedar paralelas: misma dirección o al revés
+        [0, 180].forEach(function (flip) {
+          var rot = ar + flip - am;
+          while (rot > 180) rot -= 360;
+          while (rot < -180) rot += 360;
+          if (Math.abs(rot) > MAXROT) return;
+          var rad = rot * Math.PI / 180, co = Math.cos(rad), si = Math.sin(rad);
+          function gir(x, y) {
+            var ox = x - cx, oy = y - cy;
+            return [cx + ox * co - oy * si, cy + ox * si + oy * co];
+          }
+          var pm = gir(dm.mx, dm.my);
+          // perpendicular a la pared quieta
+          var nx = -dr.uy, ny = dr.ux;
+          var vx = dr.mx - pm[0], vy = dr.my - pm[1];
+          var t = vx * nx + vy * ny;                 // lo que hay que acercar
+          if (Math.abs(t) > SNAP) return;
+          var s0 = vx * dr.ux + vy * dr.uy;          // corrimiento a lo largo
+          // opciones a lo largo: quedarse donde está, o alinear puntas
+          var pa = gir(wm.x1, wm.y1), pb = gir(wm.x2, wm.y2);
+          var proj = function (p) { return (p[0] - dr.mx) * dr.ux + (p[1] - dr.my) * dr.uy; };
+          var m1 = Math.min(proj(pa), proj(pb)), m2 = Math.max(proj(pa), proj(pb));
+          var r1 = -dr.L / 2, r2 = dr.L / 2;
+          var alter = [0, r1 - m1, r2 - m2, (r1 + r2) / 2 - (m1 + m2) / 2];
+          alter.forEach(function (s) {
+            if (Math.abs(s) > 24) return;
+            var a1 = m1 + s, a2 = m2 + s;
+            var sol = Math.min(a2, r2) - Math.max(a1, r1);   // solape a lo largo
+            if (sol < Math.min(24, Math.min(dm.L, dr.L) * 0.4)) return;
+            var tx = nx * t + dr.ux * s, ty = ny * t + dr.uy * s;
+            // ¿queda la pieza del lado bueno? dos cuartos vecinos van uno a
+            // cada lado de la pared que comparten, nunca montados encima
+            var cf = cent[pz.pad[fi]];
+            var ladoF = (cf.x - dr.mx) * nx + (cf.y - dr.my) * ny;
+            var pcm = gir(cx, cy);                    // el centro no se mueve al girar
+            var ladoM = (pcm[0] + tx - dr.mx) * nx + (pcm[1] + ty - dr.my) * ny;
+            if (Math.abs(ladoF) > 6 && Math.abs(ladoM) > 6 && ladoF * ladoM > 0) return;
+            var costo = Math.abs(t) + Math.abs(s) * 0.5 + Math.abs(rot) * 6 - sol * 0.25;
+            if (!best || costo < best.costo)
+              best = { deg: rot, dx: tx, dy: ty, cx: cx, cy: cy, costo: costo,
+                       solape: sol, sep: t, wm: wm, wr: wr };
+          });
+        });
+      });
+    });
+    return best;
+  }
+
+  /* 🧩 CALZAR de un toque: para cuando la pieza está colocada por encima
+     pero todavía lejos. Busca más lejos que el imán del arrastre (hasta 10
+     pies) y permite enderezarla hasta 20°. Sigue siendo Edgar quien decide
+     DÓNDE va la pieza; esto solo la deja exacta. */
+  function calzarSel() {
+    if (!selGroup || !selGroup.length) { setHint('Selecciona primero la pieza que quieres calzar'); return; }
+    var pw = partirParedes(selGroup);
+    if (!pw.mv.length) { setHint('🧩 Lo seleccionado no tiene paredes que calzar'); return; }
+    if (!pw.fj.length) { setHint('🧩 No hay ninguna otra pieza puesta con la que calzar'); return; }
+    var c = calcePropuesta(pw.mv, pw.fj, { maxRot: 20, snap: 120 });
+    if (!c) {
+      setHint('🧩 No encuentro con qué calzarla. Acércala más a la pieza vecina (a menos de 10 pies) y vuelve a darle.');
+      return;
+    }
+    pushUndo();
+    aplicarCalce(selGroup, c);
+    refresh(); renderSel();
+    setHint('🧩 Calzada: ' + fmtFtIn(c.solape) + ' de pared en común' +
+      (Math.abs(c.deg) >= 0.1 ? ', enderezada ' + Math.abs(c.deg).toFixed(1) + '°' : '') +
+      '. Ahora 🧲 Soldar las une en una sola pared.');
+  }
+
   function deleteGroup() {
     if (!selGroup) return;
     pushUndo();
@@ -3613,6 +3834,7 @@ window.MAXPOWER_SUPABASE = {
         '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
         '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
         '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>' +
+        '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">🧩 Calzar con lo puesto</button>' +
         '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
@@ -3622,6 +3844,8 @@ window.MAXPOWER_SUPABASE = {
       if (b8) b8.addEventListener('click', function () { rotateGroup(180); });
       var be = $('#prEndG');
       if (be) be.addEventListener('click', function () { straightenRefs(selGroup); });
+      var bc = $('#prCalce');
+      if (bc) bc.addEventListener('click', function () { calzarSel(); });
       return;
     }
     var e = findSel();
@@ -4936,7 +5160,19 @@ window.MAXPOWER_SUPABASE = {
       var idsSel = {};
       selGroup.forEach(function (r) { if (r.kind === 'wall') idsSel[r.id] = 1; });
       var elegidas = state.walls.filter(function (w) { return idsSel[w.id]; });
-      if (elegidas.length >= 2) soloSel = elegidas;
+      if (elegidas.length >= 2) {
+        /* LA COSTURA. Soldar SOLO lo seleccionado dejaba la unión sin tocar:
+           al calzar una pieza queda seleccionada, se pulsa 🧲 y no pasa nada
+           — la pared repetida sigue ahí doble. Medido 28/08: 8 paredes → 8.
+           Por eso al universo se le suman las paredes de al lado (a menos de
+           30"): son justo las de la costura. Lo lejano sigue sin tocarse. */
+        var VEC = 30;
+        var vecinas = state.walls.filter(function (w) {
+          if (idsSel[w.id]) return false;
+          return elegidas.some(function (e) { return segDist(w, e) <= VEC; });
+        });
+        soloSel = elegidas.concat(vecinas);
+      }
     }
     var universo = soloSel || state.walls;
     // FOTO de cómo estaba cada pared antes de tocarla (para el candado)
