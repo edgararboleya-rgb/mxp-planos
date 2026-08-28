@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.H';
+  var APP_VERSION = 'v25.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1489,6 +1489,9 @@ window.MAXPOWER_SUPABASE = {
   window.__viewSet = function (z) { view.z = z; applyView(); };
   window.__marcoMinDbg = function () { return marcoMin(); };
   window.__mdDbg = function (t) { try { return mdMini(t); } catch (e) { return 'EXC ' + e.message; } };
+  window.__aplicaCalceDbg = function (refs, c) { try { aplicarCalce(refs, c); } catch (e) { return 'EXC ' + e.message; } };
+  window.__refreshDbg = function () { try { refresh(); } catch (e) {} };
+  window.__joinsDbg = function () { try { return computeJoins(); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
   var view = { tx: 120, ty: 90, z: 1 };
@@ -5349,10 +5352,139 @@ window.MAXPOWER_SUPABASE = {
     c.scrollTop = c.scrollHeight;
   }
 
+
+  /* ══════════ 🧲 ÓRDENES DE ARMADO POR PALABRAS ══════════
+     Edgar (28/08): "yo le podía decir a usted como asistente de la app
+     'me puedes soldar el master bedroom con el closet' y usted lo hacía
+     correctamente". Se hace AQUÍ, en la app, sin gastar un centavo: es
+     geometría nuestra, no hace falta preguntarle a nadie.
+
+     El chat detecta la orden, busca las dos piezas por su rótulo, calza la
+     chica contra la grande (hasta 10 pies) y suelda SOLO esa costura. */
+  function quitaAcentos(t) {
+    return String(t || '').toUpperCase()
+      .replace(/[ÁÀÄÂ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+      .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N')
+      .replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  // piezas de la hoja, cada una con su rótulo (el texto que le cae dentro)
+  function piezasConNombre() {
+    var W = state.walls;
+    var pad = W.map(function () { return -1; }), np = 0;
+    function toca(a, b) {
+      var pa = [[a.x1, a.y1], [a.x2, a.y2]], pb = [[b.x1, b.y1], [b.x2, b.y2]];
+      for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++)
+        if (Math.hypot(pa[i][0] - pb[j][0], pa[i][1] - pb[j][1]) < 18) return true;
+      return false;
+    }
+    for (var i = 0; i < W.length; i++) {
+      if (pad[i] >= 0) continue;
+      var id = np++, pila = [i]; pad[i] = id;
+      while (pila.length) {
+        var k = pila.pop();
+        for (var j = 0; j < W.length; j++)
+          if (pad[j] < 0 && toca(W[k], W[j])) { pad[j] = id; pila.push(j); }
+      }
+    }
+    var piezas = [];
+    for (var q = 0; q < np; q++) piezas.push({ ws: [], bb: { x1: 1e9, y1: 1e9, x2: -1e9, y2: -1e9 }, noms: [] });
+    W.forEach(function (w, ii) {
+      var pz = piezas[pad[ii]];
+      pz.ws.push(w);
+      pz.bb.x1 = Math.min(pz.bb.x1, w.x1, w.x2); pz.bb.y1 = Math.min(pz.bb.y1, w.y1, w.y2);
+      pz.bb.x2 = Math.max(pz.bb.x2, w.x1, w.x2); pz.bb.y2 = Math.max(pz.bb.y2, w.y1, w.y2);
+    });
+    state.texts.forEach(function (t) {
+      if (!t.text || /SQ FT/i.test(t.text)) return;
+      piezas.forEach(function (pz) {
+        if (t.x >= pz.bb.x1 - 12 && t.x <= pz.bb.x2 + 12 && t.y >= pz.bb.y1 - 12 && t.y <= pz.bb.y2 + 12)
+          pz.noms.push(quitaAcentos(t.text));
+      });
+    });
+    return piezas;
+  }
+  function buscaPieza(piezas, nombre) {
+    var n = quitaAcentos(nombre);
+    if (!n) return null;
+    var hit = null;
+    piezas.forEach(function (pz) {
+      pz.noms.forEach(function (nm) {
+        if (nm === n && !hit) hit = pz;
+      });
+    });
+    if (hit) return hit;
+    piezas.forEach(function (pz) {
+      pz.noms.forEach(function (nm) {
+        if (!hit && (nm.indexOf(n) >= 0 || n.indexOf(nm) >= 0)) hit = pz;
+      });
+    });
+    return hit;
+  }
+  // ¿la frase es una orden de soldar? → {a, b} o null
+  function ordenDeSoldar(q) {
+    var t = quitaAcentos(q);
+    var m = /(?:SUELDA(?:ME)?|SOLDA(?:R|RME|ME)?|SOLDAR|UNE(?:ME)?|UNIR|PEGA(?:ME)?|PEGAR|CALZA(?:ME)?|CALZAR|JUNTA(?:ME)?|JUNTAR)\s+(?:EL |LA |LOS |LAS )?(.+?)\s+(?:CON|AL?|Y)\s+(?:EL |LA |LOS |LAS )?(.+)$/.exec(t);
+    if (!m) return null;
+    return { a: m[1].trim(), b: m[2].trim() };
+  }
+  function soldarPorNombre(nomA, nomB) {
+    var piezas = piezasConNombre();
+    if (piezas.length < 2) return { err: 'Solo veo una pieza en la hoja — no hay nada que soldar con nada.' };
+    var A = buscaPieza(piezas, nomA), B = buscaPieza(piezas, nomB);
+    var vistos = [];
+    piezas.forEach(function (pz) { pz.noms.forEach(function (n) { if (vistos.indexOf(n) < 0) vistos.push(n); }); });
+    if (!A || !B) {
+      var falta = !A ? nomA : nomB;
+      return { err: 'No encuentro ninguna pieza que se llame "' + falta + '".' +
+        (vistos.length ? ' Los rótulos que veo: ' + vistos.join(', ') + '.' : ' Ninguna pieza tiene rótulo — ponles nombre con la herramienta Text.') };
+    }
+    if (A === B) return { err: '"' + nomA + '" y "' + nomB + '" son la misma pieza — ya están unidas.' };
+    // la grande se queda quieta; la chica viene
+    var LA = 0, LB = 0;
+    A.ws.forEach(function (w) { LA += Math.hypot(w.x2 - w.x1, w.y2 - w.y1); });
+    B.ws.forEach(function (w) { LB += Math.hypot(w.x2 - w.x1, w.y2 - w.y1); });
+    var fija = LA >= LB ? A : B, mov = LA >= LB ? B : A;
+    var c = calcePropuesta(mov.ws, fija.ws, { maxRot: 20, snap: 120 });
+    pushUndo();
+    var girada = 0;
+    if (c) {
+      var refs = mov.ws.map(function (w) { return { kind: 'wall', id: w.id }; });
+      aplicarCalce(refs, c);
+      girada = Math.abs(c.deg);
+    }
+    // soldar SOLO esas dos piezas (más las paredes de la costura)
+    selGroup = A.ws.concat(B.ws).map(function (w) { return { kind: 'wall', id: w.id }; });
+    var antesW = state.walls.length, antesA = aberturasVivas().length;
+    window.__weldOK = 1;
+    try { $('#btnWeld').click(); } finally { window.__weldOK = 0; }
+    selGroup = null; renderSel(); showProps();
+    var dW = antesW - state.walls.length, dA = antesA - aberturasVivas().length;
+    refresh(); zoomFit();
+    return {
+      ok: '🧲 Hecho: **' + nomA.toUpperCase() + '** + **' + nomB.toUpperCase() + '**.\n' +
+        (c ? '· Calzadas con ' + fmtFtIn(c.solape) + ' de pared en común' +
+             (girada >= 0.1 ? ', enderecé ' + girada.toFixed(1) + '°' : '') + '\n'
+           : '· Ya estaban pegadas — solo soldé la costura\n') +
+        '· ' + (dW > 0 ? dW + ' pared(es) fundidas en la costura' : 'ninguna pared sobraba') +
+        (dA > 0 ? '\n· ' + dA + ' puerta(s)/ventana(s) repetidas fundidas en una' : '') +
+        '\n\nSi no te gusta cómo quedó: **Ctrl+Z** lo deshace entero.'
+    };
+  }
+
   function chatEnvia() {
     if (chatOcupado) return;
     var t = document.getElementById('chatTxt'), q = (t.value || '').trim();
     if (!q) return;
+    // ¿es una orden de armado? Eso lo hace la app aquí mismo: gratis y exacto
+    var ord = ordenDeSoldar(q);
+    if (ord) {
+      chatMsgs.push({ rol: 'user', txt: q });
+      t.value = '';
+      var res = soldarPorNombre(ord.a, ord.b);
+      chatMsgs.push(res.err ? { rol: 'error', txt: res.err } : { rol: 'claude', txt: res.ok });
+      chatPinta();
+      return;
+    }
     var c = cerebroCfg();
     if (!c.url) { chatMsgs.push({ rol: 'error', txt: 'Falta la dirección del cerebro (⚙ Ajustes en el Asistente).' }); chatPinta(); return; }
 
@@ -5566,6 +5698,7 @@ window.MAXPOWER_SUPABASE = {
     });
     var antes = state.walls.length;
     var trabajo = universo.slice();
+    quitaCabitos(trabajo);
     mergeParallelWalls(trabajo);
     mergeDiagWalls(trabajo);
     bridgeCollinear(trabajo);
@@ -5579,9 +5712,13 @@ window.MAXPOWER_SUPABASE = {
     squareNearAxis(trabajo, 2);
     snapTJunctions(trabajo);
     closeLCorners(trabajo);
+    cierraEsquinasLibres(trabajo);
+    recortaCruces(trabajo);
     weldCorners(trabajo, 8);
     unbendTees(trabajo, 3.5);
     extenderApoyos(trabajo, 10);
+    recortaCruces(trabajo);
+    microSolda(trabajo);
     // 🔒 CANDADO: ninguna pared puede salir DEFORMADA del soldado. Si el
     // imán la giró más de 5°, corrió su centro más de 30" o le cambió el
     // largo más de un 40%, esa pared vuelve exactamente a como estaba.
@@ -5648,20 +5785,71 @@ window.MAXPOWER_SUPABASE = {
     state.openings = state.openings.filter(function (op) {
       return state.walls.some(function (w) { return w.id === op.wallId; });
     });
-    // (c) gemelas: misma pared, mismo tipo y a menos de 8" → se quedan una
+    // (c) gemelas: la MISMA puerta vista desde dos escaneos. Antes solo se
+    // fundían si acabaron en la misma pared — pero la puerta del bedroom y
+    // la del closet viven en DOS paredes (una de cada cuarto) y si esas dos
+    // no llegan a fundirse, la puerta quedaba doble (28/08, foto de Edgar).
+    // Ahora se comparan POR DÓNDE ESTÁN EN EL PLANO: mismo tipo, centros a
+    // menos de 10" y ancho parecido = la misma puerta. Se queda la de la
+    // pared más larga.
     var gemelas = 0;
+    function opMundo(op) {
+      var w = null;
+      for (var i2 = 0; i2 < state.walls.length; i2++) if (state.walls[i2].id === op.wallId) { w = state.walls[i2]; break; }
+      if (!w) return null;
+      var L2 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1;
+      var t2 = op.pos / L2;
+      return { x: w.x1 + (w.x2 - w.x1) * t2, y: w.y1 + (w.y2 - w.y1) * t2, L: L2 };
+    }
+    state.openings.forEach(function (op) { op._m = opMundo(op); });
     state.openings = state.openings.filter(function (op, i) {
-      for (var k = 0; k < i; k++) {
+      if (!op._m) return true;
+      for (var k = 0; k < state.openings.length; k++) {
+        if (k === i) continue;
         var q = state.openings[k];
-        if (q._fuera) continue;
-        if (q.wallId !== op.wallId || q.type !== op.type) continue;
-        if (Math.abs(q.pos - op.pos) > 8 || Math.abs(q.w - op.w) > 12) continue;
-        q.w = Math.max(q.w, op.w);            // se queda la más ancha
-        op._fuera = true; gemelas++;
-        return false;
+        if (q._fuera || op._fuera || !q._m) continue;
+        // una VENTANA solo se funde con otra ventana; todo lo demás (door,
+        // opening, double, pocket…) es un HUECO DE PASO: el mismo hueco
+        // puede venir como 'door' de un escaneo y 'opening' del otro
+        var vent1 = q.type === 'window' || q.type === 'slider';
+        var vent2 = op.type === 'window' || op.type === 'slider';
+        if (vent1 !== vent2) continue;
+        if (Math.hypot(q._m.x - op._m.x, q._m.y - op._m.y) > 12) continue;
+        if (Math.abs(q.w - op.w) > 16) continue;
+        // sobrevive la de la pared más larga (la principal); empate: la primera
+        var soyMenor = op._m.L < q._m.L || (op._m.L === q._m.L && i > k);
+        if (soyMenor) {
+          q.w = Math.max(q.w, op.w);
+          if (q.type === 'opening' && op.type !== 'opening') q.type = op.type;
+          op._fuera = true; gemelas++; return false;
+        }
       }
       return true;
     });
+    state.openings.forEach(function (op) { delete op._m; });
+    // (d) el MISMO paso partido en dos: cada escaneo capturó su mitad de la
+    // entrada y quedan dos huecos borde con borde en la misma pared (medido
+    // 28/08: 35" + 32" pegados = una entrada de ~66"). Pasos (no ventanas)
+    // en la misma pared con hueco de ≤8" entre sí → uno solo que abarca los dos.
+    var unidos = 0;
+    state.openings.forEach(function (op) {
+      if (op._fuera || op.type === 'window' || op.type === 'slider') return;
+      state.openings.forEach(function (q) {
+        if (q === op || q._fuera || op._fuera) return;
+        if (q.type === 'window' || q.type === 'slider') return;
+        if (q.wallId !== op.wallId) return;
+        var a1 = op.pos - op.w / 2, a2 = op.pos + op.w / 2;
+        var b1 = q.pos - q.w / 2, b2 = q.pos + q.w / 2;
+        var hueco = Math.max(a1, b1) - Math.min(a2, b2);   // negativo = se solapan
+        if (hueco > 8) return;
+        var lo = Math.min(a1, b1), hi = Math.max(a2, b2);
+        op.pos = Math.round((lo + hi) / 2); op.w = Math.round(hi - lo);
+        if (op.type === 'opening' && q.type !== 'opening') op.type = q.type;
+        q._fuera = true; unidos++;
+      });
+    });
+    if (unidos) state.openings = state.openings.filter(function (o) { return !o._fuera; });
+    gemelas += unidos;
     // re-tipar por cuartos cerrados: interior (entre 2 cuartos) = drywall,
     // el resto (da a la calle) = block. Si se soldó solo una selección, el
     // re-tipado NO se hace: con media casa en la hoja el "exterior" todavía
@@ -5674,6 +5862,10 @@ window.MAXPOWER_SUPABASE = {
         else { w.type = 'drywall'; w.t = 4.5; }
       });
     }
+    // el candado puede devolver una pared con su micro-desfase de 2-3" en
+    // la punta; volver a micro-soldar es inofensivo (mueve ≤4.5") y sella
+    // el inglete de la esquina
+    microSolda(trabajo);
     limpiaHuerfanas();
     refresh(); refreshCounts();
     setHint('🧲 ' + (soloSel ? 'Soldadas solo las paredes seleccionadas' : 'Armado soldado') + ': ' +
@@ -6352,7 +6544,54 @@ window.MAXPOWER_SUPABASE = {
         // pared buena hacia el vacío — medido +89" — y había que rehacerla.
         var La0 = a2 - a1, Lb0 = b2 - b1;
         var over = Math.min(a2, b2) - Math.max(a1, b1);
-        if (over < 0.92 * Math.min(La0, Lb0)) continue;
+        if (over < 0.92 * Math.min(La0, Lb0)) {
+          /* CORRIDAS (28/08, foto de Edgar): la pared del bedroom y la del
+             closet quedaban DOBLES porque una va corrida ~13" a lo largo —
+             solape del 85%, y el 92% no llegaba. La solución honesta, sin
+             repetir el estirón: la que tiene el tramo doble se RECORTA a lo
+             que le sobra. Nada se estira, lo doble desaparece, y lo que la
+             corta cubría de más se queda como pared de verdad. */
+          var LMIN = Math.min(La0, Lb0);
+          /* A RAS y con 20"+ en común = LA MISMA pared vista por dos
+             escaneos (la izquierda del closet ES la derecha del bedroom).
+             Aquí la unión no es el estirón de antes: las dos son testigos
+             reales del mismo eje (a ≤6" una de otra), la pared de verdad
+             abarca las dos. */
+          if (over >= 20 && Math.abs(axA - axB) <= 6) {
+            var u1 = Math.min(a1, b1), u2 = Math.max(a2, b2);
+            var ejeU = Math.round((axA * La0 + axB * Lb0) / (La0 + Lb0 || 1));
+            if (H) { a.y1 = a.y2 = ejeU; a.x1 = Math.round(u1); a.x2 = Math.round(u2); }
+            else { a.x1 = a.x2 = ejeU; a.y1 = Math.round(u1); a.y2 = Math.round(u2); }
+            if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
+            a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
+            a._fus = true; b._dead = true;
+            continue;
+          }
+          if (over >= 0.55 * LMIN && over > 20) {
+            var corta = La0 <= Lb0 ? a : b, larga = La0 <= Lb0 ? b : a;
+            var c1 = H ? Math.min(corta.x1, corta.x2) : Math.min(corta.y1, corta.y2);
+            var c2 = H ? Math.max(corta.x1, corta.x2) : Math.max(corta.y1, corta.y2);
+            var g1 = H ? Math.min(larga.x1, larga.x2) : Math.min(larga.y1, larga.y2);
+            var g2 = H ? Math.max(larga.x1, larga.x2) : Math.max(larga.y1, larga.y2);
+            var izq = Math.max(0, g1 - c1), der = Math.max(0, c2 - g2);   // lo que la corta asoma
+            var n1, n2;
+            if (izq >= der) { n1 = c1; n2 = Math.min(c2, g1); } else { n1 = Math.max(c1, g2); n2 = c2; }
+            var axL = H ? larga.y1 : larga.x1;      // la corta se alinea al eje de la larga
+            if (n2 - n1 < 12) {
+              // lo que sobra es un pellizco: la LARGA lo absorbe (crece esas
+              // pocas pulgadas, con la corta como testigo) y así la cadena
+              // del cuarto no se rompe — matarla partía el closet en dos
+              if (izq > 0 && izq <= 16) { if (H) { if (larga.x1 < larga.x2) larga.x1 = Math.round(c1); else larga.x2 = Math.round(c1); } else { if (larga.y1 < larga.y2) larga.y1 = Math.round(c1); else larga.y2 = Math.round(c1); } }
+              if (der > 0 && der <= 16) { if (H) { if (larga.x1 > larga.x2) larga.x1 = Math.round(c2); else larga.x2 = Math.round(c2); } else { if (larga.y1 > larga.y2) larga.y1 = Math.round(c2); else larga.y2 = Math.round(c2); } }
+              larga._fus = true;
+              corta._dead = true;
+            }
+            else if (H) { corta.x1 = Math.round(n1); corta.x2 = Math.round(n2); corta.y1 = corta.y2 = axL; corta._fus = true; }
+            else { corta.y1 = Math.round(n1); corta.y2 = Math.round(n2); corta.x1 = corta.x2 = axL; corta._fus = true; }
+            if ((corta.t || 0) > (larga.t || 0)) { larga.type = corta.type; larga.t = corta.t; }
+          }
+          continue;
+        }
         // fusionar. El eje se pondera por LARGO: la pieza grande manda y
         // no se mueve, la chica es la que se acomoda (que es como Edgar
         // arma el rompecabezas). Y se queda el espesor MAYOR.
@@ -6477,6 +6716,190 @@ window.MAXPOWER_SUPABASE = {
   }
   // esquinas en L donde AMBAS paredes se quedan cortas (ninguna alcanza el
   // cuerpo de la otra): se extienden las dos hasta su intersección
+  /* 🔗 MICRO-SOLDADURA: dos puntas a 3-4 pulgadas una de otra no son una
+     esquina, son LA MISMA esquina con ruido (medido 28/08: (351,194) contra
+     (351,197) dejaba un hueco visible y sin inglete). Se llevan al medio. */
+  function microSolda(walls) {
+    var T = 4.5;
+    for (var i = 0; i < walls.length; i++) for (var j = i + 1; j < walls.length; j++) {
+      var a = walls[i], b = walls[j];
+      [['1', '1'], ['1', '2'], ['2', '1'], ['2', '2']].forEach(function (par) {
+        var ax = a['x' + par[0]], ay = a['y' + par[0]];
+        var bx = b['x' + par[1]], by = b['y' + par[1]];
+        var d = Math.hypot(ax - bx, ay - by);
+        if (d < 0.5 || d > T) return;
+        var mx3 = Math.round((ax + bx) / 2), my3 = Math.round((ay + by) / 2);
+        a['x' + par[0]] = mx3; a['y' + par[0]] = my3;
+        b['x' + par[1]] = mx3; b['y' + par[1]] = my3;
+      });
+    }
+  }
+
+  /* 🧹 CABITOS: paredecitas de ≤9" que el escáner deja colgadas en las
+     esquinas (medido 28/08: un cabo de 7" en la entrada del bedroom hacía
+     que la esquina se viera ROTA). Un tramo más corto que un ladrillo con
+     una punta al aire no es una pared: se borra. Si tiene una puerta encima
+     (jamba de verdad) se respeta. */
+  function quitaCabitos(walls) {
+    var CORTO = 9, borrados = 0;
+    function tocada(px, py, quien) {
+      for (var k = 0; k < walls.length; k++) {
+        var o = walls[k];
+        if (o === quien || o._dead) continue;
+        var dx = o.x2 - o.x1, dy = o.y2 - o.y1, L = dx * dx + dy * dy;
+        var t = L ? ((px - o.x1) * dx + (py - o.y1) * dy) / L : 0;
+        t = Math.max(0, Math.min(1, t));
+        if (Math.hypot(px - (o.x1 + dx * t), py - (o.y1 + dy * t)) < 3) return true;
+      }
+      return false;
+    }
+    walls.forEach(function (w) {
+      var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      if (L > CORTO) return;
+      if (state.openings.some(function (o) { return o.wallId === w.id; })) return;
+      var t1 = tocada(w.x1, w.y1, w), t2 = tocada(w.x2, w.y2, w);
+      if (t1 && t2) {
+        // ¿puentecito de verdad, o una ASTILLA montada encima de otra pared?
+        // Si las dos puntas y el medio caen sobre la misma pared, es astilla.
+        var mx2 = (w.x1 + w.x2) / 2, my2 = (w.y1 + w.y2) / 2;
+        var astilla = walls.some(function (o) {
+          if (o === w || o._dead) return false;
+          function dd(px, py) {
+            var dx = o.x2 - o.x1, dy = o.y2 - o.y1, L2 = dx * dx + dy * dy;
+            var t = L2 ? ((px - o.x1) * dx + (py - o.y1) * dy) / L2 : 0;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(px - (o.x1 + dx * t), py - (o.y1 + dy * t));
+          }
+          return dd(w.x1, w.y1) < 4 && dd(w.x2, w.y2) < 4 && dd(mx2, my2) < 4;
+        });
+        if (!astilla) return;            // puente de verdad: se queda
+      }
+      w._dead = true; borrados++;
+    });
+    if (borrados) {
+      var out = walls.filter(function (w) { return !w._dead; });
+      walls.length = 0;
+      out.forEach(function (w) { walls.push(w); });
+    }
+    return borrados;
+  }
+
+  /* ✂️ CRUCES EN X (28/08, foto de Edgar): al soldar el closet contra la
+     diagonal del bedroom, los cabos ATRAVESABAN la esquina y quedaba una X.
+     Si dos paredes se cruzan y a una le sobra un cabito corto (≤14") más
+     allá del cruce, y ese cabo no sostiene nada, se recorta al cruce. */
+  function recortaCruces(walls) {
+    function inter(a, b) {
+      var d1x = a.x2 - a.x1, d1y = a.y2 - a.y1, d2x = b.x2 - b.x1, d2y = b.y2 - b.y1;
+      var den = d1x * d2y - d1y * d2x;
+      if (Math.abs(den) < 1e-6) return null;
+      var t = ((b.x1 - a.x1) * d2y - (b.y1 - a.y1) * d2x) / den;
+      var u = ((b.x1 - a.x1) * d1y - (b.y1 - a.y1) * d1x) / den;
+      if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+      return { x: a.x1 + d1x * t, y: a.y1 + d1y * t, t: t, u: u };
+    }
+    function libre(px, py, quien) {
+      for (var k = 0; k < walls.length; k++) {
+        var o = walls[k];
+        if (o === quien) continue;
+        if (Math.hypot(px - o.x1, py - o.y1) < 3 || Math.hypot(px - o.x2, py - o.y2) < 3) return false;
+      }
+      return true;
+    }
+    var CABO = 14;
+    for (var i = 0; i < walls.length; i++) for (var j = i + 1; j < walls.length; j++) {
+      var a = walls[i], b = walls[j];
+      var q = inter(a, b);
+      if (!q) continue;
+      [{ w: a, t: q.t }, { w: b, t: q.u }].forEach(function (par) {
+        var w = par.w, L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+        var d1 = par.t * L, d2 = (1 - par.t) * L;        // cabo por cada lado
+        if (d1 > 2 && d1 <= CABO && libre(w.x1, w.y1, w)) { w.x1 = Math.round(q.x); w.y1 = Math.round(q.y); }
+        else if (d2 > 2 && d2 <= CABO && libre(w.x2, w.y2, w)) { w.x2 = Math.round(q.x); w.y2 = Math.round(q.y); }
+      });
+    }
+  }
+
+  /* 📐 ESQUINAS EN CUALQUIER ÁNGULO: closeLCorners solo sabe V×H, y esta
+     casa tiene diagonales de verdad. Dos puntas libres cercanas cuyas
+     paredes NO son paralelas se llevan al cruce de sus rectas — solo
+     alargando un poco (≤32"), nunca doblando la pared. */
+  function cierraEsquinasLibres(walls) {
+    /* Afinado tras verlo con los cuartos reales: la 1ª versión creó una PÚA
+       cerrando un vano que era un paso de verdad. Tres frenos:
+       · MAX 22" — por debajo del ancho mínimo de una puerta (24"): un hueco
+         más ancho puede ser un paso real y se deja en paz
+       · el cruce tiene que estar AHÍ MISMO (≤30" de las dos puntas), no en
+         la prolongación lejana de dos rectas casi paralelas
+       · si hay una puerta/abertura viva cerca del hueco, ese hueco es una
+         ENTRADA: no se cierra */
+    var MAX = 22, ALARGA = 30;
+    function d2s(px, py, o) {
+      var dx = o.x2 - o.x1, dy = o.y2 - o.y1, L = dx * dx + dy * dy;
+      var t = L ? ((px - o.x1) * dx + (py - o.y1) * dy) / L : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (o.x1 + dx * t), py - (o.y1 + dy * t));
+    }
+    var eps = [];
+    walls.forEach(function (w) {
+      ['1', '2'].forEach(function (e) {
+        var px = w['x' + e], py = w['y' + e], free = true;
+        for (var k = 0; k < walls.length && free; k++)
+          if (walls[k] !== w && d2s(px, py, walls[k]) < 3) free = false;
+        if (free) eps.push({ w: w, e: e });
+      });
+    });
+    eps.forEach(function (a) {
+      if (a.done) return;
+      var ax = a.w['x' + a.e], ay = a.w['y' + a.e];
+      var best = null, bd = 1e9;
+      eps.forEach(function (b) {
+        if (b === a || b.done || b.w === a.w) return;
+        var d = Math.hypot(ax - b.w['x' + b.e], ay - b.w['y' + b.e]);
+        if (d < bd) { bd = d; best = b; }
+      });
+      if (!best || bd > MAX) return;
+      var b = best;
+      var bx = b.w['x' + b.e], by = b.w['y' + b.e];
+      var d1x = a.w.x2 - a.w.x1, d1y = a.w.y2 - a.w.y1;
+      var d2x = b.w.x2 - b.w.x1, d2y = b.w.y2 - b.w.y1;
+      var den = d1x * d2y - d1y * d2x;
+      var L1 = Math.hypot(d1x, d1y) || 1, L2 = Math.hypot(d2x, d2y) || 1;
+      if (Math.abs(den) / (L1 * L2) < 0.5) return;       // menos de ~30° entre sí: no es esquina
+      var t = ((b.w.x1 - a.w.x1) * d2y - (b.w.y1 - a.w.y1) * d2x) / den;
+      var ix = a.w.x1 + d1x * t, iy = a.w.y1 + d1y * t;
+      // el cruce tiene que estar pegado a las dos puntas — si queda lejos,
+      // esto no es una esquina rota, es otra cosa
+      if (Math.hypot(ix - ax, iy - ay) > 30 || Math.hypot(ix - bx, iy - by) > 30) return;
+      // ¿hay una puerta/abertura viva asomada al hueco? entonces es una entrada
+      var mx = (ax + bx) / 2, my = (ay + by) / 2, entrada = false;
+      state.openings.forEach(function (op) {
+        if (entrada) return;
+        var wo = null;
+        for (var k2 = 0; k2 < state.walls.length; k2++) if (state.walls[k2].id === op.wallId) { wo = state.walls[k2]; break; }
+        if (!wo) return;
+        var Lo = Math.hypot(wo.x2 - wo.x1, wo.y2 - wo.y1) || 1;
+        var to = op.pos / Lo;
+        var ox2 = wo.x1 + (wo.x2 - wo.x1) * to, oy2 = wo.y1 + (wo.y2 - wo.y1) * to;
+        if (Math.hypot(ox2 - mx, oy2 - my) < 36) entrada = true;
+      });
+      if (entrada) return;
+      // cada punta solo puede ALARGARSE hacia el cruce (nunca doblarse hacia atrás)
+      function vale(w, e, px, py) {
+        var ox = e === '1' ? w.x2 : w.x1, oy = e === '1' ? w.y2 : w.y1;
+        var ex = w['x' + e], ey = w['y' + e];
+        var Lw = Math.hypot(ex - ox, ey - oy);
+        var Ln = Math.hypot(px - ox, py - oy);
+        // ni más de ALARGA, ni más del 35% del largo (el candado lo tumbaría)
+        return Ln >= Lw - 2 && Ln - Lw <= Math.min(ALARGA, Lw * 0.35 + 6);
+      }
+      if (!vale(a.w, a.e, ix, iy) || !vale(b.w, b.e, ix, iy)) return;
+      a.w['x' + a.e] = Math.round(ix); a.w['y' + a.e] = Math.round(iy);
+      b.w['x' + b.e] = Math.round(ix); b.w['y' + b.e] = Math.round(iy);
+      a.done = b.done = true;
+    });
+  }
+
   function closeLCorners(walls) {
     var MAX = 32;
     function d2s(px, py, o) {
