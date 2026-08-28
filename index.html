@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.S';
+  var APP_VERSION = 'v24.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4215,7 +4215,24 @@ window.MAXPOWER_SUPABASE = {
   $('#btnWeld').addEventListener('click', function () {
     if (!state.walls.length) { uiAlert('No hay paredes en esta hoja.'); return; }
     pushUndo();
-    state.walls.forEach(function (w) {
+    // Si hay una SELECCIÓN de paredes, se suelda SOLO eso. Con 13 piezas en
+    // la hoja, soldar todo de golpe encadena errores; de dos en dos se ve
+    // lo que pasa y se puede deshacer una sola unión.
+    var soloSel = null;
+    if (selGroup) {
+      var idsSel = {};
+      selGroup.forEach(function (r) { if (r.kind === 'wall') idsSel[r.id] = 1; });
+      var elegidas = state.walls.filter(function (w) { return idsSel[w.id]; });
+      if (elegidas.length >= 2) soloSel = elegidas;
+    }
+    var universo = soloSel || state.walls;
+    // FOTO de cómo estaba cada pared antes de tocarla (para el candado)
+    var foto = {};
+    universo.forEach(function (w) {
+      foto[w.id] = { x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2, type: w.type, t: w.t };
+      delete w._fus;
+    });
+    universo.forEach(function (w) {
       var dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       var dev = Math.abs(Math.atan2(dy, dx) % (Math.PI / 2));
       dev = Math.min(dev, Math.PI / 2 - dev);
@@ -4231,20 +4248,55 @@ window.MAXPOWER_SUPABASE = {
       return { op: op, x: w.x1 + (w.x2 - w.x1) * t, y: w.y1 + (w.y2 - w.y1) * t };
     });
     var antes = state.walls.length;
-    mergeParallelWalls(state.walls);
-    mergeDiagWalls(state.walls);
-    bridgeCollinear(state.walls);
+    var trabajo = universo.slice();
+    mergeParallelWalls(trabajo);
+    mergeDiagWalls(trabajo);
+    bridgeCollinear(trabajo);
     // El orden importa y salió de medirlo: primero se pone TODO a escuadra
     // (así el escalón de 2-3° no llega nunca a la esquina) y solo después
     // se cierran las esquinas. Cerrar es lo último: una esquina abierta se
     // ve, un pelo de grado no.
-    squareNearAxis(state.walls, 3);
-    snapTJunctions(state.walls);
-    weldCorners(state.walls);
-    squareNearAxis(state.walls, 2);
-    snapTJunctions(state.walls);
-    closeLCorners(state.walls);
-    weldCorners(state.walls, 8);
+    squareNearAxis(trabajo, 3);
+    snapTJunctions(trabajo);
+    weldCorners(trabajo);
+    squareNearAxis(trabajo, 2);
+    snapTJunctions(trabajo);
+    closeLCorners(trabajo);
+    weldCorners(trabajo, 8);
+    unbendTees(trabajo, 3.5);
+    extenderApoyos(trabajo, 10);
+    // 🔒 CANDADO: ninguna pared puede salir DEFORMADA del soldado. Si el
+    // imán la giró más de 5°, corrió su centro más de 30" o le cambió el
+    // largo más de un 40%, esa pared vuelve exactamente a como estaba.
+    // (Las que ABSORBIERON a otra crecen a propósito: a esas solo se les
+    // mira el ángulo.) El imán puede arreglar o no hacer nada — romper no.
+    var revertidas = 0;
+    trabajo.forEach(function (w) {
+      var o = foto[w.id];
+      if (!o) return;
+      var L0 = Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
+      var L1 = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      var a0 = Math.atan2(o.y2 - o.y1, o.x2 - o.x1) * 180 / Math.PI;
+      var a1 = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+      var da = Math.abs(a1 - a0) % 360; if (da > 180) da = 360 - da;
+      if (da > 90) da = 180 - da;
+      var mal = da > 5;
+      if (!w._fus) {
+        var mov = Math.hypot((w.x1 + w.x2) / 2 - (o.x1 + o.x2) / 2, (w.y1 + w.y2) / 2 - (o.y1 + o.y2) / 2);
+        if (mov > 30 || Math.abs(L1 - L0) > Math.max(36, L0 * 0.4)) mal = true;
+      }
+      if (mal) {
+        w.x1 = o.x1; w.y1 = o.y1; w.x2 = o.x2; w.y2 = o.y2;
+        w.type = o.type; w.t = o.t;
+        revertidas++;
+      }
+    });
+    if (soloSel) {
+      var vivas = {}; trabajo.forEach(function (x) { vivas[x.id] = 1; });
+      state.walls = state.walls.filter(function (w) { return !foto[w.id] || vivas[w.id]; });
+    } else {
+      state.walls = trabajo;
+    }
     // reconectar aberturas. Tres reglas que salieron de medir el daño:
     //  a) si la pared de siempre sobrevivió y sigue cerca, la puerta NO se
     //     muda a la pared vecina (antes saltaba hasta 10")
@@ -4291,8 +4343,10 @@ window.MAXPOWER_SUPABASE = {
       return true;
     });
     // re-tipar por cuartos cerrados: interior (entre 2 cuartos) = drywall,
-    // el resto (da a la calle) = block
-    var rooms = detectRoomPolys(state.walls);
+    // el resto (da a la calle) = block. Si se soldó solo una selección, el
+    // re-tipado NO se hace: con media casa en la hoja el "exterior" todavía
+    // no se sabe y repintaría de block paredes interiores.
+    var rooms = soloSel ? [] : detectRoomPolys(state.walls);
     if (rooms.length) {
       var ext = rooms[0]._ext;
       state.walls.forEach(function (w) {
@@ -4301,9 +4355,11 @@ window.MAXPOWER_SUPABASE = {
       });
     }
     refresh(); refreshCounts();
-    setHint('🧲 Armado soldado: ' + antes + '→' + state.walls.length + ' paredes, ' + rooms.length +
-      ' cuarto(s) cerrados' + (gemelas ? ', ' + gemelas + ' puerta(s) gemela(s) fundida(s)' : '') +
-      ' · calle=block, interior=drywall · (si una pieza quedó sin pegar, arrástrala y vuelve a soldar)');
+    setHint('🧲 ' + (soloSel ? 'Soldadas solo las paredes seleccionadas' : 'Armado soldado') + ': ' +
+      antes + '→' + state.walls.length + ' paredes' + (soloSel ? '' : ', ' + rooms.length + ' cuarto(s) cerrados') +
+      (gemelas ? ', ' + gemelas + ' puerta(s) gemela(s) fundida(s)' : '') +
+      (revertidas ? ' · 🔒 ' + revertidas + ' pared(es) se dejaron COMO ESTABAN (el imán las deformaba)' : '') +
+      (soloSel ? ' · selecciona otras dos piezas y vuelve a soldar' : ' · consejo: selecciona 2 piezas y suelda de dos en dos'));
   });
 
   $('#btnOv').addEventListener('click', function () {
@@ -4813,6 +4869,68 @@ window.MAXPOWER_SUPABASE = {
       }
     });
   }
+  // 🩹 ÚLTIMO REPASO: una pared que quedó torcida 1-3° porque el soldado le
+  // jaló una punta se vuelve a poner recta DESLIZANDO esa punta sobre la
+  // pared en la que se apoya (así no se despega). Si al enderezarla se
+  // saldría de su apoyo, se deja como está.
+  function unbendTees(walls, tolDeg) {
+    var tol = (tolDeg || 3.5) * Math.PI / 180;
+    function proy(px, py, o) {
+      var dx = o.x2 - o.x1, dy = o.y2 - o.y1, L = dx * dx + dy * dy;
+      var t = L ? ((px - o.x1) * dx + (py - o.y1) * dy) / L : 0;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (o.x1 + dx * t), py - (o.y1 + dy * t));
+    }
+    function apoyo(px, py, w) {
+      var best = null;
+      walls.forEach(function (o) {
+        if (o === w) return;
+        var d = proy(px, py, o);
+        if (d < 4 && (!best || d < best.d)) best = { o: o, d: d };
+      });
+      return best && best.o;
+    }
+    walls.forEach(function (w) {
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy);
+      if (L < 12) return;
+      var ang = Math.atan2(dy, dx);
+      var dH = Math.min(Math.abs(ang), Math.abs(Math.abs(ang) - Math.PI));
+      var dV = Math.abs(Math.abs(ang) - Math.PI / 2);
+      var H = dH <= tol && dH <= dV, V = dV <= tol && dV < dH;
+      if (!H && !V) return;
+      if ((H && dy === 0) || (V && dx === 0)) return;      // ya está recta
+      var h1 = apoyo(w.x1, w.y1, w), h2 = apoyo(w.x2, w.y2, w);
+      var o1 = w.x1, o2 = w.y1, o3 = w.x2, o4 = w.y2;
+      if (H) { var yy = Math.round((w.y1 + w.y2) / 2); w.y1 = yy; w.y2 = yy; }
+      else { var xx = Math.round((w.x1 + w.x2) / 2); w.x1 = xx; w.x2 = xx; }
+      var ok = (!h1 || proy(w.x1, w.y1, h1) < 4.5) && (!h2 || proy(w.x2, w.y2, h2) < 4.5);
+      if (!ok) { w.x1 = o1; w.y1 = o2; w.x2 = o3; w.y2 = o4; }
+    });
+  }
+  // Cerrar el pelo que queda: si una punta se pasó unas pulgadas del final
+  // de la pared en la que se apoya, se ESTIRA esa pared (por su propio eje,
+  // sin torcerla) hasta alcanzarla. Cierra la esquina sin inclinar nada.
+  function extenderApoyos(walls, max) {
+    var MX = max || 10;
+    walls.forEach(function (w) {
+      ['1', '2'].forEach(function (e) {
+        var px = w['x' + e], py = w['y' + e];
+        walls.forEach(function (o) {
+          if (o === w) return;
+          var dx = o.x2 - o.x1, dy = o.y2 - o.y1, L = Math.hypot(dx, dy);
+          if (L < 1) return;
+          var ux = dx / L, uy = dy / L;
+          var t = (px - o.x1) * ux + (py - o.y1) * uy;          // a lo largo
+          var perp = Math.abs((px - o.x1) * uy - (py - o.y1) * ux);
+          if (perp > 3) return;
+          if (t < -MX || t > L + MX) return;
+          if (t >= -0.5 && t <= L + 0.5) return;                // ya toca
+          if (t < 0) { o.x1 = Math.round(o.x1 + ux * t); o.y1 = Math.round(o.y1 + uy * t); }
+          else { o.x2 = Math.round(o.x1 + ux * t); o.y2 = Math.round(o.y1 + uy * t); }
+        });
+      });
+    });
+  }
   function weldCorners(walls, md) {
     // MD 12: los escaneos REALES dejan esquinas a 8-12" (los sintéticos a 2-3)
     var i, j, MD = md || 12;
@@ -4826,7 +4944,19 @@ window.MAXPOWER_SUPABASE = {
     function sp(p, x, y) { if (p.e === 1) { p.w.x1 = x; p.w.y1 = y; } else { p.w.x2 = x; p.w.y2 = y; } }
     var par = eps.map(function (_, k) { return k; });
     function find(k) { while (par[k] !== k) { par[k] = par[par[k]]; k = par[k]; } return k; }
+    // dos paredes PARALELAS que corren separadas no forman una esquina: son
+    // dos T distintas contra la misma pared. Soldarlas en un punto torcía a
+    // las dos (medido 2.4°). Si son paralelas y sus ejes distan más de 6",
+    // cada una se queda con su T.
+    function paralelasSeparadas(A, B) {
+      if (A._o === 'D' || B._o === 'D' || A._o !== B._o) return false;
+      var ejeA = A._o === 'H' ? (A.y1 + A.y2) / 2 : (A.x1 + A.x2) / 2;
+      var ejeB = B._o === 'H' ? (B.y1 + B.y2) / 2 : (B.x1 + B.x2) / 2;
+      return Math.abs(ejeA - ejeB) > 6;
+    }
     for (i = 0; i < eps.length; i++) for (j = i + 1; j < eps.length; j++) {
+      if (eps[i].w === eps[j].w) continue;
+      if (paralelasSeparadas(eps[i].w, eps[j].w)) continue;
       if (Math.hypot(gx(eps[i]) - gx(eps[j]), gy(eps[i]) - gy(eps[j])) < MD) par[find(i)] = find(j);
     }
     var groups = {};
@@ -4868,22 +4998,25 @@ window.MAXPOWER_SUPABASE = {
         var a2 = H ? Math.max(a.x1, a.x2) : Math.max(a.y1, a.y2);
         var b1 = H ? Math.min(b.x1, b.x2) : Math.min(b.y1, b.y2);
         var b2 = H ? Math.max(b.x1, b.x2) : Math.max(b.y1, b.y2);
+        // La corta tiene que estar DENTRO de la larga (92%). Así la
+        // fusionada NUNCA se estira: se queda con el tramo de la larga.
+        // Antes se tomaba la unión y una pieza mal puesta alargaba una
+        // pared buena hacia el vacío — medido +89" — y había que rehacerla.
+        var La0 = a2 - a1, Lb0 = b2 - b1;
         var over = Math.min(a2, b2) - Math.max(a1, b1);
-        // OJO: la unión de las dos extensiones solo vale si de verdad son la
-        // MISMA pared física. Si apenas se rozan, la pared superviviente se
-        // estiraba hacia el vacío (medido: +89") y había que rehacerla.
-        // Se exige que la corta esté casi entera dentro de la larga.
-        if (over < 0.6 * Math.min(a2 - a1, b2 - b1)) continue;
+        if (over < 0.92 * Math.min(La0, Lb0)) continue;
         // fusionar. El eje se pondera por LARGO: la pieza grande manda y
         // no se mueve, la chica es la que se acomoda (que es como Edgar
         // arma el rompecabezas). Y se queda el espesor MAYOR.
-        var La = a2 - a1, Lb = b2 - b1;
+        var La = La0, Lb = Lb0;
         var ax2 = Math.round((axA * La + axB * Lb) / (La + Lb || 1));
-        var lo = Math.min(a1, b1), hi = Math.max(a2, b2);
+        // el tramo es el de la LARGA (la corta ya está dentro)
+        var lo = La >= Lb ? a1 : b1, hi = La >= Lb ? a2 : b2;
         if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
         else { a.x1 = ax2; a.x2 = ax2; a.y1 = lo; a.y2 = hi; }
         if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
         a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
+        a._fus = true;
         b._dead = true;
       }
     }
@@ -4899,7 +5032,7 @@ window.MAXPOWER_SUPABASE = {
   //   1. mismo ángulo (±6°)  2. separación perpendicular ≤ 24"
   //   3. se pisan al menos el 60% de la más corta
   function mergeDiagWalls(walls) {
-    var GAP = 24, MINSOL = 0.6, i, j;
+    var GAP = 24, MINSOL = 0.92, i, j;
     function proyecta(w, px, py) {          // distancia a lo largo de w
       var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
       return ((px - w.x1) * dx + (py - w.y1) * dy) / L;
@@ -4932,14 +5065,11 @@ window.MAXPOWER_SUPABASE = {
         var Ll = Math.hypot(lar.x2 - lar.x1, lar.y2 - lar.y1);
         var sol = Math.min(Ll, c2) - Math.max(0, c1);
         if (sol < MINSOL * Math.min(La, Lb)) continue;
-        // fusionar sobre la recta de la LARGA, extendida a la unión
-        var dx = (lar.x2 - lar.x1) / Ll, dy = (lar.y2 - lar.y1) / Ll;
-        var lo = Math.min(0, c1), hi = Math.max(Ll, c2);
-        var nx1 = Math.round(lar.x1 + dx * lo), ny1 = Math.round(lar.y1 + dy * lo);
-        var nx2 = Math.round(lar.x1 + dx * hi), ny2 = Math.round(lar.y1 + dy * hi);
-        a.x1 = nx1; a.y1 = ny1; a.x2 = nx2; a.y2 = ny2;
+        // fusionar sobre la recta y el TRAMO de la larga (nunca se estira)
+        a.x1 = lar.x1; a.y1 = lar.y1; a.x2 = lar.x2; a.y2 = lar.y2;
         if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
         a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
+        a._fus = true;
         b._dead = true;
       }
     }
@@ -5094,6 +5224,7 @@ window.MAXPOWER_SUPABASE = {
           if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
           else { a.x1 = ax2; a.x2 = ax2; a.y1 = lo; a.y2 = hi; }
           a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
+          a._fus = true;
           b._dead = true;
           changed = true;
         }
