@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.O';
+  var APP_VERSION = 'v25.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1494,6 +1494,17 @@ window.MAXPOWER_SUPABASE = {
   window.__aplicaCalceDbg = function (refs, c) { try { aplicarCalce(refs, c); } catch (e) { return 'EXC ' + e.message; } };
   window.__refreshDbg = function () { try { refresh(); } catch (e) {} };
   window.__joinsDbg = function () { try { return computeJoins(); } catch (e) { return 'EXC ' + e.message; } };
+  window.__sheetDataDbg = function () { try { return sheetData(); } catch (e) { return '{}'; } };
+  // prueba la función REAL de exportar, no una copia: lo que salga aquí es
+  // literalmente lo que se convierte en el PNG y el PDF del inspector
+  window.__exportSvgDbg = function () {
+    try {
+      var c = cleanSvgClone({ x: -100, y: -100, w: 800, h: 600 });
+      return { html: c.outerHTML, guia: !!c.querySelector('#gGuia'),
+               paredes: (c.querySelector('#gWalls') || {}).childElementCount || 0 };
+    } catch (e) { return { err: e.message }; }
+  };
+  window.__loadSheetDbg = function (j) { try { loadSheetData(j); } catch (e) {} };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
   var view = { tx: 120, ty: 90, z: 1 };
@@ -6219,6 +6230,7 @@ window.MAXPOWER_SUPABASE = {
       walls: state.walls, openings: state.openings, symbols: state.symbols,
       texts: state.texts, dims: state.dims, areas: state.areas,
       wires: state.wires, leaders: state.leaders, bg: state.bg, bg2: state.bg2,
+      guia: state.guia, huecos: state.huecos,
       view: { tx: view.tx, ty: view.ty, z: view.z }
     });
   }
@@ -6238,6 +6250,7 @@ window.MAXPOWER_SUPABASE = {
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.bg = o.bg || null;
     state.bg2 = o.bg2 || null;
+    state.guia = o.guia || []; state.huecos = o.huecos || [];
     if (o.view) Object.assign(view, o.view);
     sel = null; selGroup = null; measure = null; drawing = null;
     undoStack.length = 0; redoStack.length = 0;
@@ -8375,7 +8388,10 @@ window.MAXPOWER_SUPABASE = {
   function cleanSvgClone(b) {
     var clone = svg.cloneNode(true);
     clone.removeAttribute('style');
-    ['gGridBase', 'gSel', 'gPreview', 'gMeasure'].forEach(function (id) {
+    // 'gGuia' entra aquí desde la auditoría del 08/29: la guía del survey se
+    // estaba IMPRIMIENDO en el PNG y el PDF, con su rótulo en español encima.
+    // Es una referencia de trabajo, no parte del plano que ve el inspector.
+    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia'].forEach(function (id) {
       var n = clone.querySelector('#' + id);
       if (n) n.parentNode.removeChild(n);
     });
