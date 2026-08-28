@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.K';
+  var APP_VERSION = 'v25.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3065,7 +3065,8 @@ window.MAXPOWER_SUPABASE = {
       if (calceOn && !finoOn(ev)) {
         var pw = partirParedes(drag.refs);
         if (pw.mv.length && pw.mv.length <= 140 && pw.fj.length) {
-          var cc = calcePropuesta(pw.mv, pw.fj);
+          var cc = calcePropuesta(pw.mv, pw.fj,
+            { abMov: aberturasDe(pw.mv), abFij: aberturasDe(pw.fj) });
           if (cc) {
             drag.calce = cc;
             var gg = 3 / view.z;
@@ -3794,6 +3795,20 @@ window.MAXPOWER_SUPABASE = {
       pt2seg(a.x1, a.y1, b.x1, b.y1, b.x2, b.y2), pt2seg(a.x2, a.y2, b.x1, b.y1, b.x2, b.y2),
       pt2seg(b.x1, b.y1, a.x1, a.y1, a.x2, a.y2), pt2seg(b.x2, b.y2, a.x1, a.y1, a.x2, a.y2));
   }
+  // centros en el mundo de las aberturas que viven en estas paredes
+  function aberturasDe(walls) {
+    var ids = {};
+    walls.forEach(function (w) { ids[w.id] = w; });
+    var out = [];
+    state.openings.forEach(function (o) {
+      var w = ids[o.wallId];
+      if (!w) return;
+      var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1;
+      var t = o.pos / L;
+      out.push({ x: w.x1 + (w.x2 - w.x1) * t, y: w.y1 + (w.y2 - w.y1) * t, w: o.w });
+    });
+    return out;
+  }
   function calcePropuesta(mov, fij, opts) {
     opts = opts || {};
     var MAXROT = opts.maxRot == null ? 15 : opts.maxRot;   // giro que se permite
@@ -3864,9 +3879,28 @@ window.MAXPOWER_SUPABASE = {
             var ladoM = (pcm[0] + tx - dr.mx) * nx + (pcm[1] + ty - dr.my) * ny;
             if (Math.abs(ladoF) > 6 && Math.abs(ladoM) > 6 && ladoF * ladoM > 0) return;
             var costo = Math.abs(t) + Math.abs(s) * 0.5 + Math.abs(rot) * 6 - sol * 0.25;
+            /* PUERTAS CARA A CARA: la misma puerta vive en las dos piezas
+               (cada escaneo trae su copia). Un calce que deja dos puertas
+               del mismo ancho una sobre otra es casi seguro EL bueno — vale
+               más que cualquier pista geométrica. Medido 28/08: el ancho de
+               puerta NO sirve para elegir pareja entre 13 piezas (109 de
+               136 pares tienen candidato), pero para DESEMPATAR entre dos
+               posiciones de las MISMAS dos piezas es oro. */
+            var puertasOK = 0;
+            if (opts.abMov && opts.abMov.length && opts.abFij && opts.abFij.length) {
+              opts.abMov.forEach(function (am) {
+                var g2 = gir(am.x, am.y);
+                var gx = g2[0] + tx, gy = g2[1] + ty;
+                opts.abFij.forEach(function (af) {
+                  if (Math.abs(am.w - af.w) > 8) return;
+                  if (Math.hypot(gx - af.x, gy - af.y) < 14) puertasOK++;
+                });
+              });
+              costo -= Math.min(puertasOK, 2) * 60;
+            }
             if (!best || costo < best.costo)
               best = { deg: rot, dx: tx, dy: ty, cx: cx, cy: cy, costo: costo,
-                       solape: sol, sep: t, wm: wm, wr: wr };
+                       solape: sol, sep: t, wm: wm, wr: wr, puertas: puertasOK };
           });
         });
       });
@@ -3878,21 +3912,59 @@ window.MAXPOWER_SUPABASE = {
      pero todavía lejos. Busca más lejos que el imán del arrastre (hasta 10
      pies) y permite enderezarla hasta 20°. Sigue siendo Edgar quien decide
      DÓNDE va la pieza; esto solo la deja exacta. */
+  /* 🔄 CALCE A 4 VIENTOS: la pieza puede venir girada 90/180/270 del
+     escaneo. En vez de obligar a Edgar al ↺90 a mano, se prueba el calce
+     en las 4 orientaciones y gana la de mejor puntaje (con el bonus de
+     puertas cara a cara desempatando). Devuelve {pre, c}: el giro previo
+     y el calce fino encontrado desde ahí. */
+  function calceCuatro(movWs, fijWs, opts) {
+    var cx = 0, cy = 0, tl = 0;
+    movWs.forEach(function (w) {
+      var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      cx += (w.x1 + w.x2) / 2 * L; cy += (w.y1 + w.y2) / 2 * L; tl += L;
+    });
+    if (!tl) return null;
+    cx /= tl; cy /= tl;
+    var abM = aberturasDe(movWs), abF = aberturasDe(fijWs);
+    var mejor = null;
+    [0, 90, 180, 270].forEach(function (pre) {
+      var rad = pre * Math.PI / 180, co = Math.cos(rad), si = Math.sin(rad);
+      function gp(x, y) {
+        var ox = x - cx, oy = y - cy;
+        return [cx + ox * co - oy * si, cy + ox * si + oy * co];
+      }
+      var giradas = movWs.map(function (w) {
+        var a = gp(w.x1, w.y1), b2 = gp(w.x2, w.y2);
+        return { id: w.id, x1: a[0], y1: a[1], x2: b2[0], y2: b2[1] };
+      });
+      var abG = abM.map(function (o) { var g = gp(o.x, o.y); return { x: g[0], y: g[1], w: o.w }; });
+      var o2 = {};
+      for (var k in (opts || {})) o2[k] = opts[k];
+      o2.abMov = abG; o2.abFij = abF;
+      var c = calcePropuesta(giradas, fijWs, o2);
+      if (c && (!mejor || c.costo < mejor.c.costo)) mejor = { pre: pre, c: c, cx: cx, cy: cy };
+    });
+    return mejor;
+  }
+
   function calzarSel() {
     if (!selGroup || !selGroup.length) { setHint('Selecciona primero la pieza que quieres calzar'); return; }
     var pw = partirParedes(selGroup);
     if (!pw.mv.length) { setHint('🧩 Lo seleccionado no tiene paredes que calzar'); return; }
     if (!pw.fj.length) { setHint('🧩 No hay ninguna otra pieza puesta con la que calzar'); return; }
-    var c = calcePropuesta(pw.mv, pw.fj, { maxRot: 20, snap: 120 });
-    if (!c) {
+    var m4 = calceCuatro(pw.mv, pw.fj, { maxRot: 20, snap: 120 });
+    if (!m4) {
       setHint('🧩 No encuentro con qué calzarla. Acércala más a la pieza vecina (a menos de 10 pies) y vuelve a darle.');
       return;
     }
     pushUndo();
-    aplicarCalce(selGroup, c);
+    if (m4.pre) rotateRefs(selGroup, m4.pre, m4.cx, m4.cy);
+    aplicarCalce(selGroup, m4.c);
     refresh(); renderSel();
-    setHint('🧩 Calzada: ' + fmtFtIn(c.solape) + ' de pared en común' +
-      (Math.abs(c.deg) >= 0.1 ? ', enderezada ' + Math.abs(c.deg).toFixed(1) + '°' : '') +
+    setHint('🧩 Calzada: ' + fmtFtIn(m4.c.solape) + ' de pared en común' +
+      (m4.pre ? ', girada ' + m4.pre + '°' : '') +
+      (Math.abs(m4.c.deg) >= 0.1 ? ', enderezada ' + Math.abs(m4.c.deg).toFixed(1) + '°' : '') +
+      (m4.c.puertas ? ' · las puertas casan cara a cara ✓' : '') +
       '. Ahora 🧲 Soldar las une en una sola pared.');
   }
 
@@ -4851,7 +4923,31 @@ window.MAXPOWER_SUPABASE = {
           'Acércalas (selecciona una y arrástrala, o con las flechas del teclado: cada una mueve 1") y vuelve a 🧲 Soldar. ' +
           'Si de verdad son dos paredes distintas de la casa, ignora este aviso.',
         accion: 'Enseñármelas', refs: [{ kind: 'wall', id: par.a.id }, { kind: 'wall', id: par.b.id }],
-        fix: null
+        /* Desde v25.L el aviso también lo ARREGLA: trae la pieza de la
+           pared b hasta la de la pared a con el calce (alcanza 10 pies,
+           prueba las 4 orientaciones, las puertas desempatan) y suelda
+           SOLO esa costura. Ctrl+Z lo deshace entero. */
+        accion2: '🧩 Traerla y soldarla',
+        fix2: function () {
+          var pa = pieza[par.a.id];
+          var movWs = state.walls.filter(function (w) { return pieza[w.id] !== pa; })
+            .filter(function (w) { return pieza[w.id] === pieza[par.b.id]; });
+          var fijWs = state.walls.filter(function (w) { return pieza[w.id] === pa; });
+          if (!movWs.length || !fijWs.length) { setHint('🧩 Ya no encuentro las dos piezas — ¿se soldaron?'); return; }
+          var m4 = calceCuatro(movWs, fijWs, { maxRot: 20, snap: 120 });
+          if (!m4) { setHint('🧩 No les encuentro calce limpio — acércalas un poco a mano.'); return; }
+          pushUndo();
+          var refs = movWs.map(function (w) { return { kind: 'wall', id: w.id }; });
+          if (m4.pre) rotateRefs(refs, m4.pre, m4.cx, m4.cy);
+          aplicarCalce(refs, m4.c);
+          selGroup = refs.concat(fijWs.map(function (w) { return { kind: 'wall', id: w.id }; }));
+          window.__weldOK = 1;
+          try { $('#btnWeld').click(); } finally { window.__weldOK = 0; }
+          selGroup = null; renderSel(); showProps();
+          refresh();
+          setHint('🧩 Traída y soldada: ' + fmtFtIn(m4.c.solape) + ' de pared en común' +
+            (m4.c.puertas ? ' · las puertas casan ✓' : '') + ' — Ctrl+Z si no era ahí.');
+        }
       });
     });
     // ——— 3. direcciones de la casa: cuáles son reales y cuáles ruido ———
@@ -5020,6 +5116,7 @@ window.MAXPOWER_SUPABASE = {
           '<div style="font-size:12px;margin:5px 0;white-space:pre-wrap;line-height:1.45">' + esc(a.txt) + '</div>' +
           '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
           (a.fix ? '<button class="aiFix" data-i="' + i + '" style="padding:5px 12px;border:none;background:' + col + ';color:#fff;border-radius:6px;cursor:pointer;font-size:11.5px;font-weight:700">✔ ' + esc(a.accion) + '</button>' : '') +
+          (a.fix2 ? '<button class="aiFix2" data-i="' + i + '" style="padding:5px 12px;border:none;background:' + col + ';color:#fff;border-radius:6px;cursor:pointer;font-size:11.5px;font-weight:700">' + esc(a.accion2) + '</button>' : '') +
           (a.refs ? '<button class="aiSel" data-i="' + i + '" style="padding:5px 12px;border:1px solid #c9c9c3;background:#fff;border-radius:6px;cursor:pointer;font-size:11.5px">👁 Enseñármelo en el plano</button>' : '') +
           '</div></div>';
       });
@@ -5049,6 +5146,12 @@ window.MAXPOWER_SUPABASE = {
       b.addEventListener('click', function () {
         var a = window.__aiFix[+b.dataset.i];
         if (a && a.fix) { a.fix(); $('#aiModal').hidden = true; setHint('🤖 ' + a.accion + ': hecho — Ctrl+Z lo deshace'); }
+      });
+    });
+    $$('.aiFix2').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = window.__aiFix[+b.dataset.i];
+        if (a && a.fix2) { $('#aiModal').hidden = true; a.fix2(); }
       });
     });
     $$('.aiSel').forEach(function (b) {
@@ -5444,13 +5547,15 @@ window.MAXPOWER_SUPABASE = {
     A.ws.forEach(function (w) { LA += Math.hypot(w.x2 - w.x1, w.y2 - w.y1); });
     B.ws.forEach(function (w) { LB += Math.hypot(w.x2 - w.x1, w.y2 - w.y1); });
     var fija = LA >= LB ? A : B, mov = LA >= LB ? B : A;
-    var c = calcePropuesta(mov.ws, fija.ws, { maxRot: 20, snap: 120 });
+    var m4 = calceCuatro(mov.ws, fija.ws, { maxRot: 20, snap: 120 });
+    var c = m4 && m4.c;
     pushUndo();
     var girada = 0;
     if (c) {
       var refs = mov.ws.map(function (w) { return { kind: 'wall', id: w.id }; });
+      if (m4.pre) rotateRefs(refs, m4.pre, m4.cx, m4.cy);
       aplicarCalce(refs, c);
-      girada = Math.abs(c.deg);
+      girada = Math.abs(c.deg) + (m4.pre || 0);
     }
     // soldar SOLO esas dos piezas (más las paredes de la costura)
     selGroup = A.ws.concat(B.ws).map(function (w) { return { kind: 'wall', id: w.id }; });
@@ -5463,7 +5568,8 @@ window.MAXPOWER_SUPABASE = {
     return {
       ok: '🧲 Hecho: **' + nomA.toUpperCase() + '** + **' + nomB.toUpperCase() + '**.\n' +
         (c ? '· Calzadas con ' + fmtFtIn(c.solape) + ' de pared en común' +
-             (girada >= 0.1 ? ', enderecé ' + girada.toFixed(1) + '°' : '') + '\n'
+             (girada >= 0.1 ? ', giré ' + girada.toFixed(1) + '°' : '') +
+             (c.puertas ? ' · las puertas casan cara a cara ✓' : '') + '\n'
            : '· Ya estaban pegadas — solo soldé la costura\n') +
         '· ' + (dW > 0 ? dW + ' pared(es) fundidas en la costura' : 'ninguna pared sobraba') +
         (dA > 0 ? '\n· ' + dA + ' puerta(s)/ventana(s) repetidas fundidas en una' : '') +
