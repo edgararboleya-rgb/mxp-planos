@@ -1233,7 +1233,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.Y';
+  var APP_VERSION = 'v24.Z';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4300,6 +4300,53 @@ window.MAXPOWER_SUPABASE = {
      Medido en los escaneos de Caroline: bedroom_2 −18.5° → queda a
      escuadra; Master Bedroom −2° y su corte real de 45° SE RESPETA;
      bedroom_1 (que estaba bien) no se toca. Largos: 0.00" de cambio. */
+  /* ⚠️ CORRECCIÓN IMPORTANTE (08/28, tras medirlo en los 13 escaneos):
+     los ángulos de 19-21° que se estaban marcando como DERIVA del sensor son
+     ESQUINAS REALES de la casa de Caroline. La prueba: en bedroom_2,
+     living/dining y Kitchen, las paredes de ese segundo grupo son
+     perpendiculares ENTRE SÍ y se tocan formando esquina. La deriva es un
+     giro que se acumula: reparte las paredes de cualquier manera y NUNCA
+     produce un par perpendicular y pegado. Edgar ya lo había dicho: "esta
+     casa tiene muchas esquinas y diagonales, no es una casa de paredes
+     rectas". Así que:
+       · un grupo COHERENTE (perpendicular consigo mismo + pegado) = la casa
+         es así, y no se toca jamás
+       · el ruido de verdad son los 1-4° de cada pared respecto a SU grupo
+     Rectificar limpia ESO: lleva cada pared al ángulo exacto de su propio
+     grupo. Los cantos reales de la casa se quedan donde están. */
+  function gruposDir(W) {
+    var gr = [];
+    W.slice().sort(function (a, b) { return largo(b) - largo(a); }).forEach(function (w) {
+      if (largo(w) < 10) return;
+      var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
+      var g = null;
+      for (var i = 0; i < gr.length; i++) if (dist90(gr[i].a, t) < 8) { g = gr[i]; break; }
+      if (!g) { g = { a: t, L: 0, ws: [] }; gr.push(g); }
+      // media circular en el espacio mod 90 (para no promediar 89° con 1°)
+      var d = t - g.a;
+      while (d > 45) d -= 90;
+      while (d < -45) d += 90;
+      g.a = ((g.a + d * largo(w) / (g.L + largo(w))) % 90 + 90) % 90;
+      g.L += largo(w); g.ws.push(w);
+    });
+    gr.sort(function (a, b) { return b.L - a.L; });
+    return gr;
+  }
+  // ¿este grupo es una esquina REAL de la casa o ruido suelto?
+  function grupoCoherente(g) {
+    if (g.ws.length < 2) return false;
+    for (var i = 0; i < g.ws.length; i++) for (var j = i + 1; j < g.ws.length; j++) {
+      var A = g.ws[i], B = g.ws[j];
+      var d = Math.abs(Math.atan2(A.y2 - A.y1, A.x2 - A.x1) - Math.atan2(B.y2 - B.y1, B.x2 - B.x1)) * 180 / Math.PI % 180;
+      d = Math.min(d, 180 - d);
+      if (Math.abs(d - 90) > 6) continue;                 // no son perpendiculares entre sí
+      var dd = Math.min(
+        Math.hypot(A.x1 - B.x1, A.y1 - B.y1), Math.hypot(A.x1 - B.x2, A.y1 - B.y2),
+        Math.hypot(A.x2 - B.x1, A.y2 - B.y1), Math.hypot(A.x2 - B.x2, A.y2 - B.y2));
+      if (dd < 24) return true;                            // perpendiculares Y pegadas = esquina
+    }
+    return false;
+  }
   function familiasDir(W) {
     var bins = [], i;
     for (i = 0; i < 180; i++) bins[i] = 0;          // medio grado
@@ -4412,12 +4459,8 @@ window.MAXPOWER_SUPABASE = {
       var bx = f ? w.x1 : w.x2, by = f ? w.y1 : w.y2;
       var L = Math.hypot(bx - ax, by - ay);
       var a = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
-      var t = ((a % 90) + 90) % 90, best = null;
-      dest.forEach(function (d) {
-        var dd = dist90(t, d.origen);
-        if (!best || dd < best.dd) best = { dd: dd, d: d };
-      });
-      var corr = (best && best.dd <= 14 && Math.abs(best.d.corr) <= 25) ? best.d.corr : 0;
+      var corr = w._corr || 0;
+      if (f) corr = -corr;                       // la pared va al revés en el circuito
       pasos.push({ L: L, a: (a + corr) * Math.PI / 180 });
     }
     // encadenar desde el punto de partida original.
@@ -4451,31 +4494,61 @@ window.MAXPOWER_SUPABASE = {
   function rectificarYcerrar(W) {
     var L0 = {};
     W.forEach(function (w) { if (!w.id) w.id = uid(); L0[w.id] = largo(w); });
-    var fams = familiasDir(W);
-    if (!fams.length) return null;
-    var base = fams[0].a;
-    var dest = fams.map(function (f) {
-      var d = f.a - base;
-      while (d > 45) d -= 90;
-      while (d < -45) d += 90;
-      var k = Math.round(d / 45);
-      return { origen: f.a, sep: d, corr: k * 45 - d };
+    var gr = gruposDir(W);
+    if (!gr.length) return null;
+    var info = gr.map(function (g) {
+      return { a: g.a, ft: g.L / 12, n: g.ws.length, real: grupoCoherente(g),
+               sep: dist90(g.a, gr[0].a) };
     });
-    var maxC = 0;
-    dest.forEach(function (d) { maxC = Math.max(maxC, Math.abs(d.corr)); });
-    if (maxC < 1.2) return { fams: fams, dest: dest, girada: 0, maxG: 0, yaEstaba: true, maxDL: 0, bucles: 0 };
-    // se rectifica CADA circuito cerrado por separado
-    var usadas = {}, bucles = 0, cierreMax = 0, perimTot = 0, tocadas = 0, ciclo;
-    while ((ciclo = cadenaCerrada(W, usadas))) {
-      var res = null;
-      for (var it = 0; it < 3; it++) res = rectificarBucle(ciclo, dest);
-      bucles++; tocadas += ciclo.length;
-      if (res && res.cierre > cierreMax) { cierreMax = res.cierre; perimTot = res.perim; }
-    }
+    // ¿hay algo que limpiar? el ruido es lo que cada pared se aparta de SU grupo
+    var maxRuido = 0;
+    gr.forEach(function (g) {
+      g.ws.forEach(function (w) {
+        var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
+        maxRuido = Math.max(maxRuido, dist90(t, g.a));
+      });
+    });
+    if (maxRuido < 0.6) return { grupos: info, girada: 0, maxG: 0, yaEstaba: true, maxDL: 0, bucles: 0 };
+    // cada pared al ángulo exacto de su grupo (giros de 1-4°, nada violento)
+    var dest = gr.map(function (g) { return { origen: g.a, corr: 0, exacto: g.a }; });
+    var tocadas = 0, maxG = 0;
+    gr.forEach(function (g) {
+      g.ws.forEach(function (w) {
+        var a = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+        var t = ((a % 90) + 90) % 90;
+        var d = g.a - t;
+        while (d > 45) d -= 90;
+        while (d < -45) d += 90;
+        if (Math.abs(d) < 0.05 || Math.abs(d) > 8) return;
+        w._corr = d; tocadas++; maxG = Math.max(maxG, Math.abs(d));
+      });
+    });
+    if (!tocadas) return { grupos: info, girada: 0, maxG: 0, yaEstaba: true, maxDL: 0, bucles: 0 };
+    // Las correcciones son de 1-5°: girando cada pared sobre su punto medio
+    // los extremos se mueven pulgadas, no pies. Así se conserva EXACTO el
+    // largo de cada pared — que es el dato bueno del sensor — y después una
+    // soldadura suave vuelve a juntar las esquinas.
+    W.forEach(function (w) {
+      if (!w._corr) return;
+      var giro = w._corr * Math.PI / 180;
+      var a0 = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) + giro;
+      var l = largo(w) / 2, mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+      w.x1 = Math.round(mx - Math.cos(a0) * l); w.y1 = Math.round(my - Math.sin(a0) * l);
+      w.x2 = Math.round(mx + Math.cos(a0) * l); w.y2 = Math.round(my + Math.sin(a0) * l);
+    });
+    snapTJunctions(W); weldCorners(W, 10); unbendTees(W, 3.5);
+    // el largo medido manda: se le devuelve a cada pared el suyo
+    W.forEach(function (w) {
+      var l0 = L0[w.id], l = largo(w);
+      delete w._corr;
+      if (!l0 || !l || Math.abs(l - l0) < 0.6) return;
+      var mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2, k = l0 / l;
+      w.x1 = Math.round(mx + (w.x1 - mx) * k); w.y1 = Math.round(my + (w.y1 - my) * k);
+      w.x2 = Math.round(mx + (w.x2 - mx) * k); w.y2 = Math.round(my + (w.y2 - my) * k);
+    });
     var maxDL = 0;
     W.forEach(function (w) { if (L0[w.id]) maxDL = Math.max(maxDL, Math.abs(largo(w) - L0[w.id])); });
-    return { fams: fams, dest: dest, girada: tocadas, maxG: maxC, maxDL: maxDL,
-             bucles: bucles, cierre: cierreMax, perim: perimTot };
+    return { grupos: info, girada: tocadas, maxG: maxG, maxDL: maxDL };
   }
 
   function analizarPlano() {
@@ -4567,73 +4640,66 @@ window.MAXPOWER_SUPABASE = {
         fix: null
       });
     });
-    // ——— 3. paredes que DIVERGEN: el escaneo derivó ———
-    var divergen = [];
-    for (i = 0; i < W.length; i++) for (j = i + 1; j < W.length; j++) {
-      var p = W[i], q = W[j];
-      if (largo(p) < 100 || largo(q) < 100) continue;
-      var ap = Math.atan2(p.y2 - p.y1, p.x2 - p.x1) * 180 / Math.PI;
-      var aq = Math.atan2(q.y2 - q.y1, q.x2 - q.x1) * 180 / Math.PI;
-      var d = Math.abs(ap - aq) % 180; if (d > 90) d = 180 - d;
-      if (d < 6 || d > 30) continue;               // paralelas o esquina real
-      // deberían ser paralelas: los dos muros largos de un mismo cuarto
-      var cxp = (p.x1 + p.x2) / 2, cyp = (p.y1 + p.y2) / 2;
-      var cxq = (q.x1 + q.x2) / 2, cyq = (q.y1 + q.y2) / 2;
-      var dist = Math.hypot(cxp - cxq, cyp - cyq);
-      if (dist > Math.max(largo(p), largo(q)) * 1.1) continue;
-      divergen.push({ a: p, b: q, d: d });
-      if (divergen.length > 40) break;
-    }
-    divergen.sort(function (x, y) { return y.d - x.d; });
-    divergen.slice(0, 3).forEach(function (par) {
+    // ——— 3. direcciones de la casa: cuáles son reales y cuáles ruido ———
+    // (esto se corrigió el 08/28: los ángulos de 19-21° de la casa de
+    //  Caroline NO son deriva del sensor, son esquinas de verdad. Se
+    //  distinguen porque sus paredes son perpendiculares entre sí y se
+    //  tocan. Ver gruposDir/grupoCoherente.)
+    var gr = gruposDir(W);
+    var ruido = 0, maxRu = 0;
+    gr.forEach(function (g) {
+      g.ws.forEach(function (w) {
+        var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
+        var d = dist90(t, g.a);
+        if (d > 0.6) { ruido++; maxRu = Math.max(maxRu, d); }
+      });
+    });
+    if (gr.length > 1) {
+      var lin = gr.map(function (g, i) {
+        return '   • ' + Math.round(g.L / 12) + ' ft de pared a ' + g.a.toFixed(0) + '°' +
+          (i ? ' (a ' + dist90(g.a, gr[0].a).toFixed(0) + '° de la principal) — ' +
+            (grupoCoherente(g) ? 'ESQUINA REAL de la casa: no se toca' : 'suelto, puede ser ruido') : ' — dirección principal');
+      });
+      var sueltos2 = gr.filter(function (g, i) { return i && !grupoCoherente(g); });
       av.push({
-        sev: 0, tit: 'Dos muros largos se abren ' + par.d.toFixed(0) + '° entre sí',
-        txt: 'Miden ' + fmtFtIn(largo(par.a)) + ' y ' + fmtFtIn(largo(par.b)) + ' y en vez de ir paralelos se abren como un embudo. ' +
-          'Eso NO es una casa torcida: el escaneo DERIVÓ en ese cuarto (gabinetes, reflejos, se caminó rápido).\n\n' +
-          'NO hace falta que lo repitas. El sensor mide bien los LARGOS (cada pared la mide en segundos); lo que se le ' +
-          'va es el ÁNGULO entre paredes tomadas con minutos de diferencia. 🔧 Rectificar agrupa las paredes por dirección y ' +
-          'lleva cada grupo a 90° o 45° exactos SIN cambiarle el largo a ninguna — como cierra una poligonal un topógrafo. ' +
-          'Los cortes de 45° de verdad se respetan.\n\n' +
-          'Míralo antes y después: si no te convence, Ctrl+Z. Si el plano te queda raro, entonces sí repite el cuarto.',
-        accion: '🔧 Rectificarlo sin repetir el escaneo',
-        refs: [{ kind: 'wall', id: par.a.id }, { kind: 'wall', id: par.b.id }],
+        sev: sueltos2.length ? 1 : 2,
+        tit: 'Esta parte de la casa tiene ' + gr.length + ' direcciones',
+        txt: lin.join('\n') + '\n\n' +
+          (sueltos2.length
+            ? 'Los grupos marcados como "suelto" son paredes que no forman esquina con nadie a ese ángulo: ' +
+              'ésas sí pueden ser ruido del escáner.'
+            : 'Todas son esquinas de verdad. La casa es así — no hay nada que arreglar en los ángulos.'),
+        accion: null, refs: null, fix: null
+      });
+    }
+    if (ruido) {
+      av.push({
+        sev: 2,
+        tit: ruido + ' pared(es) se apartan hasta ' + maxRu.toFixed(1) + '° de su propia dirección',
+        txt: 'Cada pared debería ir EXACTA en la dirección de su grupo, y estas se van uno o dos grados. ' +
+          'Eso sí es ruido del sensor.\n\n🔧 Rectificar las lleva al ángulo exacto de su grupo SIN cambiarles el largo ' +
+          'y SIN tocar los ángulos reales de la casa (los cantos de 19° o de 45° se quedan donde están).',
+        accion: '🔧 Rectificar (llevar cada pared a su dirección)',
+        refs: null,
         fix: function () {
           pushUndo();
           var r = rectificarYcerrar(state.walls);
           refresh();
           if (!r) { setHint('🔧 No pude agrupar las direcciones de este plano.'); return; }
-          if (r.yaEstaba) { setHint('🔧 Este plano ya está a escuadra — no le toqué nada.'); return; }
-          if (!r.bucles) {
-            uiAlert('🔧 No pude rectificarlo automáticamente.\n\n' +
-              'Para cuadrar un cuarto hay que recorrer su circuito completo de paredes, y en éste las paredes ' +
-              'no cierran un circuito (faltan tramos o hay huecos grandes).\n\n' +
-              'Lo que SÍ funciona siempre y no obliga a repetir el escaneo:\n' +
-              '1. Mide con la cinta DOS paredes largas de ese cuarto.\n' +
-              '2. Selecciona cada una y escribe la medida real en 📏 (aquí abajo).\n' +
-              '3. Vuelve a darle a 🔧 Rectificar.\n\n' +
-              'Con dos medidas de verdad el cuarto queda exacto.');
-            return;
-          }
-          var ratio = Math.round(r.perim / Math.max(0.1, r.cierre));
-          var bien = r.maxDL <= 4;
+          if (r.yaEstaba) { setHint('🔧 Ya está todo en su dirección — no toqué nada.'); return; }
+          var dirs = r.grupos.map(function (g) {
+            return Math.round(g.ft) + 'ft@' + g.a.toFixed(0) + '°' + (g.real && g.sep > 1 ? ' (real)' : '');
+          }).join(' · ');
           uiAlert('🔧 RECTIFICADO\n\n' +
-            '· ' + r.girada + ' pared(es) en ' + r.bucles + ' circuito(s) cerrado(s)\n' +
-            '· giro máximo aplicado: ' + r.maxG.toFixed(1) + '°\n' +
-            '· los largos cambiaron como mucho ' + r.maxDL.toFixed(1) + '"\n' +
-            '· cierre del circuito: 1:' + ratio + '\n\n' +
-            (bien
-              ? '✅ Buen resultado: el cuarto se cuadró casi sin tocar las medidas. Puedes fiarte.'
-              : '⚠️ OJO: para cuadrarlo hubo que cambiar largos hasta ' + r.maxDL.toFixed(1) + '".\n' +
-                'Eso significa que las medidas de ese escaneo NO cuadran entre sí — no es que falte un ' +
-                'algoritmo, es que falta información. Ningún programa puede inventarla.\n\n' +
-                'La solución de verdad, sin repetir el escaneo:\n' +
-                '1. Mide con la cinta las DOS paredes largas del cuarto.\n' +
-                '2. Selecciona cada una y escribe la medida real en 📏 (aquí abajo).\n' +
-                'Con dos medidas buenas el cuarto queda exacto para el permit.') +
-            '\n\nSi no te gusta cómo quedó: Ctrl+Z.');
+            '· ' + r.girada + ' pared(es) llevadas al ángulo exacto de su grupo\n' +
+            '· corrección máxima: ' + r.maxG.toFixed(1) + '°\n' +
+            '· los largos cambiaron como mucho ' + r.maxDL.toFixed(1) + '"\n\n' +
+            'Direcciones de la casa (SE CONSERVAN):\n   ' + dirs + '\n\n' +
+            'Los cantos reales de la casa no se tocaron: solo se le quitó a cada pared el pelo de ' +
+            'grado que el escáner le metió.\n\nSi no te gusta: Ctrl+Z.');
         }
       });
-    });
+    }
     // ——— 4. extremos sueltos cerca de otra pared ———
     var sueltos = [];
     W.forEach(function (w) {
