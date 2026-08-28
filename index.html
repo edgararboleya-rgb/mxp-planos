@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.Q';
+  var APP_VERSION = 'v24.R';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1583,6 +1583,14 @@ window.MAXPOWER_SUPABASE = {
     }
     var gs = 6; // rejilla de 6"
     return [Math.round(p[0] / gs) * gs, Math.round(p[1] / gs) * gs];
+  }
+  // 🐢 MODO FINO (Alt/Option apretado): la pieza se mueve MUCHO menos de lo
+  // que corre el mouse y se apaga el imán de la rejilla — para cuadrar al
+  // cuarto de pulgada sin que se vaya de un salto
+  var FINO = 0.15;
+  function finoOn(ev) { return !!(ev && ev.altKey); }
+  function finoPt(ev, start, ox, oy, p) {
+    return [ox + (p[0] - start[0]) * FINO, oy + (p[1] - start[1]) * FINO];
   }
   // con Shift: bloquea a horizontal o vertical exacto desde el punto inicial
   function orthoLock(a, b) {
@@ -2795,8 +2803,8 @@ window.MAXPOWER_SUPABASE = {
       var w = findSel();
       if (w) {
         var hr = 8 / view.z + 3;
-        if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < hr) { drag = { mode: 'endpoint', wall: w, end: 1, snap: snapshot(), moved: false }; return; }
-        if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < hr) { drag = { mode: 'endpoint', wall: w, end: 2, snap: snapshot(), moved: false }; return; }
+        if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < hr) { drag = { mode: 'endpoint', wall: w, end: 1, start: p, ox: w.x1, oy: w.y1, snap: snapshot(), moved: false }; return; }
+        if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < hr) { drag = { mode: 'endpoint', wall: w, end: 2, start: p, ox: w.x2, oy: w.y2, snap: snapshot(), moved: false }; return; }
       }
     }
     // asas de extremos de una medida/cota seleccionada
@@ -2806,8 +2814,8 @@ window.MAXPOWER_SUPABASE = {
         var dLen = Math.hypot(dsel.x2 - dsel.x1, dsel.y2 - dsel.y1);
         // el asa nunca se come más de un tercio de la medida: el centro queda libre para mover
         var dhr2 = Math.min((document.body.classList.contains('touch') ? 14 : 8) / view.z + 3, dLen / 3);
-        if (Math.hypot(p[0] - dsel.x1, p[1] - dsel.y1) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 1, snap: snapshot(), moved: false }; return; }
-        if (Math.hypot(p[0] - dsel.x2, p[1] - dsel.y2) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 2, snap: snapshot(), moved: false }; return; }
+        if (Math.hypot(p[0] - dsel.x1, p[1] - dsel.y1) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 1, start: p, ox: dsel.x1, oy: dsel.y1, snap: snapshot(), moved: false }; return; }
+        if (Math.hypot(p[0] - dsel.x2, p[1] - dsel.y2) < dhr2) { drag = { mode: 'dimEnd', dim: dsel, end: 2, start: p, ox: dsel.x2, oy: dsel.y2, snap: snapshot(), moved: false }; return; }
       }
     }
     // asas de jamba: agrandar / achicar una puerta o ventana arrastrando su borde
@@ -2893,6 +2901,7 @@ window.MAXPOWER_SUPABASE = {
     if (drag.mode === 'groupmove') {
       drag.moved = true;
       var gdx = p[0] - drag.start[0], gdy = p[1] - drag.start[1];
+      if (finoOn(ev)) { gdx *= FINO; gdy *= FINO; setHint('🐢 Fino (Alt): el grupo se mueve poquito a poquito'); }
       if (wantOrtho(ev)) { if (Math.abs(gdx) >= Math.abs(gdy)) gdy = 0; else gdx = 0; }
       applyGroupDelta(drag.items, gdx, gdy);
       renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
@@ -2925,7 +2934,8 @@ window.MAXPOWER_SUPABASE = {
       applyView(); return;
     }
     if (drag.mode === 'endpoint') {
-      var np = snapWallPt(p);
+      // Alt = fino: sin imán y a paso corto; sin Alt, el imán de siempre
+      var np = finoOn(ev) ? finoPt(ev, drag.start, drag.ox, drag.oy, p) : snapWallPt(p);
       // con SHIFT (o el botón ∟ 90°) la pared no se puede inclinar: queda
       // recta respecto al extremo que se queda quieto
       var anc = drag.end === 1 ? [drag.wall.x2, drag.wall.y2] : [drag.wall.x1, drag.wall.y1];
@@ -2933,14 +2943,18 @@ window.MAXPOWER_SUPABASE = {
       if (drag.end === 1) { drag.wall.x1 = np[0]; drag.wall.y1 = np[1]; }
       else { drag.wall.x2 = np[0]; drag.wall.y2 = np[1]; }
       drag.moved = true;
-      if (wantOrtho(ev)) setHint('∟ Shift: pared recta · ' + fmtFtIn(Math.hypot(drag.wall.x2 - drag.wall.x1, drag.wall.y2 - drag.wall.y1)));
+      var eLen = fmtFtIn(Math.hypot(drag.wall.x2 - drag.wall.x1, drag.wall.y2 - drag.wall.y1));
+      if (finoOn(ev)) setHint('🐢 Fino (Alt) · largo ' + eLen + (wantOrtho(ev) ? ' · ∟ recto' : ''));
+      else if (wantOrtho(ev)) setHint('∟ Shift: pared recta · ' + eLen);
       renderWalls(); renderSel(); return;
     }
     if (drag.mode === 'dimEnd') {
       var od = drag.dim;
       var anchor = drag.end === 1 ? [od.x2, od.y2] : [od.x1, od.y1];
+      // Alt = fino (paso corto, sin enderezar solo)
+      var praw = finoOn(ev) ? finoPt(ev, drag.start, drag.ox, drag.oy, p) : p;
       // se endereza solo si va casi recto; con SHIFT el candado es total
-      var dp = wantOrtho(ev) ? orthoLock(anchor, p) : orthoSnap(anchor, p);
+      var dp = wantOrtho(ev) ? orthoLock(anchor, praw) : (finoOn(ev) ? praw : orthoSnap(anchor, praw));
       if (drag.end === 1) { od.x1 = dp[0]; od.y1 = dp[1]; }
       else { od.x2 = dp[0]; od.y2 = dp[1]; }
       drag.moved = true;
@@ -2979,6 +2993,7 @@ window.MAXPOWER_SUPABASE = {
     if (drag.mode === 'move') {
       var dx = p[0] - drag.start[0], dy = p[1] - drag.start[1];
       if (Math.hypot(dx, dy) < 2 / view.z) return;
+      if (finoOn(ev)) { dx *= FINO; dy *= FINO; setHint('🐢 Fino (Alt): se mueve poquito a poquito'); }
       // con SHIFT (o ∟ 90°) la pieza se corre en línea recta: o de lado
       // o de arriba abajo, nunca en diagonal
       if (wantOrtho(ev)) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
@@ -3480,6 +3495,36 @@ window.MAXPOWER_SUPABASE = {
     };
     return true;
   }
+  // ⬅➡⬆⬇ EMPUJONCITO: mueve la selección una medida EXACTA con las flechas
+  function moveRefs(refs, dx, dy) {
+    (refs || []).forEach(function (r) {
+      var e = entityOf(r);
+      if (!e) return;
+      if (r.kind === 'opening') {
+        var w = state.walls.find(function (x) { return x.id === e.wallId; });
+        if (!w) return;
+        var g = wallGeom(w);
+        var t = (dx * (w.x2 - w.x1) + dy * (w.y2 - w.y1)) / (g.len || 1);
+        e.pos = Math.max(e.w / 2, Math.min(g.len - e.w / 2, e.pos + t));
+        return;
+      }
+      if (e.pts) e.pts = e.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
+      else if (e.x1 != null) { e.x1 += dx; e.y1 += dy; e.x2 += dx; e.y2 += dy; }
+      else if (e.x != null) {
+        e.x += dx; e.y += dy;
+        if (e.tx != null) { e.tx += dx; e.ty += dy; }
+      }
+    });
+  }
+  function nudgeSel(dx, dy, step) {
+    var refs = selGroup || (sel ? [sel] : null);
+    if (!refs || !refs.length) return false;
+    pushUndo();
+    moveRefs(refs, dx * step, dy * step);
+    refresh(); renderSel();
+    setHint('⬌ Movido ' + fmtFtIn(step) + ' — flechas = 1" · Shift+flecha = 1 pie · Alt+flecha = 1/4"');
+    return true;
+  }
   function rotateGroup(deg) {
     if (!selGroup) return;
     pushUndo();
@@ -3548,6 +3593,10 @@ window.MAXPOWER_SUPABASE = {
       });
       html += '</select></div>';
       html += '<div class="row"><label>Largo</label><input id="prWallLen" value="' + fmtFtIn(g.len) + '"></div>';
+      // ángulo exacto (para cuadrar sin pelear con el mouse; en el iPad es
+      // la forma más precisa: escribes 0 y la pared queda recta)
+      var wAng = Math.atan2(e.y2 - e.y1, e.x2 - e.x1) * 180 / Math.PI;
+      html += '<div class="row"><label>Ángulo</label><input id="prWallAng" type="number" step="0.5" value="' + (Math.round(wAng * 10) / 10) + '"></div>';
       if (WALL_TYPES[e.type] && WALL_TYPES[e.type].dry) {
         html += '<button id="prFlipDry">↕ Lado del drywall</button>';
       }
@@ -3688,6 +3737,17 @@ window.MAXPOWER_SUPABASE = {
       var g = wallGeom(e);
       e.x2 = e.x1 + g.ux * v; e.y2 = e.y1 + g.uy * v;
       refresh();
+    });
+    on('prWallAng', 'change', function (n) {
+      var a = parseFloat(n.value);
+      if (isNaN(a)) return;
+      pushUndo();
+      var gg = wallGeom(e), rr = a * Math.PI / 180;
+      // gira la pared sobre su CENTRO: los dos extremos se mueven lo mismo
+      var mx = (e.x1 + e.x2) / 2, my = (e.y1 + e.y2) / 2, hl = gg.len / 2;
+      e.x1 = Math.round(mx - Math.cos(rr) * hl); e.y1 = Math.round(my - Math.sin(rr) * hl);
+      e.x2 = Math.round(mx + Math.cos(rr) * hl); e.y2 = Math.round(my + Math.sin(rr) * hl);
+      refresh(); renderSel();
     });
     on('prOpenType', 'change', function (n) {
       if (!OPEN_NAMES[n.value]) return;
@@ -6473,6 +6533,13 @@ window.MAXPOWER_SUPABASE = {
       case 'a': case 'A': setTool('area'); break;
       case 'x': case 'X': setTool('wire'); break;
       case 'l': case 'L': setTool('leader'); break;
+      case 'ArrowLeft': case 'ArrowRight': case 'ArrowUp': case 'ArrowDown':
+        // empujoncito exacto: 1" · Shift = 1 pie · Alt = 1/4"
+        var nstep = ev.shiftKey ? 12 : (ev.altKey ? 0.25 : 1);
+        var ndx = ev.key === 'ArrowLeft' ? -1 : ev.key === 'ArrowRight' ? 1 : 0;
+        var ndy = ev.key === 'ArrowUp' ? -1 : ev.key === 'ArrowDown' ? 1 : 0;
+        if (nudgeSel(ndx, ndy, nstep)) ev.preventDefault();
+        break;
       case 'F8': ev.preventDefault(); setOrtho(!orthoOn); break;
     }
   });
