@@ -638,7 +638,7 @@ body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
           </div>
           <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Revisa el plano y te dice qué está mal y cómo arreglarlo">🤖 Asistente: revisar el plano</button></div>
           <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí">📋 Recibo del último escaneo importado</button></div>
-          <div class="sub"><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
+          <div class="sub"><button id="btnGuiaDel" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Borrar el contorno de guia calcado del survey (las piezas se quedan donde estan)">🧭</button><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
           <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
           <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
           <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.L';
+  var APP_VERSION = 'v25.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1472,6 +1472,7 @@ window.MAXPOWER_SUPABASE = {
     texts: [],     // {id,x,y,text,size}
     dims: [],      // {id,x1,y1,x2,y2,off}
     areas: [],     // {id,pts:[[x,y]…],pattern,rot}
+    guia: [],      // {x1,y1,x2,y2} — contorno del survey: guía visual e imán, NO cuenta en nada
     wires: [],     // {id,x1,y1,x2,y2,style,side,bulge}
     leaders: [],   // {id,tx,ty,x,y,text,size}
     bg: null,      // {url,x,y,w,h,opacity}
@@ -1521,6 +1522,7 @@ window.MAXPOWER_SUPABASE = {
       walls: state.walls, openings: state.openings, symbols: state.symbols,
       texts: state.texts, dims: state.dims, areas: state.areas,
       wires: state.wires, leaders: state.leaders, panels: state.panels,
+      guia: state.guia,
       bgMeta: state.bg ? { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h, opacity: state.bg.opacity } : null,
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
@@ -1588,6 +1590,7 @@ window.MAXPOWER_SUPABASE = {
     state.texts = o.texts; state.dims = o.dims; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.panels = o.panels || [];
+    state.guia = o.guia || [];
     if (state.bg && o.bgMeta) { state.bg.x = o.bgMeta.x; state.bg.y = o.bgMeta.y; state.bg.w = o.bgMeta.w; state.bg.h = o.bgMeta.h; state.bg.opacity = o.bgMeta.opacity; }
     if (state.bg2 && o.bg2Meta) { state.bg2.x = o.bg2Meta.x; state.bg2.y = o.bg2Meta.y; state.bg2.w = o.bg2Meta.w; state.bg2.h = o.bg2Meta.h; state.bg2.opacity = o.bg2Meta.opacity; }
     limpiaHuerfanas();      // aberturas cuya pared ya no existe
@@ -1736,6 +1739,8 @@ window.MAXPOWER_SUPABASE = {
     var ids = {}, mv = [], fj = [];
     refs.forEach(function (r) { if (r.kind === 'wall') ids[r.id] = 1; });
     state.walls.forEach(function (w) { (ids[w.id] ? mv : fj).push(w); });
+    // el contorno del survey también imanta (solo como pared fija)
+    if (state.guia && state.guia.length) fj = fj.concat(guiaComoParedes());
     return { mv: mv, fj: fj };
   }
   function finoOn(ev) { return !!(ev && ev.altKey); }
@@ -2537,8 +2542,23 @@ window.MAXPOWER_SUPABASE = {
     return pool ? pool.find(function (e) { return e.id === sel.id; }) : null;
   }
 
+  function renderGuia() {
+    var g = document.getElementById('gGuia');
+    if (!g) {
+      g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.id = 'gGuia';
+      G.bg.parentNode.insertBefore(g, G.bg.nextSibling);   // encima del fondo, debajo de las paredes
+    }
+    if (!state.guia || !state.guia.length) { g.innerHTML = ''; return; }
+    var W = 2.2 / (view.z || 1);
+    g.innerHTML = state.guia.map(function (t) {
+      return '<line x1="' + t.x1 + '" y1="' + t.y1 + '" x2="' + t.x2 + '" y2="' + t.y2 +
+        '" stroke="#8a8fa3" stroke-width="' + W + '" stroke-dasharray="' + (W * 5) + ' ' + (W * 3.5) + '" stroke-linecap="round" opacity="0.9"/>';
+    }).join('') +
+    '<text x="' + state.guia[0].x1 + '" y="' + (state.guia[0].y1 - 8) + '" font-size="' + (11 / (view.z || 1) * 1.2) + '" fill="#8a8fa3">CONTORNO (guía — no cuenta en materiales)</text>';
+  }
   function refresh() {
-    renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderBg(); renderSel();
+    renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderBg(); renderGuia(); renderSel();
     refreshCounts(); showProps();
   }
 
@@ -3873,11 +3893,13 @@ window.MAXPOWER_SUPABASE = {
             var tx = nx * t + dr.ux * s, ty = ny * t + dr.uy * s;
             // ¿queda la pieza del lado bueno? dos cuartos vecinos van uno a
             // cada lado de la pared que comparten, nunca montados encima
-            var cf = cent[pz.pad[fi]];
-            var ladoF = (cf.x - dr.mx) * nx + (cf.y - dr.my) * ny;
-            var pcm = gir(cx, cy);                    // el centro no se mueve al girar
-            var ladoM = (pcm[0] + tx - dr.mx) * nx + (pcm[1] + ty - dr.my) * ny;
-            if (Math.abs(ladoF) > 6 && Math.abs(ladoM) > 6 && ladoF * ladoM > 0) return;
+            if (!wr._guia) {
+              var cf = cent[pz.pad[fi]];
+              var ladoF = (cf.x - dr.mx) * nx + (cf.y - dr.my) * ny;
+              var pcm = gir(cx, cy);                  // el centro no se mueve al girar
+              var ladoM = (pcm[0] + tx - dr.mx) * nx + (pcm[1] + ty - dr.my) * ny;
+              if (Math.abs(ladoF) > 6 && Math.abs(ladoM) > 6 && ladoF * ladoM > 0) return;
+            }
             var costo = Math.abs(t) + Math.abs(s) * 0.5 + Math.abs(rot) * 6 - sol * 0.25;
             /* PUERTAS CARA A CARA: la misma puerta vive en las dos piezas
                (cada escaneo trae su copia). Un calce que deja dos puertas
@@ -3968,6 +3990,45 @@ window.MAXPOWER_SUPABASE = {
       '. Ahora 🧲 Soldar las une en una sola pared.');
   }
 
+  /* 🧭 CONTORNO DE GUÍA (pedido de Edgar 28/08): el survey de la propiedad
+     trae la huella del edificio. Se mete el survey de fondo (📂 Abrir, PDF o
+     foto), se calibra con 📐 Escala, se CALCAN sus líneas con la herramienta
+     de pared, se seleccionan y se convierten en guía. La guía:
+       · se ve punteada gris, con su letrero
+       · IMANTA las piezas (el calce la trata como pared fija)
+       · NO cuenta en materiales, takeoff, estimador ni pies lineales
+       · la soldadura no la toca jamás (no vive en state.walls)
+     Así el exterior lo da el survey y el interior lo van dando las piezas. */
+  function hacerGuia() {
+    if (!selGroup || !selGroup.length) { setHint('🧭 Selecciona primero las paredes que calcaste del survey'); return; }
+    var ids = {};
+    selGroup.forEach(function (r) { if (r.kind === 'wall') ids[r.id] = 1; });
+    var mover = state.walls.filter(function (w) { return ids[w.id]; });
+    if (!mover.length) { setHint('🧭 Lo seleccionado no tiene paredes'); return; }
+    pushUndo();
+    mover.forEach(function (w) { state.guia.push({ x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2 }); });
+    state.walls = state.walls.filter(function (w) { return !ids[w.id]; });
+    limpiaHuerfanas();
+    selGroup = null; sel = null;
+    refresh(); renderSel(); showProps();
+    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: botón 🧭 en el panel derecho');
+  }
+  function borrarGuia() {
+    if (!state.guia.length) { setHint('🧭 No hay guía en la hoja'); return; }
+    uiConfirm('¿Borrar el contorno de guía (' + state.guia.length + ' tramos)?\n\nLas piezas ya calzadas se quedan donde están.', function (okb) {
+      if (!okb) return;
+      pushUndo();
+      state.guia = [];
+      refresh();
+      setHint('🧭 Guía borrada');
+    });
+  }
+  function guiaComoParedes() {
+    return state.guia.map(function (t, i) {
+      return { id: '_guia' + i, x1: t.x1, y1: t.y1, x2: t.x2, y2: t.y2, t: 4.5, _guia: true };
+    });
+  }
+
   function deleteGroup() {
     if (!selGroup) return;
     pushUndo();
@@ -3996,6 +4057,7 @@ window.MAXPOWER_SUPABASE = {
         '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
         '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>' +
         '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">🧩 Calzar con lo puesto</button>' +
+        '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">🧭 Convertir en guía (survey)</button>' +
         '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
@@ -4007,6 +4069,8 @@ window.MAXPOWER_SUPABASE = {
       if (be) be.addEventListener('click', function () { straightenRefs(selGroup); });
       var bc = $('#prCalce');
       if (bc) bc.addEventListener('click', function () { calzarSel(); });
+      var bgd = $('#prGuia');
+      if (bgd) bgd.addEventListener('click', function () { hacerGuia(); });
       return;
     }
     var e = findSel();
@@ -6413,6 +6477,10 @@ window.MAXPOWER_SUPABASE = {
     });
     state.openings.forEach(function (o) { delete o._fuera; });
   }
+  (function () {
+    var bg = document.getElementById('btnGuiaDel');
+    if (bg) bg.addEventListener('click', borrarGuia);
+  })();
   $('#btnSave').addEventListener('click', function () {
     syncSheet(); limpiaMarcas();
     var data = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
@@ -8050,6 +8118,7 @@ window.MAXPOWER_SUPABASE = {
     state.wires = o.state.wires || [];
     state.leaders = o.state.leaders || [];
     state.panels = o.state.panels || [];
+    state.guia = o.state.guia || [];
     state.precision = o.state.precision || 4;
     $('#pjPrec').value = String(state.precision);
     state.printScale = o.state.printScale || 'fit';
