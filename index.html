@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.R';
+  var APP_VERSION = 'v24.S';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3148,14 +3148,22 @@ window.MAXPOWER_SUPABASE = {
   function openingDown(p, type) {
     var near = nearestWall(p);
     if (!near) { setHint('Acércate a una pared para colocar la ' + OPEN_NAMES[type].toLowerCase()); return; }
-    var g = wallGeom(near.wall), w = OPEN_DEFAULT[type];
-    if (g.len < w + 4) { setHint('La pared es muy corta para esta abertura'); return; }
+    var g = wallGeom(near.wall), w = OPEN_DEFAULT[type], ajust = false;
+    // pared corta (las de ángulo del escaneo lo son casi siempre): en vez de
+    // negarse, la abertura se achica a lo que cabe — luego se afina el Ancho
+    if (g.len < w + 4) {
+      if (g.len < 20) { setHint('Esa pared mide ' + fmtFtIn(g.len) + ' — muy corta hasta para una abertura'); return; }
+      w = Math.round(g.len - 4); ajust = true;
+    }
     var d = Math.max(w / 2 + 1, Math.min(g.len - w / 2 - 1, near.t * g.len));
     pushUndo();
     var o = { id: uid(), wallId: near.wall.id, type: type, pos: Math.round(d), w: w, swing: 1, hinge: 0 };
     state.openings.push(o);
     sel = { kind: 'opening', id: o.id };
     refresh();
+    var incl = Math.abs(Math.atan2(near.wall.y2 - near.wall.y1, near.wall.x2 - near.wall.x1) * 180 / Math.PI) % 90;
+    if (ajust) setHint('↔ ' + OPEN_NAMES[type] + ' ajustada a ' + fmtFtIn(w) + ' (la pared mide ' + fmtFtIn(g.len) + ') — cambia el Ancho en Propiedades');
+    else if (incl > 3 && incl < 87) setHint(OPEN_NAMES[type] + ' de ' + fmtFtIn(w) + ' en pared inclinada — arrástrala para moverla, o ajusta Ancho y Abatimiento');
   }
 
   /* --- medir / cotas / calibrar --- */
@@ -4224,25 +4232,63 @@ window.MAXPOWER_SUPABASE = {
     });
     var antes = state.walls.length;
     mergeParallelWalls(state.walls);
+    mergeDiagWalls(state.walls);
     bridgeCollinear(state.walls);
+    // El orden importa y salió de medirlo: primero se pone TODO a escuadra
+    // (así el escalón de 2-3° no llega nunca a la esquina) y solo después
+    // se cierran las esquinas. Cerrar es lo último: una esquina abierta se
+    // ve, un pelo de grado no.
+    squareNearAxis(state.walls, 3);
     snapTJunctions(state.walls);
     weldCorners(state.walls);
-    // reconectar aberturas a la pared más cercana sobreviviente
+    squareNearAxis(state.walls, 2);
+    snapTJunctions(state.walls);
+    closeLCorners(state.walls);
+    weldCorners(state.walls, 8);
+    // reconectar aberturas. Tres reglas que salieron de medir el daño:
+    //  a) si la pared de siempre sobrevivió y sigue cerca, la puerta NO se
+    //     muda a la pared vecina (antes saltaba hasta 10")
+    //  b) la puerta nunca queda colgando de la punta: se mete dentro y, si
+    //     la pared es más corta que la puerta, la puerta se achica
+    //  c) puertas gemelas (la misma de dos escaneos) se funden en una
     opPts.forEach(function (r) {
       if (!r) return;
+      var vivo = null;
+      state.walls.forEach(function (w) { if (w.id === r.op.wallId) vivo = w; });
       var best = null;
       state.walls.forEach(function (w) {
         var res = distToSeg(r.x, r.y, w.x1, w.y1, w.x2, w.y2);
         if (!best || res.d < best.res.d) best = { w: w, res: res };
       });
-      if (best && best.res.d < 24) {
-        r.op.wallId = best.w.id;
-        var len2 = Math.hypot(best.w.x2 - best.w.x1, best.w.y2 - best.w.y1);
-        r.op.pos = Math.round(best.res.t * len2);
+      // (a) la pared de origen manda si sigue viva y a mano
+      if (vivo) {
+        var rv = distToSeg(r.x, r.y, vivo.x1, vivo.y1, vivo.x2, vivo.y2);
+        if (rv.d < 24) best = { w: vivo, res: rv };
       }
+      if (!best || best.res.d >= 24) return;
+      r.op.wallId = best.w.id;
+      var len2 = Math.hypot(best.w.x2 - best.w.x1, best.w.y2 - best.w.y1);
+      var pos2 = best.res.t * len2;
+      // (b) que quepa entera dentro de la pared
+      if (r.op.w > len2 - 2) r.op.w = Math.max(12, Math.round(len2 - 2));
+      r.op.pos = Math.round(Math.max(r.op.w / 2, Math.min(len2 - r.op.w / 2, pos2)));
     });
     state.openings = state.openings.filter(function (op) {
       return state.walls.some(function (w) { return w.id === op.wallId; });
+    });
+    // (c) gemelas: misma pared, mismo tipo y a menos de 8" → se quedan una
+    var gemelas = 0;
+    state.openings = state.openings.filter(function (op, i) {
+      for (var k = 0; k < i; k++) {
+        var q = state.openings[k];
+        if (q._fuera) continue;
+        if (q.wallId !== op.wallId || q.type !== op.type) continue;
+        if (Math.abs(q.pos - op.pos) > 8 || Math.abs(q.w - op.w) > 12) continue;
+        q.w = Math.max(q.w, op.w);            // se queda la más ancha
+        op._fuera = true; gemelas++;
+        return false;
+      }
+      return true;
     });
     // re-tipar por cuartos cerrados: interior (entre 2 cuartos) = drywall,
     // el resto (da a la calle) = block
@@ -4256,7 +4302,8 @@ window.MAXPOWER_SUPABASE = {
     }
     refresh(); refreshCounts();
     setHint('🧲 Armado soldado: ' + antes + '→' + state.walls.length + ' paredes, ' + rooms.length +
-      ' cuarto(s) cerrados · calle=block, interior=drywall · (si una pieza quedó sin pegar, arrástrala y vuelve a soldar)');
+      ' cuarto(s) cerrados' + (gemelas ? ', ' + gemelas + ' puerta(s) gemela(s) fundida(s)' : '') +
+      ' · calle=block, interior=drywall · (si una pieza quedó sin pegar, arrástrala y vuelve a soldar)');
   });
 
   $('#btnOv').addEventListener('click', function () {
@@ -4747,6 +4794,25 @@ window.MAXPOWER_SUPABASE = {
     return rot;
   }
   // soldar esquinas cercanas (union-find): la pared V manda en X, la H en Y
+  // Al soldar, juntar los extremos deja las paredes rectas con un pelo de
+  // inclinación (1-2°) y la esquina hace un escalón feo. Esto las vuelve a
+  // poner a escuadra EXACTA. Solo toca las que ya venían casi rectas
+  // (≤ 2°): una pared del escaneo inclinada de verdad no se toca.
+  function squareNearAxis(walls, tolDeg) {
+    var tol = (tolDeg || 2) * Math.PI / 180;
+    walls.forEach(function (w) {
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+      if (Math.hypot(dx, dy) < 8) return;
+      var ang = Math.atan2(dy, dx);
+      var dH = Math.min(Math.abs(ang), Math.abs(Math.abs(ang) - Math.PI));
+      var dV = Math.abs(Math.abs(ang) - Math.PI / 2);
+      if (dH <= tol && dH <= dV) {
+        var y = Math.round((w.y1 + w.y2) / 2); w.y1 = y; w.y2 = y;
+      } else if (dV <= tol) {
+        var x = Math.round((w.x1 + w.x2) / 2); w.x1 = x; w.x2 = x;
+      }
+    });
+  }
   function weldCorners(walls, md) {
     // MD 12: los escaneos REALES dejan esquinas a 8-12" (los sintéticos a 2-3)
     var i, j, MD = md || 12;
@@ -4783,7 +4849,11 @@ window.MAXPOWER_SUPABASE = {
   // cuartos vecinos: la MISMA pared escaneada desde los dos lados llega como
   // dos paredes paralelas casi encimadas — aquí se fusionan en una sola
   function mergeParallelWalls(walls) {
-    var GAP = 14, i, j;
+    // GAP = a qué distancia dos paredes paralelas se consideran LA MISMA.
+    // Medido con Edgar: colocando las piezas a mano la separación real
+    // llegaba a 16-20" y con GAP 14 quedaban DOS paredes encimadas y la
+    // esquina abierta. 24" (2 pies) cubre el pulso + los dos espesores.
+    var GAP = 24, i, j;
     for (i = 0; i < walls.length; i++) {
       var a = walls[i];
       if (!a || a._dead) continue;
@@ -4799,11 +4869,20 @@ window.MAXPOWER_SUPABASE = {
         var b1 = H ? Math.min(b.x1, b.x2) : Math.min(b.y1, b.y2);
         var b2 = H ? Math.max(b.x1, b.x2) : Math.max(b.y1, b.y2);
         var over = Math.min(a2, b2) - Math.max(a1, b1);
-        if (over < 0.25 * Math.min(a2 - a1, b2 - b1)) continue;
-        // fusionar: eje promedio, extensión unión, y la pared queda interior
-        var ax2 = Math.round((axA + axB) / 2), lo = Math.min(a1, b1), hi = Math.max(a2, b2);
+        // OJO: la unión de las dos extensiones solo vale si de verdad son la
+        // MISMA pared física. Si apenas se rozan, la pared superviviente se
+        // estiraba hacia el vacío (medido: +89") y había que rehacerla.
+        // Se exige que la corta esté casi entera dentro de la larga.
+        if (over < 0.6 * Math.min(a2 - a1, b2 - b1)) continue;
+        // fusionar. El eje se pondera por LARGO: la pieza grande manda y
+        // no se mueve, la chica es la que se acomoda (que es como Edgar
+        // arma el rompecabezas). Y se queda el espesor MAYOR.
+        var La = a2 - a1, Lb = b2 - b1;
+        var ax2 = Math.round((axA * La + axB * Lb) / (La + Lb || 1));
+        var lo = Math.min(a1, b1), hi = Math.max(a2, b2);
         if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
         else { a.x1 = ax2; a.x2 = ax2; a.y1 = lo; a.y2 = hi; }
+        if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
         a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
         b._dead = true;
       }
@@ -4812,8 +4891,62 @@ window.MAXPOWER_SUPABASE = {
     walls.length = 0;
     out.forEach(function (w) { walls.push(w); });
   }
-  // (fusionar duplicados diagonales se probó y COME paredes buenas en
-  // cadena — no repetir; el merge H/V cubre los casos que importan)
+  // Paredes EN ÁNGULO duplicadas (dos piezas que comparten una pared
+  // diagonal). El primer intento de esto se comía paredes buenas en cadena
+  // porque solo miraba el ángulo. Ahora hay tres candados a la vez y los
+  // tramos consecutivos de una cadena NO los pasan (se tocan punta con
+  // punta, no se solapan):
+  //   1. mismo ángulo (±6°)  2. separación perpendicular ≤ 24"
+  //   3. se pisan al menos el 60% de la más corta
+  function mergeDiagWalls(walls) {
+    var GAP = 24, MINSOL = 0.6, i, j;
+    function proyecta(w, px, py) {          // distancia a lo largo de w
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
+      return ((px - w.x1) * dx + (py - w.y1) * dy) / L;
+    }
+    function perp(w, px, py) {              // distancia perpendicular a la RECTA de w
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
+      return Math.abs((px - w.x1) * dy - (py - w.y1) * dx) / L;
+    }
+    for (i = 0; i < walls.length; i++) {
+      var a = walls[i];
+      if (!a || a._dead || a._o !== 'D') continue;
+      for (j = i + 1; j < walls.length; j++) {
+        var b = walls[j];
+        if (!b || b._dead || b._o !== 'D') continue;
+        var aa = Math.atan2(a.y2 - a.y1, a.x2 - a.x1) * 180 / Math.PI;
+        var ab = Math.atan2(b.y2 - b.y1, b.x2 - b.x1) * 180 / Math.PI;
+        var da = Math.abs(aa - ab) % 180;
+        if (da > 90) da = 180 - da;
+        if (da > 6) continue;                                   // (1)
+        var La = Math.hypot(a.x2 - a.x1, a.y2 - a.y1);
+        var Lb = Math.hypot(b.x2 - b.x1, b.y2 - b.y1);
+        if (La < 12 || Lb < 12) continue;
+        // (2) separación: la recta de la larga contra los dos extremos de la otra
+        var lar = La >= Lb ? a : b, cor = La >= Lb ? b : a;
+        var sep = Math.max(perp(lar, cor.x1, cor.y1), perp(lar, cor.x2, cor.y2));
+        if (sep > GAP) continue;
+        // (3) solape proyectado sobre la larga
+        var t1 = proyecta(lar, cor.x1, cor.y1), t2 = proyecta(lar, cor.x2, cor.y2);
+        var c1 = Math.min(t1, t2), c2 = Math.max(t1, t2);
+        var Ll = Math.hypot(lar.x2 - lar.x1, lar.y2 - lar.y1);
+        var sol = Math.min(Ll, c2) - Math.max(0, c1);
+        if (sol < MINSOL * Math.min(La, Lb)) continue;
+        // fusionar sobre la recta de la LARGA, extendida a la unión
+        var dx = (lar.x2 - lar.x1) / Ll, dy = (lar.y2 - lar.y1) / Ll;
+        var lo = Math.min(0, c1), hi = Math.max(Ll, c2);
+        var nx1 = Math.round(lar.x1 + dx * lo), ny1 = Math.round(lar.y1 + dy * lo);
+        var nx2 = Math.round(lar.x1 + dx * hi), ny2 = Math.round(lar.y1 + dy * hi);
+        a.x1 = nx1; a.y1 = ny1; a.x2 = nx2; a.y2 = ny2;
+        if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
+        a.rids = (a.rids || (a.rid ? [a.rid] : [])).concat(b.rids || (b.rid ? [b.rid] : []));
+        b._dead = true;
+      }
+    }
+    var out = walls.filter(function (w) { return !w._dead; });
+    walls.length = 0;
+    out.forEach(function (w) { walls.push(w); });
+  }
   // uniones en T: una pared que muere cerca del cuerpo de otra se suelda a
   // ella (TOL 16 por los huecos de escaneos reales; el extremo se lleva al
   // cuerpo y se recorta al tramo de la otra pared)
