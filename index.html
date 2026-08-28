@@ -1233,7 +1233,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.X';
+  var APP_VERSION = 'v24.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4282,6 +4282,202 @@ window.MAXPOWER_SUPABASE = {
     var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
     return Math.abs((px - w.x1) * dy - (py - w.y1) * dx) / L;
   }
+  /* ═══════════ 🔧 RECTIFICAR: arreglar la deriva SIN repetir el escaneo ═══
+     Edgar: "¿y si me dice que lo repita y lo repito diez veces y diez veces
+     sale mal? ¿No puede arreglarlo él por mí?"
+
+     Sí se puede, y esto es por qué. Se comprobó con sus escaneos reales:
+     el polígono del piso NO sirve de segunda opinión (deriva igual que las
+     paredes). Pero el error del sensor NO es parejo:
+       · los LARGOS son buenos — cada pared se mide en pocos segundos
+       · lo que deriva es el ÁNGULO entre paredes escaneadas con minutos de
+         diferencia (el giro del sensor se va acumulando)
+       · y una casa tiene esquinas de 90° y, a veces, cortes de 45°
+     Así que se agrupan las paredes por dirección, cada grupo se lleva al
+     múltiplo de 45° más cercano, y CADA PARED CONSERVA SU LARGO EXACTO.
+     Es lo mismo que hace un topógrafo al cerrar una poligonal: se fía de
+     las distancias y corrige los ángulos.
+     Medido en los escaneos de Caroline: bedroom_2 −18.5° → queda a
+     escuadra; Master Bedroom −2° y su corte real de 45° SE RESPETA;
+     bedroom_1 (que estaba bien) no se toca. Largos: 0.00" de cambio. */
+  function familiasDir(W) {
+    var bins = [], i;
+    for (i = 0; i < 180; i++) bins[i] = 0;          // medio grado
+    W.forEach(function (w) {
+      var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
+      bins[Math.round(t * 2) % 180] += largo(w);
+    });
+    var suav = [], top = 0;
+    for (i = 0; i < 180; i++) {
+      var v = 0;
+      for (var k = -6; k <= 6; k++) v += bins[(i + k + 180) % 180];
+      suav[i] = v; top = Math.max(top, v);
+    }
+    var orden = [];
+    for (i = 0; i < 180; i++) orden.push([suav[i], i]);
+    orden.sort(function (a, b) { return b[0] - a[0]; });
+    var picos = [];
+    orden.forEach(function (p) {
+      if (p[0] < top * 0.12) return;
+      var g = p[1] / 2;
+      for (var j = 0; j < picos.length; j++) {
+        var d = Math.abs(picos[j].a - g); d = Math.min(d, 90 - d);
+        if (d < 7) return;
+      }
+      picos.push({ a: g, w: p[0] });
+    });
+    return picos;
+  }
+  function dist90(a, b) { var d = Math.abs(a - b) % 90; return Math.min(d, 90 - d); }
+  function rectificarPiezas(W) {
+    var fams = familiasDir(W);
+    if (!fams.length) return null;
+    var base = fams[0].a;
+    var dest = fams.map(function (f) {
+      // OJO: la cuenta va en el espacio mod 90. Restar los ángulos crudos
+      // daba correcciones de 90° (giraba paredes buenas media vuelta).
+      var d = f.a - base;
+      while (d > 45) d -= 90;
+      while (d < -45) d += 90;
+      var k = Math.round(d / 45);            // 0 = paralela · ±1 = corte de 45°
+      return { origen: f.a, sep: d, corr: k * 45 - d };
+    });
+    // si ya está todo a escuadra, no se toca nada
+    var hayQue = dest.some(function (d) { return Math.abs(d.corr) >= 1.2; });
+    if (!hayQue) return { fams: fams, dest: dest, girada: 0, maxG: 0, yaEstaba: true };
+    var girada = 0, maxG = 0;
+    W.forEach(function (w) {
+      var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
+      var best = null;
+      dest.forEach(function (d) {
+        var dd = dist90(t, d.origen);
+        if (!best || dd < best.dd) best = { dd: dd, d: d };
+      });
+      if (!best || best.dd > 14) return;      // ángulo que no es de ninguna familia: no se toca
+      if (Math.abs(best.d.corr) < 0.05) return;
+      if (Math.abs(best.d.corr) > 25) return; // candado: nunca media vuelta
+      var giro = best.d.corr * Math.PI / 180;
+      var a0 = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) + giro;
+      var l = largo(w) / 2, mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+      w.x1 = Math.round(mx - Math.cos(a0) * l); w.y1 = Math.round(my - Math.sin(a0) * l);
+      w.x2 = Math.round(mx + Math.cos(a0) * l); w.y2 = Math.round(my + Math.sin(a0) * l);
+      girada++; maxG = Math.max(maxG, Math.abs(best.d.corr));
+    });
+    return { fams: fams, dest: dest, girada: girada, maxG: maxG };
+  }
+  /* La poligonal cerrada, como la cierra un topógrafo.
+     Girar cada pared sobre su punto medio deja el cuarto "a escuadra" en los
+     números pero DESPEGADO en el dibujo (probado: se ve roto). Lo correcto es
+     recorrer el circuito: se van encadenando las paredes con su ÁNGULO
+     CORREGIDO y su LARGO MEDIDO, y al final sobra un pelo — el error de
+     cierre. Ese error se reparte entre todos los vértices en proporción a lo
+     que llevas andado (regla de Bowditch, la de toda la vida en topografía).
+     El cuarto sale cerrado, a escuadra, y con los largos del sensor. */
+  function cadenaCerrada(W, usadas) {
+    var TOL = 32;
+    function ptos(w) { return [[w.x1, w.y1], [w.x2, w.y2]]; }
+    for (var i = 0; i < W.length; i++) {
+      if (usadas[W[i].id]) continue;
+      var ciclo = [{ w: W[i], flip: false }];
+      var marca = {}; marca[W[i].id] = 1;
+      var ini = [W[i].x1, W[i].y1], fin = [W[i].x2, W[i].y2];
+      var seguro = 0;
+      while (seguro++ < 200) {
+        var sig = null;
+        for (var j = 0; j < W.length; j++) {
+          var o = W[j];
+          if (marca[o.id] || usadas[o.id]) continue;
+          var p = ptos(o);
+          if (Math.hypot(p[0][0] - fin[0], p[0][1] - fin[1]) < TOL) { sig = { w: o, flip: false, np: p[1] }; break; }
+          if (Math.hypot(p[1][0] - fin[0], p[1][1] - fin[1]) < TOL) { sig = { w: o, flip: true, np: p[0] }; break; }
+        }
+        if (!sig) break;
+        ciclo.push({ w: sig.w, flip: sig.flip });
+        marca[sig.w.id] = 1;
+        fin = sig.np;
+        if (Math.hypot(fin[0] - ini[0], fin[1] - ini[1]) < TOL && ciclo.length >= 4) {
+          ciclo.forEach(function (c) { usadas[c.w.id] = 1; });
+          return ciclo;                       // ¡cerró!
+        }
+      }
+    }
+    return null;
+  }
+  function rectificarBucle(ciclo, dest) {
+    var n = ciclo.length, i;
+    var pasos = [];
+    for (i = 0; i < n; i++) {
+      var w = ciclo[i].w, f = ciclo[i].flip;
+      var ax = f ? w.x2 : w.x1, ay = f ? w.y2 : w.y1;
+      var bx = f ? w.x1 : w.x2, by = f ? w.y1 : w.y2;
+      var L = Math.hypot(bx - ax, by - ay);
+      var a = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+      var t = ((a % 90) + 90) % 90, best = null;
+      dest.forEach(function (d) {
+        var dd = dist90(t, d.origen);
+        if (!best || dd < best.dd) best = { dd: dd, d: d };
+      });
+      var corr = (best && best.dd <= 14 && Math.abs(best.d.corr) <= 25) ? best.d.corr : 0;
+      pasos.push({ L: L, a: (a + corr) * Math.PI / 180 });
+    }
+    // encadenar desde el punto de partida original.
+    // (se repite 3 veces: repartir el error vuelve a torcer un pelo los
+    //  ángulos, y volver a cuadrarlos acerca más el cierre)
+    var p0 = ciclo[0].flip ? [ciclo[0].w.x2, ciclo[0].w.y2] : [ciclo[0].w.x1, ciclo[0].w.y1];
+    var pts = [p0.slice()], total = 0;
+    for (i = 0; i < n; i++) {
+      var q = pts[i];
+      pts.push([q[0] + Math.cos(pasos[i].a) * pasos[i].L, q[1] + Math.sin(pasos[i].a) * pasos[i].L]);
+      total += pasos[i].L;
+    }
+    // error de cierre y reparto de Bowditch
+    var ex = pts[n][0] - pts[0][0], ey = pts[n][1] - pts[0][1];
+    var cierre = Math.hypot(ex, ey);
+    var acum = 0;
+    for (i = 1; i <= n; i++) {
+      acum += pasos[i - 1].L;
+      var f2 = acum / (total || 1);
+      pts[i][0] -= ex * f2; pts[i][1] -= ey * f2;
+    }
+    // escribir las paredes
+    for (i = 0; i < n; i++) {
+      var c = ciclo[i], A = pts[i], B = pts[(i + 1) % (n + 1)];
+      if (i === n - 1) B = pts[0];
+      if (c.flip) { c.w.x2 = Math.round(A[0]); c.w.y2 = Math.round(A[1]); c.w.x1 = Math.round(B[0]); c.w.y1 = Math.round(B[1]); }
+      else { c.w.x1 = Math.round(A[0]); c.w.y1 = Math.round(A[1]); c.w.x2 = Math.round(B[0]); c.w.y2 = Math.round(B[1]); }
+    }
+    return { cierre: cierre, perim: total };
+  }
+  function rectificarYcerrar(W) {
+    var L0 = {};
+    W.forEach(function (w) { if (!w.id) w.id = uid(); L0[w.id] = largo(w); });
+    var fams = familiasDir(W);
+    if (!fams.length) return null;
+    var base = fams[0].a;
+    var dest = fams.map(function (f) {
+      var d = f.a - base;
+      while (d > 45) d -= 90;
+      while (d < -45) d += 90;
+      var k = Math.round(d / 45);
+      return { origen: f.a, sep: d, corr: k * 45 - d };
+    });
+    var maxC = 0;
+    dest.forEach(function (d) { maxC = Math.max(maxC, Math.abs(d.corr)); });
+    if (maxC < 1.2) return { fams: fams, dest: dest, girada: 0, maxG: 0, yaEstaba: true, maxDL: 0, bucles: 0 };
+    // se rectifica CADA circuito cerrado por separado
+    var usadas = {}, bucles = 0, cierreMax = 0, perimTot = 0, tocadas = 0, ciclo;
+    while ((ciclo = cadenaCerrada(W, usadas))) {
+      var res = null;
+      for (var it = 0; it < 3; it++) res = rectificarBucle(ciclo, dest);
+      bucles++; tocadas += ciclo.length;
+      if (res && res.cierre > cierreMax) { cierreMax = res.cierre; perimTot = res.perim; }
+    }
+    var maxDL = 0;
+    W.forEach(function (w) { if (L0[w.id]) maxDL = Math.max(maxDL, Math.abs(largo(w) - L0[w.id])); });
+    return { fams: fams, dest: dest, girada: tocadas, maxG: maxC, maxDL: maxDL,
+             bucles: bucles, cierre: cierreMax, perim: perimTot };
+  }
+
   function analizarPlano() {
     var av = [];
     var W = state.walls;
@@ -4393,10 +4589,49 @@ window.MAXPOWER_SUPABASE = {
       av.push({
         sev: 0, tit: 'Dos muros largos se abren ' + par.d.toFixed(0) + '° entre sí',
         txt: 'Miden ' + fmtFtIn(largo(par.a)) + ' y ' + fmtFtIn(largo(par.b)) + ' y en vez de ir paralelos se abren como un embudo. ' +
-          'Eso NO es una casa torcida: es que el escaneo derivó en ese cuarto (gabinetes, reflejos, se caminó rápido). ' +
-          'Girar el plano no lo arregla. Lo mejor es REPETIR ese cuarto despacio; si no, endereza cada muro a mano (selecciónalo → 📐 Enderezar) y cuadra las esquinas.',
-        accion: 'Enseñármelos', refs: [{ kind: 'wall', id: par.a.id }, { kind: 'wall', id: par.b.id }],
-        fix: null
+          'Eso NO es una casa torcida: el escaneo DERIVÓ en ese cuarto (gabinetes, reflejos, se caminó rápido).\n\n' +
+          'NO hace falta que lo repitas. El sensor mide bien los LARGOS (cada pared la mide en segundos); lo que se le ' +
+          'va es el ÁNGULO entre paredes tomadas con minutos de diferencia. 🔧 Rectificar agrupa las paredes por dirección y ' +
+          'lleva cada grupo a 90° o 45° exactos SIN cambiarle el largo a ninguna — como cierra una poligonal un topógrafo. ' +
+          'Los cortes de 45° de verdad se respetan.\n\n' +
+          'Míralo antes y después: si no te convence, Ctrl+Z. Si el plano te queda raro, entonces sí repite el cuarto.',
+        accion: '🔧 Rectificarlo sin repetir el escaneo',
+        refs: [{ kind: 'wall', id: par.a.id }, { kind: 'wall', id: par.b.id }],
+        fix: function () {
+          pushUndo();
+          var r = rectificarYcerrar(state.walls);
+          refresh();
+          if (!r) { setHint('🔧 No pude agrupar las direcciones de este plano.'); return; }
+          if (r.yaEstaba) { setHint('🔧 Este plano ya está a escuadra — no le toqué nada.'); return; }
+          if (!r.bucles) {
+            uiAlert('🔧 No pude rectificarlo automáticamente.\n\n' +
+              'Para cuadrar un cuarto hay que recorrer su circuito completo de paredes, y en éste las paredes ' +
+              'no cierran un circuito (faltan tramos o hay huecos grandes).\n\n' +
+              'Lo que SÍ funciona siempre y no obliga a repetir el escaneo:\n' +
+              '1. Mide con la cinta DOS paredes largas de ese cuarto.\n' +
+              '2. Selecciona cada una y escribe la medida real en 📏 (aquí abajo).\n' +
+              '3. Vuelve a darle a 🔧 Rectificar.\n\n' +
+              'Con dos medidas de verdad el cuarto queda exacto.');
+            return;
+          }
+          var ratio = Math.round(r.perim / Math.max(0.1, r.cierre));
+          var bien = r.maxDL <= 4;
+          uiAlert('🔧 RECTIFICADO\n\n' +
+            '· ' + r.girada + ' pared(es) en ' + r.bucles + ' circuito(s) cerrado(s)\n' +
+            '· giro máximo aplicado: ' + r.maxG.toFixed(1) + '°\n' +
+            '· los largos cambiaron como mucho ' + r.maxDL.toFixed(1) + '"\n' +
+            '· cierre del circuito: 1:' + ratio + '\n\n' +
+            (bien
+              ? '✅ Buen resultado: el cuarto se cuadró casi sin tocar las medidas. Puedes fiarte.'
+              : '⚠️ OJO: para cuadrarlo hubo que cambiar largos hasta ' + r.maxDL.toFixed(1) + '".\n' +
+                'Eso significa que las medidas de ese escaneo NO cuadran entre sí — no es que falte un ' +
+                'algoritmo, es que falta información. Ningún programa puede inventarla.\n\n' +
+                'La solución de verdad, sin repetir el escaneo:\n' +
+                '1. Mide con la cinta las DOS paredes largas del cuarto.\n' +
+                '2. Selecciona cada una y escribe la medida real en 📏 (aquí abajo).\n' +
+                'Con dos medidas buenas el cuarto queda exacto para el permit.') +
+            '\n\nSi no te gusta cómo quedó: Ctrl+Z.');
+        }
       });
     });
     // ——— 4. extremos sueltos cerca de otra pared ———
@@ -7714,6 +7949,7 @@ window.MAXPOWER_SUPABASE = {
   window.__mxpRefresh = refresh;
   window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
   window.__mxpAngle = refsAngle;
+  window.__mxpRect = rectificarYcerrar;   // gancho de pruebas
   // logo oficial de Max Power en la barra (viene de js/logo.js)
   try {
     if (window.MAXPOWER_LOGO) {
