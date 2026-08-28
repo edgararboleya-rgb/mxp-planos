@@ -1247,7 +1247,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.F';
+  var APP_VERSION = 'v25.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1418,6 +1418,9 @@ window.MAXPOWER_SUPABASE = {
   window.__mxpState = state;
   // ganchos SOLO para las pruebas automáticas (no los usa la app)
   window.__zf = function () { try { zoomFit(); } catch (e) {} };
+  window.__viewZ = function () { return view.z; };
+  window.__viewSet = function (z) { view.z = z; applyView(); };
+  window.__marcoMinDbg = function () { return marcoMin(); };
   window.__mdDbg = function (t) { try { return mdMini(t); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
@@ -1629,6 +1632,17 @@ window.MAXPOWER_SUPABASE = {
   // cuarto de pulgada sin que se vaya de un salto
   var FINO = 0.15;
   var calceOn = true;              // 🧲 imán entre piezas al armar el rompecabezas
+  /* MARCO DE SELECCIÓN: cuánto hay que arrastrar para que cuente como marco.
+     28/08 — Edgar: "siempre que selecciono una pared de pronto se me
+     seleccionan varias cosas sin yo tocar". El umbral estaba en PULGADAS DE
+     PLANO (4"), no en píxeles de pantalla. Alejado viendo la casa entera,
+     4" son menos de UN píxel: cualquier temblor al hacer clic ya contaba
+     como marco, y como los símbolos son un punto, se llevaba los que
+     tuviera cerca. Ahora son píxeles de pantalla de verdad — 5 con ratón,
+     10 con el dedo, que tiembla más. */
+  function marcoMin() {
+    return (document.body.classList.contains('touch') ? 10 : 5) / (view.z || 1);
+  }
   // corre lo seleccionado sin tocar nada más (el calce lo usa al soltar)
   function moveRefs(refs, dx, dy) {
     dx = Math.round(dx); dy = Math.round(dy);
@@ -2960,6 +2974,9 @@ window.MAXPOWER_SUPABASE = {
   function onDragMove(p, ev) {
     if (drag.mode === 'marquee') {
       drag.cur = p;
+      // no se pinta hasta que el arrastre sea de verdad: así lo que se ve
+      // en pantalla es exactamente lo que va a seleccionar
+      if (Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) <= marcoMin()) { G.prev.innerHTML = ''; return; }
       var x0 = Math.min(drag.start[0], p[0]), y0 = Math.min(drag.start[1], p[1]);
       G.prev.innerHTML = '<rect x="' + x0 + '" y="' + y0 + '" width="' + Math.abs(p[0] - drag.start[0]) +
         '" height="' + Math.abs(p[1] - drag.start[1]) + '" fill="rgba(11,132,255,0.08)" stroke="#0b84ff" stroke-width="0.8" stroke-dasharray="4 3"/>';
@@ -3127,7 +3144,7 @@ window.MAXPOWER_SUPABASE = {
   function onDragEnd() {
     if (drag.mode === 'marquee') {
       G.prev.innerHTML = '';
-      if (drag.cur && Math.hypot(drag.cur[0] - drag.start[0], drag.cur[1] - drag.start[1]) > 4) {
+      if (drag.cur && Math.hypot(drag.cur[0] - drag.start[0], drag.cur[1] - drag.start[1]) > marcoMin()) {
         var g = marqueeCollect(drag.start, drag.cur);
         selGroup = g.length ? g : null;
         sel = null;
