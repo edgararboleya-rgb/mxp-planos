@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.M';
+  var APP_VERSION = 'v25.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5257,6 +5257,20 @@ window.MAXPOWER_SUPABASE = {
       if (!u.trim()) { abrirAsistente(); return; }
       uiPrompt('Tu MXP_TOKEN (la contraseña que pusiste al desplegar el worker):', c.tok, function (t) {
         if (t !== null) { try { localStorage.setItem('mxpCerebroTok', t.trim()); } catch (e) {} }
+        // ping GRATIS al guardar: así se sabe AHORA si la dirección y el
+        // token son buenos, no cuando falle la primera pregunta de verdad
+        var c2 = cerebroCfg();
+        if (c2.url) {
+          setHint('🔌 Probando el cerebro…');
+          fetch(c2.url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-mxp-token': c2.tok },
+            body: JSON.stringify({ ping: true })
+          }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d.texto === 'pong') setHint('🔌 ✓ Cerebro conectado de verdad' + (d.modelo ? ' (' + d.modelo + ')' : ''));
+            else setHint('🔌 ✗ ' + (d.error || 'Esa dirección contesta, pero no es el cerebro MXP'));
+          }).catch(function (e) { setHint('🔌 ✗ No se llega al cerebro: ' + e.message); });
+        }
         abrirAsistente();
       });
     });
