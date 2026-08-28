@@ -1247,7 +1247,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.C';
+  var APP_VERSION = 'v25.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1418,6 +1418,7 @@ window.MAXPOWER_SUPABASE = {
   window.__mxpState = state;
   // ganchos SOLO para las pruebas automáticas (no los usa la app)
   window.__zf = function () { try { zoomFit(); } catch (e) {} };
+  window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
   var view = { tx: 120, ty: 90, z: 1 };
   var measure = null;                 // medición transitoria
@@ -5026,6 +5027,30 @@ window.MAXPOWER_SUPABASE = {
       rooms.forEach(function (r) {
         var nom = state.texts.filter(function (t) { return !/SQ FT/i.test(t.text) && ptInPoly(t.x, t.y, r.poly); })[0];
         L.push(' ' + (nom ? nom.text : '(sin nombre)') + ' — ' + r.sqft + ' sq ft');
+      });
+    }
+    /* TODAS las etiquetas escritas, cierre o no cierre el cuarto.
+       28/08: Edgar preguntó por la cocina y el cerebro dijo que no había —
+       y sí había un rótulo KITCHEN. Los nombres solo viajaban si el cuarto
+       salía como polígono CERRADO, y en un plano armado por piezas casi
+       ninguno cierra todavía. El rótulo es dato del oficio: va siempre. */
+    var etq = state.texts.filter(function (t) { return t.text && !/SQ FT/i.test(t.text); });
+    if (etq.length) {
+      L.push('RÓTULOS ESCRITOS EN EL PLANO (nombre · dónde está, en pulgadas):');
+      etq.forEach(function (t) {
+        L.push(' "' + t.text + '" en ' + Math.round(t.x) + ',' + Math.round(t.y));
+      });
+      L.push('OJO: un rótulo que no salga arriba en CUARTOS CERRADOS existe igual. ' +
+        'Puede ser (a) una cocina, comedor o family room ABIERTOS, que en planta ' +
+        'de verdad no cierran contra nada y así es como son; o (b) un cuarto al ' +
+        'que todavía le falta cerrar una esquina. NO des por hecho que falta: si ' +
+        'necesitas saber cuál de las dos es, míralo por las paredes de alrededor ' +
+        'o pregúntaselo a Edgar.');
+    }
+    if (state.areas && state.areas.length) {
+      L.push('ÁREAS MARCADAS A MANO:');
+      state.areas.forEach(function (a) {
+        L.push(' ' + (a.name || '(sin nombre)') + (a.sqft ? ' — ' + a.sqft + ' sq ft' : ''));
       });
     }
     var an = analizarPlano();
