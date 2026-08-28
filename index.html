@@ -1233,7 +1233,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.V';
+  var APP_VERSION = 'v24.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5348,6 +5348,15 @@ window.MAXPOWER_SUPABASE = {
     }
     var groups = {};
     for (i = 0; i < eps.length; i++) { var r = find(i); (groups[r] = groups[r] || []).push(eps[i]); }
+    // Una pared MÁS CORTA que la distancia de soldadura no puede "abrir" una
+    // esquina: si se le jalan los dos extremos a sitios distintos se GIRA
+    // entera (medido: pedacitos de 6-7" girando 48-90°). Esas se mueven
+    // RÍGIDAS — el mismo desplazamiento a los dos extremos — así conservan
+    // su largo y su ángulo exactos.
+    var rigida = {}, yaMovida = {};
+    walls.forEach(function (w) {
+      if (Math.hypot(w.x2 - w.x1, w.y2 - w.y1) < MD * 1.6) rigida[w.id || (w.id = uid())] = w;
+    });
     Object.keys(groups).forEach(function (k) {
       var g = groups[k];
       if (g.length < 2) return;
@@ -5360,7 +5369,17 @@ window.MAXPOWER_SUPABASE = {
       function avg(a) { return a.reduce(function (s, v) { return s + v; }, 0) / a.length; }
       var fx = Math.round(xV.length ? avg(xV) : avg(ax));
       var fy = Math.round(yH.length ? avg(yH) : avg(ay));
-      g.forEach(function (p) { sp(p, fx, fy); });
+      g.forEach(function (p) {
+        var id = p.w.id;
+        if (rigida[id]) {
+          if (yaMovida[id]) return;              // ya se colocó por su otro extremo
+          var dx0 = fx - gx(p), dy0 = fy - gy(p);
+          p.w.x1 += dx0; p.w.y1 += dy0; p.w.x2 += dx0; p.w.y2 += dy0;
+          yaMovida[id] = 1;
+          return;
+        }
+        sp(p, fx, fy);
+      });
     });
   }
   // cuartos vecinos: la MISMA pared escaneada desde los dos lados llega como
@@ -5744,6 +5763,7 @@ window.MAXPOWER_SUPABASE = {
   // que en vez de confiar, se cuenta y se compara.
   var reciboDib = [];      // [{name, sqft}] de cada cuarto que se dibujó
   var ultimoRecibo = null; // texto del último recibo (botón 📋 Recibo)
+  var reciboNota = '';     // aviso extra del importador para el recibo
   // lo que el ARCHIVO trae, contado sin tocar el dibujo
   function contarArchivo(o) {
     var M = 39.3700787;
@@ -5782,7 +5802,9 @@ window.MAXPOWER_SUPABASE = {
     // miente. El archivo trae las dos cosas: las paredes de raíz (las que ya
     // pasaron por el StructureBuilder de Apple) y las crudas de cada cuarto.
     // Si hay paredes de raíz, ésas son las que se dibujan.
-    var cuartos = (!o.walls && Array.isArray(o.rooms) && o.rooms.length && o.rooms[0] && o.rooms[0].walls) ? o.rooms : null;
+    var unSolo = (Array.isArray(o.rooms) && o.rooms.length === 1 && o.rooms[0] && Array.isArray(o.rooms[0].walls) &&
+      (!Array.isArray(o.walls) || o.rooms[0].walls.length >= o.walls.length));
+    var cuartos = ((unSolo || !o.walls) && Array.isArray(o.rooms) && o.rooms.length && o.rooms[0] && o.rooms[0].walls) ? o.rooms : null;
     if (cuartos) {
       cuartos.forEach(function (rm, i) {
         r.cuartos++;
@@ -5846,6 +5868,7 @@ window.MAXPOWER_SUPABASE = {
     fila('PIES DE PARED', A.pies, pies, ' ft', 0.03);
     fila('SUPERFICIE', A.sqft, sqDib, ' sf', 0.04);
     var txt = '📋 RECIBO DE IMPORTACIÓN — MXP Scan → MXP Planos\n\n' + lin.join('\n');
+    if (reciboNota) txt += '\n\nℹ️ ' + reciboNota;
     if (fallas) {
       txt += '\n\n⚠️ HAY DIFERENCIAS. Cuarto por cuarto:\n';
       A.nombres.forEach(function (a) {
@@ -6124,6 +6147,31 @@ window.MAXPOWER_SUPABASE = {
       return { x1: cx - dx * L / 2, y1: cy - dz * L / 2, x2: cx + dx * L / 2, y2: cy + dz * L / 2, cx: cx, cy: cy, w: L };
     }
     var totals = { walls: 0, doors: 0, windows: 0, furn: 0, floors: 0, names: [] };
+    // ⚖️ AUDITORÍA 08/28: el archivo trae las paredes DOS VECES —
+    //   rooms[].walls = lo que capturó el sensor (LO QUE DIBUJA MX SCAN)
+    //   walls (raíz)  = lo que devolvió el StructureBuilder de Apple
+    // Medido en los 13 escaneos de Caroline: casi siempre idénticas, pero el
+    // StructureBuilder BORRA paredes (Master Bedroom −1, living/dining −2) y
+    // funde tramos (closet: una pared cambió 31"). Con UN SOLO cuarto el
+    // StructureBuilder no aporta nada (no hay nada que entrelazar) y sí
+    // quita: se usan las del sensor, que es lo que Edgar vio en el teléfono.
+    if (srcRooms.length === 1 && srcRooms[0] && Array.isArray(srcRooms[0].walls) &&
+        srcRooms[0].walls.length && Array.isArray(o.walls)) {
+      var nSens = srcRooms[0].walls.length, nEstr = o.walls.length;
+      if (nSens >= nEstr) {
+        o = {
+          version: o.version,
+          walls: srcRooms[0].walls,
+          doors: srcRooms[0].doors || o.doors || [],
+          windows: srcRooms[0].windows || o.windows || [],
+          openings: srcRooms[0].openings || o.openings || [],
+          objects: srcRooms[0].objects || o.objects || [],
+          sections: o.sections || [], floors: o.floors || [],
+          rooms: srcRooms, mxpMeta: o.mxpMeta, _noType: o._noType
+        };
+        if (nSens > nEstr) reciboNota = 'Se usaron las ' + nSens + ' paredes del SENSOR (las que viste en el teléfono); el StructureBuilder de Apple entregaba ' + nEstr + '.';
+      }
+    }
     // CapturedStructure (escaneo continuo multi-cuarto de MXP Scan): las
     // habitaciones vienen en rooms[] YA alineadas en el mismo origen —
     // se aplanan a un solo set y la fusión de paredes hace el resto
@@ -6681,7 +6729,7 @@ window.MAXPOWER_SUPABASE = {
           var nObj = scanFurnCount(o);
           var doImport = function (withFurn) {
             pushUndo();
-            reciboDib = [];
+            reciboDib = []; reciboNota = '';
             var wAntes = state.walls.length;
             var n = importRoomScan(o, { furniture: withFurn, fileName: f.name });
             var rec = reciboImport(o, {
