@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.P';
+  var APP_VERSION = 'v25.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1505,6 +1505,8 @@ window.MAXPOWER_SUPABASE = {
     } catch (e) { return { err: e.message }; }
   };
   window.__loadSheetDbg = function (j) { try { loadSheetData(j); } catch (e) {} };
+  window.__selGrupoDbg = function (g) { selGroup = g; sel = null; renderSel(); showProps(); };
+  window.__encajaDbg = function () { try { encajarSel(); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
   var view = { tx: 120, ty: 90, z: 1 };
@@ -4064,6 +4066,121 @@ window.MAXPOWER_SUPABASE = {
     });
   }
 
+  /* ══════════ 🎯 ENCAJAR EN LA GUÍA ══════════
+     Pedido de Edgar 08/29, con el plano que le mandó la cliente: "¿podemos
+     adecuar las capturas del scan al plano que ella me dio?".
+
+     El imán (calcePropuesta) resuelve otra cosa: pegar DOS PIEZAS por la
+     pared que comparten. Para meter una pieza DENTRO del contorno de su
+     cuarto hace falta un ajuste GLOBAL — que TODAS las paredes de la pieza
+     queden lo más cerca posible del contorno, no que una sola encaje bien.
+     Medido: con el imán, el office quedaba a 26" de mediana del plano de la
+     cliente porque agarró una pared y se conformó; el escaneo venía girado
+     90° (171x149 contra 138x169).
+
+     Aquí se prueba el giro COMPLETO (barrido de 3° en toda la vuelta, luego
+     fino de medio grado) y el corrimiento alrededor de donde Edgar la dejó.
+     Gana el que deja la menor distancia media al contorno. */
+  function encajarEnGuia(refs, guiaSegs) {
+    var G = guiaSegs && guiaSegs.length ? guiaSegs : (state.guia || []);
+    if (!G.length) return { err: 'No hay guía en la hoja. Calca el plano del cliente y conviértelo con 🧭.' };
+    var ids = {};
+    refs.forEach(function (r) { if (r.kind === 'wall') ids[r.id] = 1; });
+    var ws = state.walls.filter(function (w) { return ids[w.id]; });
+    if (!ws.length) return { err: 'Lo seleccionado no tiene paredes.' };
+
+    // centro de la pieza y muestras a lo largo de sus paredes
+    var cx = 0, cy = 0, TL = 0, muestras = [];
+    ws.forEach(function (w) {
+      var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+      cx += (w.x1 + w.x2) / 2 * L; cy += (w.y1 + w.y2) / 2 * L; TL += L;
+      var n = Math.max(2, Math.round(L / 24));
+      for (var i = 0; i <= n; i++)
+        muestras.push([w.x1 + (w.x2 - w.x1) * i / n, w.y1 + (w.y2 - w.y1) * i / n]);
+    });
+    if (!TL) return { err: 'Lo seleccionado no mide nada.' };
+    cx /= TL; cy /= TL;
+
+    function d2s(px, py, o) {
+      var dx = o.x2 - o.x1, dy = o.y2 - o.y1, Q = dx * dx + dy * dy;
+      var t = Q ? ((px - o.x1) * dx + (py - o.y1) * dy) / Q : 0;
+      t = t < 0 ? 0 : (t > 1 ? 1 : t);
+      return Math.hypot(px - (o.x1 + dx * t), py - (o.y1 + dy * t));
+    }
+    var TOPE = 48;   // más lejos de 4 pies ya no distingue: no premia irse lejos
+    function puntaje(ang, ox, oy) {
+      var co = Math.cos(ang), si = Math.sin(ang), sc = 0;
+      for (var i = 0; i < muestras.length; i++) {
+        var q = muestras[i];
+        var rx = cx + (q[0] - cx) * co - (q[1] - cy) * si + ox;
+        var ry = cy + (q[0] - cx) * si + (q[1] - cy) * co + oy;
+        var d = 1e9;
+        for (var j = 0; j < G.length; j++) {
+          var dd = d2s(rx, ry, G[j]);
+          if (dd < d) { d = dd; if (d < 0.5) break; }
+        }
+        sc += d < TOPE ? d : TOPE;
+      }
+      return sc / muestras.length;
+    }
+
+    /* Se ALTERNAN las dos búsquedas, dos veces. Un solo barrido de ángulo no
+       basta: se hace con la pieza donde Edgar la dejó, y si está descolocada
+       elige un giro que luego, ya centrada, resulta peor. Medido 08/29: el
+       office daba 2.9" saliendo de su sitio y 11.6" saliendo descolocado 25".
+       Girar → centrar → volver a girar → volver a centrar converge. */
+    var best = { ang: 0, ox: 0, oy: 0, sc: puntaje(0, 0, 0) };
+    for (var pasada = 0; pasada < 2; pasada++) {
+      // la vuelta completa, de 3 en 3 grados, DESDE la posición actual
+      for (var a = -180; a < 180; a += 3) {
+        var sc = puntaje(a * Math.PI / 180, best.ox, best.oy);
+        if (sc < best.sc) best = { ang: a * Math.PI / 180, ox: best.ox, oy: best.oy, sc: sc };
+      }
+      // corrimiento grueso → fino, reafinando el ángulo en cada ronda
+      [[60, 10], [12, 2]].forEach(function (paso) {
+        var R = paso[0], P = paso[1];
+        for (var ox = best.ox - R; ox <= best.ox + R; ox += P)
+          for (var oy = best.oy - R; oy <= best.oy + R; oy += P) {
+            var s2 = puntaje(best.ang, ox, oy);
+            if (s2 < best.sc) best = { ang: best.ang, ox: ox, oy: oy, sc: s2 };
+          }
+        for (var da = -4; da <= 4; da += 0.5) {
+          var s3 = puntaje(best.ang + da * Math.PI / 180, best.ox, best.oy);
+          if (s3 < best.sc) best = { ang: best.ang + da * Math.PI / 180, ox: best.ox, oy: best.oy, sc: s3 };
+        }
+      });
+    }
+    if (best.sc > 36) return { err: 'No encuentro dónde encaja (queda a ' + fmtFtIn(best.sc) +
+      ' de media del contorno). Acércala al cuarto que le toca y vuelve a darle.' };
+    return { ang: best.ang, ox: best.ox, oy: best.oy, sc: best.sc, cx: cx, cy: cy };
+  }
+
+  function encajarSel() {
+    if (!selGroup || !selGroup.length) { setHint('🎯 Selecciona primero la pieza que quieres encajar'); return; }
+    var r = encajarEnGuia(selGroup);
+    if (r.err) { setHint('🎯 ' + r.err); return; }
+    pushUndo();
+    var deg = r.ang * 180 / Math.PI;
+    if (Math.abs(deg) > 0.01) rotateRefs(selGroup, deg, r.cx, r.cy);
+    moveRefs(selGroup, r.ox, r.oy);
+    refresh(); renderSel();
+    /* El residuo del encaje es un CONTROL DE CALIDAD gratis: si la pieza no
+       logra pegarse al contorno del plano del cliente, casi siempre es que
+       ese escaneo salió torcido (medido 08/29: el bedroom de Caroline llega
+       como trapecio donde el plano dice rectángulo). Vale la pena decirlo. */
+    var giro = Math.abs(deg) > 0.5 ? ' (la giré ' + Math.round(((deg % 360) + 360) % 360) + '°)' : '';
+    if (r.sc <= 4) {
+      setHint('🎯 Encajada CLAVADA en el plano — ' + r.sc.toFixed(1) + '" de media' + giro + ' · Ctrl+Z si no era ahí');
+    } else if (r.sc <= 10) {
+      setHint('🎯 Encajada: ' + r.sc.toFixed(1) + '" de media del contorno' + giro +
+        ' — normal si el cuarto no es un rectángulo limpio · Ctrl+Z si no era ahí');
+    } else {
+      setHint('⚠️ Encajada, pero queda a ' + r.sc.toFixed(1) + '" del plano del cliente' + giro +
+        '. Eso es mucho: probablemente ESE ESCANEO salió torcido. Compara la forma con el plano — ' +
+        'si no cuadra, fíate del plano y corrige con 📏, o repite ese cuarto.');
+    }
+  }
+
   function deleteGroup() {
     if (!selGroup) return;
     pushUndo();
@@ -4095,6 +4212,7 @@ window.MAXPOWER_SUPABASE = {
         '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
         '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>' +
         '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">🧩 Calzar con lo puesto</button>' +
+        '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">🎯 Encajar en el plano (guía)</button>' +
         '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">🧭 Convertir en guía (survey)</button>' +
         '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
       var bg = $('#prDelGroup');
@@ -4109,6 +4227,8 @@ window.MAXPOWER_SUPABASE = {
       if (bc) bc.addEventListener('click', function () { calzarSel(); });
       var bgd = $('#prGuia');
       if (bgd) bgd.addEventListener('click', function () { hacerGuia(); });
+      var ben = $('#prEncaja');
+      if (ben) ben.addEventListener('click', function () { encajarSel(); });
       return;
     }
     var e = findSel();
