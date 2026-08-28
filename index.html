@@ -418,7 +418,7 @@ body.touch #main { position: relative; }
     </div>
 
     <div class="tgroup">
-      <button id="btnOrtho" title="ORTHO 90°: mantiene las líneas rectas sin apretar Shift (F8)">∟ 90°</button>
+      <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟ 90°</button>
       <select id="wallType" title="Tipo de pared al dibujar">
         <option value="block">8" Block</option>
         <option value="block12">12" Block</option>
@@ -1220,7 +1220,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.P';
+  var APP_VERSION = 'v24.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1604,7 +1604,7 @@ window.MAXPOWER_SUPABASE = {
   function setOrtho(v) {
     orthoOn = v;
     $('#btnOrtho').classList.toggle('active', orthoOn);
-    setHint(orthoOn ? 'ORTHO 90° activado — las líneas salen rectas (F8 o el botón para apagarlo)' : 'ORTHO 90° apagado');
+    setHint(orthoOn ? 'ORTHO 90° activado — dibujar Y arrastrar sale siempre recto (F8 o el botón para apagarlo)' : 'ORTHO 90° apagado — con Shift apretado sigue saliendo recto');
   }
   $('#btnOrtho').addEventListener('click', function () { setOrtho(!orthoOn); });
   function wantOrtho(ev) { return orthoOn || (ev && ev.shiftKey); }
@@ -2309,6 +2309,7 @@ window.MAXPOWER_SUPABASE = {
         var e = entityOf(r);
         if (e) s += selShapeMarkup(r.kind, e);
       });
+      s += rotHandleMarkup(selGroup);
       G.sel.innerHTML = s;
       return;
     }
@@ -2364,6 +2365,9 @@ window.MAXPOWER_SUPABASE = {
           var lx = e.x >= e.tx ? e.x - 3 : e.x - lw + 3;
           s += '<rect class="sel" x="' + lx + '" y="' + (e.y - (e.size || 7)) + '" width="' + lw + '" height="' + ((e.size || 7) + 5) + '"/>';
         }
+        // el circulito de girar tambien en una sola pieza (menos aberturas,
+        // que viajan pegadas a su pared)
+        if (sel.kind !== 'opening') s += rotHandleMarkup([sel]);
       }
     }
     G.sel.innerHTML = s;
@@ -2774,6 +2778,9 @@ window.MAXPOWER_SUPABASE = {
     return selGroup && h && selGroup.some(function (r) { return r.kind === h.kind && r.id === h.id; });
   }
   function selectDown(p, ev) {
+    // el circulito de giro manda: se comprueba ANTES de cualquier otra cosa
+    if (selGroup && tryRotateGrab(p, selGroup)) return;
+    if (sel && sel.kind !== 'opening' && findSel() && tryRotateGrab(p, [sel])) return;
     var h = hitTest(p);
     // arrastrar cualquier pieza del grupo mueve el grupo completo
     if (inGroup(h)) {
@@ -2885,8 +2892,31 @@ window.MAXPOWER_SUPABASE = {
     }
     if (drag.mode === 'groupmove') {
       drag.moved = true;
-      applyGroupDelta(drag.items, p[0] - drag.start[0], p[1] - drag.start[1]);
+      var gdx = p[0] - drag.start[0], gdy = p[1] - drag.start[1];
+      if (wantOrtho(ev)) { if (Math.abs(gdx) >= Math.abs(gdy)) gdy = 0; else gdx = 0; }
+      applyGroupDelta(drag.items, gdx, gdy);
       renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
+      return;
+    }
+    if (drag.mode === 'rotate') {
+      drag.moved = true;
+      var a1 = Math.atan2(p[1] - drag.cy, p[0] - drag.cx) * 180 / Math.PI;
+      var deg = a1 - drag.a0;
+      while (deg > 180) deg -= 360;
+      while (deg < -180) deg += 360;
+      // a donde queda el angulo dominante de la pieza si giro esto
+      var res = drag.base + deg;
+      res = ((res % 90) + 135) % 90 - 45;          // -45..45
+      var recto = Math.abs(res) < 4;
+      if (recto) deg -= res;                        // se cuadra sola
+      else deg = Math.round(deg);
+      var ah = (drag.a0 + deg) * Math.PI / 180;
+      drag.hx = drag.cx + Math.cos(ah) * drag.R;
+      drag.hy = drag.cy + Math.sin(ah) * drag.R;
+      restoreItems(drag.items);
+      rotateRefs(drag.refs, deg, drag.cx, drag.cy);
+      renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
+      setHint('↻ ' + deg.toFixed(1) + '°' + (recto ? ' — recto ✓ (se cuadró sola)' : ' — suéltalo cerca de recto y se cuadra'));
       return;
     }
     if (drag.mode === 'pan') {
@@ -2896,15 +2926,21 @@ window.MAXPOWER_SUPABASE = {
     }
     if (drag.mode === 'endpoint') {
       var np = snapWallPt(p);
+      // con SHIFT (o el botón ∟ 90°) la pared no se puede inclinar: queda
+      // recta respecto al extremo que se queda quieto
+      var anc = drag.end === 1 ? [drag.wall.x2, drag.wall.y2] : [drag.wall.x1, drag.wall.y1];
+      if (wantOrtho(ev)) np = orthoLock(anc, np);
       if (drag.end === 1) { drag.wall.x1 = np[0]; drag.wall.y1 = np[1]; }
       else { drag.wall.x2 = np[0]; drag.wall.y2 = np[1]; }
       drag.moved = true;
+      if (wantOrtho(ev)) setHint('∟ Shift: pared recta · ' + fmtFtIn(Math.hypot(drag.wall.x2 - drag.wall.x1, drag.wall.y2 - drag.wall.y1)));
       renderWalls(); renderSel(); return;
     }
     if (drag.mode === 'dimEnd') {
       var od = drag.dim;
       var anchor = drag.end === 1 ? [od.x2, od.y2] : [od.x1, od.y1];
-      var dp = orthoSnap(anchor, p);   // se endereza solo si va casi recto
+      // se endereza solo si va casi recto; con SHIFT el candado es total
+      var dp = wantOrtho(ev) ? orthoLock(anchor, p) : orthoSnap(anchor, p);
       if (drag.end === 1) { od.x1 = dp[0]; od.y1 = dp[1]; }
       else { od.x2 = dp[0]; od.y2 = dp[1]; }
       drag.moved = true;
@@ -2943,6 +2979,9 @@ window.MAXPOWER_SUPABASE = {
     if (drag.mode === 'move') {
       var dx = p[0] - drag.start[0], dy = p[1] - drag.start[1];
       if (Math.hypot(dx, dy) < 2 / view.z) return;
+      // con SHIFT (o ∟ 90°) la pieza se corre en línea recta: o de lado
+      // o de arriba abajo, nunca en diagonal
+      if (wantOrtho(ev)) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
       drag.moved = true;
       var e = drag.e, o = drag.orig;
       if (drag.kind === 'symbol' || drag.kind === 'text') {
@@ -2992,6 +3031,12 @@ window.MAXPOWER_SUPABASE = {
       }
       drag = null;
       return;
+    }
+    if (drag.mode === 'rotate' && drag.moved) {
+      pushUndo(drag.snap);
+      // el circulito vuelve a su sitio sobre la caja ya girada
+      drag.hx = null; renderSel();
+      refreshCounts(); showProps();
     }
     if (drag.mode === 'groupmove' && drag.moved) {
       pushUndo(drag.snap);
@@ -3303,19 +3348,74 @@ window.MAXPOWER_SUPABASE = {
   // girar la pieza seleccionada completa (para armar el rompecabezas):
   // paredes, textos, cotas, areas y simbolos rotan alrededor del centro
   // del grupo; las aberturas viajan solas con su pared
-  function rotateRefs(refs, deg) {
-    var rad = deg * Math.PI / 180, cr = Math.cos(rad), sr = Math.sin(rad);
+  // caja y centro de una selección (para girar y para las asas)
+  function refsBBox(refs) {
     var xs = [], ys = [];
-    refs.forEach(function (r) {
+    (refs || []).forEach(function (r) {
       var e = entityOf(r);
       if (!e) return;
       if (e.pts) e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
       else if (e.x1 != null) { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
       else if (e.x != null) { xs.push(e.x); ys.push(e.y); }
     });
-    if (!xs.length) return;
-    var cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2;
-    var cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+    if (!xs.length) return null;
+    var x1 = Math.min.apply(null, xs), x2 = Math.max.apply(null, xs);
+    var y1 = Math.min.apply(null, ys), y2 = Math.max.apply(null, ys);
+    return { x1: x1, y1: y1, x2: x2, y2: y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2 };
+  }
+  // ángulo dominante de la selección: cuánto hay que girarla para dejarla
+  // RECTA. OJO: no vale promediar todo — un cuarto real trae paredes a 45°
+  // (nichos, esquinas cortadas) y el promedio se iría al medio de las dos
+  // familias. Se busca el PICO (la familia con más metros de pared) y solo
+  // se promedia esa.
+  function refsAngle(refs) {
+    var segs = [];
+    (refs || []).forEach(function (r) {
+      var e = entityOf(r);
+      if (!e) return;
+      var raw = [];
+      if (e.x1 != null) raw.push([e.x1, e.y1, e.x2, e.y2]);
+      else if (e.pts) for (var i = 0; i < e.pts.length; i++) {
+        var q = e.pts[(i + 1) % e.pts.length];
+        raw.push([e.pts[i][0], e.pts[i][1], q[0], q[1]]);
+      }
+      raw.forEach(function (g) {
+        var dx = g[2] - g[0], dy = g[3] - g[1], L = Math.hypot(dx, dy);
+        if (L < 6) return;
+        var a = Math.atan2(dy, dx) * 180 / Math.PI;
+        segs.push([((a % 90) + 90) % 90, L]);          // 0..90
+      });
+    });
+    if (!segs.length) return 0;
+    // histograma de 1° con ventana de ±4° (una familia no se parte en dos)
+    var bins = [], i2;
+    for (i2 = 0; i2 < 90; i2++) bins[i2] = 0;
+    segs.forEach(function (g) { bins[Math.floor(g[0]) % 90] += g[1]; });
+    var best = 0, bestV = -1;
+    for (i2 = 0; i2 < 90; i2++) {
+      var v = 0;
+      for (var k = -4; k <= 4; k++) v += bins[(i2 + k + 90) % 90];
+      if (v > bestV) { bestV = v; best = i2; }
+    }
+    // media circular SOLO de la familia dominante (±10° del pico)
+    var sinS = 0, cosS = 0;
+    segs.forEach(function (g) {
+      var d = g[0] - best;
+      while (d > 45) d -= 90;
+      while (d < -45) d += 90;
+      if (Math.abs(d) > 10) return;
+      var a4 = g[0] * 4 * Math.PI / 180;
+      sinS += Math.sin(a4) * g[1]; cosS += Math.cos(a4) * g[1];
+    });
+    if (!sinS && !cosS) return 0;
+    return Math.atan2(sinS, cosS) / 4 * 180 / Math.PI;   // grados, −45..45
+  }
+  function rotateRefs(refs, deg, cx0, cy0) {
+    var rad = deg * Math.PI / 180, cr = Math.cos(rad), sr = Math.sin(rad);
+    var bb = refsBBox(refs);
+    if (!bb) return;
+    var cx = cx0 == null ? bb.cx : cx0;
+    var cy = cy0 == null ? bb.cy : cy0;
     function rot(x, y) {
       var ox = x - cx, oy = y - cy;
       return [Math.round(cx + ox * cr - oy * sr), Math.round(cy + ox * sr + oy * cr)];
@@ -3335,12 +3435,67 @@ window.MAXPOWER_SUPABASE = {
       }
     });
   }
+  // 🔵 ASA DE GIRO: el circulito que sale ARRIBA de lo seleccionado.
+  // Se agarra con el mouse y se arrastra: la pieza gira en vivo y se
+  // endereza sola cuando queda casi a escuadra (sin botones de grados).
+  function rotHandleOf(refs) {
+    var bb = refsBBox(refs);
+    if (!bb) return null;
+    var d = 34 / view.z + 10;
+    return { x: bb.cx, y: bb.y1 - d, cx: bb.cx, cy: (bb.y1 + bb.y2) / 2, top: bb.y1 };
+  }
+  function rotHandleMarkup(refs) {
+    var H = rotHandleOf(refs);
+    if (!H) return '';
+    // mientras se gira, el circulito sigue al dedo (no salta con la caja)
+    if (drag && drag.mode === 'rotate' && drag.hx != null) { H.x = drag.hx; H.y = drag.hy; H.top = drag.cy; }
+    var r = (document.body.classList.contains('touch') ? 11 : 7) / view.z + 2;
+    return '<line x1="' + H.x + '" y1="' + H.top + '" x2="' + H.x + '" y2="' + H.y +
+      '" stroke="#0b84ff" stroke-width="' + (1 / view.z) + '" stroke-dasharray="' + (3 / view.z) + ' ' + (2 / view.z) + '"/>' +
+      '<circle class="handle" data-rot="1" cx="' + H.x + '" cy="' + H.y + '" r="' + r + '" fill="#0b84ff" fill-opacity="0.35"/>';
+  }
+  function restoreItems(items) {
+    items.forEach(function (it) {
+      var e = it.e, o = it.orig;
+      if (!e) return;
+      if (o.pts) e.pts = o.pts.map(function (q) { return [q[0], q[1]]; });
+      if (o.x1 != null) { e.x1 = o.x1; e.y1 = o.y1; e.x2 = o.x2; e.y2 = o.y2; }
+      if (o.x != null) { e.x = o.x; e.y = o.y; }
+      if (o.tx != null) { e.tx = o.tx; e.ty = o.ty; }
+      if (o.rot != null) e.rot = o.rot;
+    });
+  }
+  // arranca el arrastre de giro si el clic cayo sobre el circulito
+  function tryRotateGrab(p, refs) {
+    var H = rotHandleOf(refs);
+    if (!H) return false;
+    var rr = (document.body.classList.contains('touch') ? 16 : 11) / view.z + 4;
+    if (Math.hypot(p[0] - H.x, p[1] - H.y) > rr) return false;
+    drag = {
+      mode: 'rotate', refs: refs, cx: H.cx, cy: H.cy,
+      a0: Math.atan2(p[1] - H.cy, p[0] - H.cx) * 180 / Math.PI,
+      R: Math.max(20, Math.hypot(H.x - H.cx, H.y - H.cy)),
+      base: refsAngle(refs), snap: snapshot(), moved: false,
+      items: refs.map(function (r) { return { ref: r, e: entityOf(r), orig: JSON.parse(JSON.stringify(entityOf(r))) }; })
+    };
+    return true;
+  }
   function rotateGroup(deg) {
     if (!selGroup) return;
     pushUndo();
     rotateRefs(selGroup, deg);
     refresh(); renderSel();
     setHint('↻ Pieza girada ' + deg + '° — arrastrala a su sitio y 🧲 Soldar armado');
+  }
+  // 📐 ENDEREZAR: gira la selección lo justo para que sus paredes queden
+  // rectas (horizontales/verticales) — un toque y el cuarto sale derecho
+  function straightenRefs(refs) {
+    var a = refsAngle(refs);
+    if (Math.abs(a) < 0.05) { setHint('📐 Ya está recto'); return; }
+    pushUndo();
+    rotateRefs(refs, -a);
+    refresh(); renderSel();
+    setHint('📐 Enderezado ' + (-a).toFixed(1) + '° — ya está a escuadra');
   }
 
   function deleteGroup() {
@@ -3369,6 +3524,7 @@ window.MAXPOWER_SUPABASE = {
         '<button id="prRotL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
         '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
+        '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>' +
         '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
@@ -3376,6 +3532,8 @@ window.MAXPOWER_SUPABASE = {
       if (bl) bl.addEventListener('click', function () { rotateGroup(-90); });
       if (br) br.addEventListener('click', function () { rotateGroup(90); });
       if (b8) b8.addEventListener('click', function () { rotateGroup(180); });
+      var be = $('#prEndG');
+      if (be) be.addEventListener('click', function () { straightenRefs(selGroup); });
       return;
     }
     var e = findSel();
@@ -3505,7 +3663,8 @@ window.MAXPOWER_SUPABASE = {
       html += '<div style="display:flex;gap:6px;margin-top:6px">' +
         '<button id="prRotSelL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotSelR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
-        '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>';
+        '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>' +
+        '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>';
     }
     body.innerHTML = html;
 
@@ -3518,6 +3677,7 @@ window.MAXPOWER_SUPABASE = {
     on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
     on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
     on('prRotSel45', 'click', function () { pushUndo(); rotateRefs([sel], 45); refresh(); renderSel(); });
+    on('prEndSel', 'click', function () { straightenRefs([sel]); });
     on('prWallType', 'change', function (n) {
       if (!WALL_TYPES[n.value]) return;
       pushUndo(); e.type = n.value; e.t = WALL_TYPES[n.value].t; refresh();
@@ -6557,6 +6717,8 @@ window.MAXPOWER_SUPABASE = {
 
   /* ---------------- inicio ---------------- */
   window.__mxpRefresh = refresh;
+  window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
+  window.__mxpAngle = refsAngle;
   // logo oficial de Max Power en la barra (viene de js/logo.js)
   try {
     if (window.MAXPOWER_LOGO) {
