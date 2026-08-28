@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.N';
+  var APP_VERSION = 'v25.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1473,6 +1473,7 @@ window.MAXPOWER_SUPABASE = {
     dims: [],      // {id,x1,y1,x2,y2,off}
     areas: [],     // {id,pts:[[x,y]…],pattern,rot}
     guia: [],      // {x1,y1,x2,y2} — contorno del survey: guía visual e imán, NO cuenta en nada
+    huecos: [],    // {x,y} — donde Edgar BORRÓ pared a propósito: la soldadura no rellena ahí
     wires: [],     // {id,x1,y1,x2,y2,style,side,bulge}
     leaders: [],   // {id,tx,ty,x,y,text,size}
     bg: null,      // {url,x,y,w,h,opacity}
@@ -1523,6 +1524,7 @@ window.MAXPOWER_SUPABASE = {
       texts: state.texts, dims: state.dims, areas: state.areas,
       wires: state.wires, leaders: state.leaders, panels: state.panels,
       guia: state.guia,
+      huecos: state.huecos,
       bgMeta: state.bg ? { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h, opacity: state.bg.opacity } : null,
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
@@ -1591,6 +1593,7 @@ window.MAXPOWER_SUPABASE = {
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.panels = o.panels || [];
     state.guia = o.guia || [];
+    state.huecos = o.huecos || [];
     if (state.bg && o.bgMeta) { state.bg.x = o.bgMeta.x; state.bg.y = o.bgMeta.y; state.bg.w = o.bgMeta.w; state.bg.h = o.bgMeta.h; state.bg.opacity = o.bgMeta.opacity; }
     if (state.bg2 && o.bg2Meta) { state.bg2.x = o.bg2Meta.x; state.bg2.y = o.bg2Meta.y; state.bg2.w = o.bg2Meta.w; state.bg2.h = o.bg2Meta.h; state.bg2.opacity = o.bg2Meta.opacity; }
     limpiaHuerfanas();      // aberturas cuya pared ya no existe
@@ -3825,7 +3828,7 @@ window.MAXPOWER_SUPABASE = {
       if (!w) return;
       var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1;
       var t = o.pos / L;
-      out.push({ x: w.x1 + (w.x2 - w.x1) * t, y: w.y1 + (w.y2 - w.y1) * t, w: o.w });
+      out.push({ x: w.x1 + (w.x2 - w.x1) * t, y: w.y1 + (w.y2 - w.y1) * t, w: o.w, wid: o.wallId });
     });
     return out;
   }
@@ -3885,8 +3888,26 @@ window.MAXPOWER_SUPABASE = {
           var m1 = Math.min(proj(pa), proj(pb)), m2 = Math.max(proj(pa), proj(pb));
           var r1 = -dr.L / 2, r2 = dr.L / 2;
           var alter = [0, r1 - m1, r2 - m2, (r1 + r2) / 2 - (m1 + m2) / 2];
-          alter.forEach(function (s) {
-            if (Math.abs(s) > 24) return;
+          // 🚪 PUERTA CON PUERTA: si la pared que se mueve trae una puerta y
+          // la quieta tiene la suya, probar el corrimiento que las deja UNA
+          // SOBRE OTRA. Con el premio de puertas en el puntaje, cuando ese
+          // corrimiento encaja, gana — y las puertas quedan casadas exactas.
+          if (opts.abMov && opts.abFij) {
+            opts.abMov.forEach(function (am) {
+              if (am.wid !== wm.id) return;
+              var g3 = gir(am.x, am.y);
+              var pm2 = (g3[0] - dr.mx) * dr.ux + (g3[1] - dr.my) * dr.uy;
+              opts.abFij.forEach(function (af) {
+                if (af.wid !== wr.id) return;
+                if (Math.abs(am.w - af.w) > 8) return;
+                var pf2 = (af.x - dr.mx) * dr.ux + (af.y - dr.my) * dr.uy;
+                var sAl = pf2 - pm2;
+                if (Math.abs(sAl) <= 36) alter.push(sAl);
+              });
+            });
+          }
+          alter.forEach(function (s, si2) {
+            if (Math.abs(s) > (si2 >= 4 ? 36 : 24)) return;
             var a1 = m1 + s, a2 = m2 + s;
             var sol = Math.min(a2, r2) - Math.max(a1, r1);   // solape a lo largo
             if (sol < Math.min(24, Math.min(dm.L, dr.L) * 0.4)) return;
@@ -3915,7 +3936,10 @@ window.MAXPOWER_SUPABASE = {
                 var gx = g2[0] + tx, gy = g2[1] + ty;
                 opts.abFij.forEach(function (af) {
                   if (Math.abs(am.w - af.w) > 8) return;
-                  if (Math.hypot(gx - af.x, gy - af.y) < 14) puertasOK++;
+                  // casada = casada: a 6" o menos. (Con 14" el corrimiento
+                  // "centrado" también cobraba el premio con las puertas a
+                  // 12" — medido 08/29 — y ganaba al corrimiento exacto.)
+                  if (Math.hypot(gx - af.x, gy - af.y) < 6) puertasOK++;
                 });
               });
               costo -= Math.min(puertasOK, 2) * 60;
@@ -3959,7 +3983,7 @@ window.MAXPOWER_SUPABASE = {
         var a = gp(w.x1, w.y1), b2 = gp(w.x2, w.y2);
         return { id: w.id, x1: a[0], y1: a[1], x2: b2[0], y2: b2[1] };
       });
-      var abG = abM.map(function (o) { var g = gp(o.x, o.y); return { x: g[0], y: g[1], w: o.w }; });
+      var abG = abM.map(function (o) { var g = gp(o.x, o.y); return { x: g[0], y: g[1], w: o.w, wid: o.wid }; });
       var o2 = {};
       for (var k in (opts || {})) o2[k] = opts[k];
       o2.abMov = abG; o2.abFij = abF;
@@ -4034,6 +4058,9 @@ window.MAXPOWER_SUPABASE = {
     pushUndo();
     selGroup.forEach(function (r) {
       if (r.kind === 'wall') {
+        var wDel = null;
+        state.walls.forEach(function (w) { if (w.id === r.id) wDel = w; });
+        if (wDel) recuerdaHueco(wDel);
         state.openings = state.openings.filter(function (o) { return o.wallId !== r.id; });
         state.walls = state.walls.filter(function (w) { return w.id !== r.id; });
       } else {
@@ -4330,10 +4357,25 @@ window.MAXPOWER_SUPABASE = {
     on('prLeadSize', 'change', function (n) { pushUndo(); e.size = parseFloat(n.value) || 7; refresh(); });
   }
 
+  function recuerdaHueco(w) {
+    state.huecos = state.huecos || [];
+    state.huecos.push({ x: Math.round((w.x1 + w.x2) / 2), y: Math.round((w.y1 + w.y2) / 2) });
+    if (state.huecos.length > 60) state.huecos = state.huecos.slice(-60);
+  }
+  // ¿este punto cae donde Edgar borró pared a propósito?
+  function esHuecoQuerido(x, y) {
+    if (!state.huecos || !state.huecos.length) return false;
+    for (var i = 0; i < state.huecos.length; i++)
+      if (Math.hypot(x - state.huecos[i].x, y - state.huecos[i].y) < 16) return true;
+    return false;
+  }
   function deleteSelected() {
     var e = findSel(); if (!e) return;
     pushUndo();
     if (sel.kind === 'wall') {
+      // Edgar borró esta pared A PROPÓSITO (p. ej. para dejar el hueco de
+      // una puerta). Se recuerda el centro: la soldadura no rellena ahí.
+      recuerdaHueco(e);
       state.walls = state.walls.filter(function (w) { return w.id !== e.id; });
       state.openings = state.openings.filter(function (o) { return o.wallId !== e.id; });
     } else {
@@ -5322,6 +5364,20 @@ window.MAXPOWER_SUPABASE = {
         L.push(' ' + (a.name || '(sin nombre)') + (a.sqft ? ' — ' + a.sqft + ' sq ft' : ''));
       });
     }
+    // el armado por piezas, contado (así el cerebro sabe en qué fase está Edgar)
+    var pzs = piezasConNombre();
+    if (pzs.length > 1) {
+      L.push('PIEZAS SUELTAS EN LA HOJA: ' + pzs.length + ' — Edgar está ARMANDO el rompecabezas.');
+      pzs.forEach(function (pz) {
+        var ftp = 0;
+        pz.ws.forEach(function (w) { ftp += Math.hypot(w.x2 - w.x1, w.y2 - w.y1); });
+        L.push(' · ' + (pz.noms[0] || '(sin rótulo)') + ' — ' + pz.ws.length + ' paredes, ' + Math.round(ftp / 12) + ' ft');
+      });
+      L.push('(Él puede escribir en el chat: "suelda el X con el Y" y la app lo hace sola, gratis.)');
+    }
+    if (state.guia && state.guia.length) {
+      L.push('HAY GUÍA en la hoja (' + state.guia.length + ' tramos): el contorno del survey o la casa fantasma — referencia, no cuenta en materiales.');
+    }
     var an = analizarPlano();
     if (an.av.length) {
       L.push('DIAGNÓSTICO YA MEDIDO POR LA APP:');
@@ -5902,6 +5958,7 @@ window.MAXPOWER_SUPABASE = {
     unbendTees(trabajo, 3.5);
     extenderApoyos(trabajo, 10);
     recortaCruces(trabajo);
+    fundeColineales(trabajo);
     microSolda(trabajo);
     // 🔒 CANDADO: ninguna pared puede salir DEFORMADA del soldado. Si el
     // imán la giró más de 5°, corrió su centro más de 30" o le cambió el
@@ -6715,6 +6772,15 @@ window.MAXPOWER_SUPABASE = {
   }
   // cuartos vecinos: la MISMA pared escaneada desde los dos lados llega como
   // dos paredes paralelas casi encimadas — aquí se fusionan en una sola
+  // ¿qué tan bien armada está una pared? = qué tan recta respecto a la
+  // rejilla de 45°. Al fusionar dos paredes, la MÁS RECTA manda: su eje se
+  // queda, la otra se acomoda. (Pedido de Edgar 08/29: "de las dos, la
+  // pared mejor armada es la que manda sobre la otra".)
+  function ruidoDeParada(w) {
+    var a = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+    var r = ((a % 45) + 45) % 45;
+    return Math.min(r, 45 - r);
+  }
   function mergeParallelWalls(walls) {
     // GAP = a qué distancia dos paredes paralelas se consideran LA MISMA.
     // Medido con Edgar: colocando las piezas a mano la separación real
@@ -6756,7 +6822,11 @@ window.MAXPOWER_SUPABASE = {
              abarca las dos. */
           if (over >= 20 && Math.abs(axA - axB) <= 6) {
             var u1 = Math.min(a1, b1), u2 = Math.max(a2, b2);
-            var ejeU = Math.round((axA * La0 + axB * Lb0) / (La0 + Lb0 || 1));
+            var rA2 = ruidoDeParada(a), rB2 = ruidoDeParada(b);
+            var ejeU;
+            if (rA2 + 0.3 < rB2) ejeU = Math.round(axA);
+            else if (rB2 + 0.3 < rA2) ejeU = Math.round(axB);
+            else ejeU = Math.round((axA * La0 + axB * Lb0) / (La0 + Lb0 || 1));
             if (H) { a.y1 = a.y2 = ejeU; a.x1 = Math.round(u1); a.x2 = Math.round(u2); }
             else { a.x1 = a.x2 = ejeU; a.y1 = Math.round(u1); a.y2 = Math.round(u2); }
             if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
@@ -6789,11 +6859,15 @@ window.MAXPOWER_SUPABASE = {
           }
           continue;
         }
-        // fusionar. El eje se pondera por LARGO: la pieza grande manda y
-        // no se mueve, la chica es la que se acomoda (que es como Edgar
-        // arma el rompecabezas). Y se queda el espesor MAYOR.
+        // fusionar. El eje: manda LA MEJOR ARMADA (la más recta respecto a
+        // la rejilla). Si están igual de rectas, se pondera por largo como
+        // antes (la grande manda). Espesor: se queda el MAYOR.
         var La = La0, Lb = Lb0;
-        var ax2 = Math.round((axA * La + axB * Lb) / (La + Lb || 1));
+        var rA = ruidoDeParada(a), rB = ruidoDeParada(b);
+        var ax2;
+        if (rA + 0.3 < rB) ax2 = Math.round(axA);
+        else if (rB + 0.3 < rA) ax2 = Math.round(axB);
+        else ax2 = Math.round((axA * La + axB * Lb) / (La + Lb || 1));
         // el tramo es el de la LARGA (la corta ya está dentro)
         var lo = La >= Lb ? a1 : b1, hi = La >= Lb ? a2 : b2;
         if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
@@ -6913,6 +6987,51 @@ window.MAXPOWER_SUPABASE = {
   }
   // esquinas en L donde AMBAS paredes se quedan cortas (ninguna alcanza el
   // cuerpo de la otra): se extienden las dos hasta su intersección
+  /* 🪢 UN SOLO LAYOUT (pedido de Edgar 08/29): tras soldar, dos tramos
+     colineales que se tocan punta con punta son LA MISMA pared partida en
+     dos. Se funden en una — el plano queda de piezas enteras, no de
+     tramitos. Solo mismo tipo, misma dirección (≤2.5°) y puntas pegadas
+     (≤2.5"); las puertas se re-enganchan solas después (van por posición). */
+  function fundeColineales(walls) {
+    var cambio = true, guarda = 0;
+    while (cambio && guarda++ < 8) {
+      cambio = false;
+      for (var i = 0; i < walls.length && !cambio; i++) {
+        var a = walls[i];
+        for (var j = i + 1; j < walls.length && !cambio; j++) {
+          var b = walls[j];
+          if (a.type !== b.type) continue;
+          var aa = Math.atan2(a.y2 - a.y1, a.x2 - a.x1) * 180 / Math.PI;
+          var ab = Math.atan2(b.y2 - b.y1, b.x2 - b.x1) * 180 / Math.PI;
+          var da = Math.abs(aa - ab) % 180;
+          if (da > 90) da = 180 - da;
+          if (da > 2.5) continue;
+          // ¿qué puntas se tocan?
+          var pares2 = [['1','1'],['1','2'],['2','1'],['2','2']];
+          for (var q = 0; q < 4; q++) {
+            var ea = pares2[q][0], eb = pares2[q][1];
+            var d = Math.hypot(a['x'+ea]-b['x'+eb], a['y'+ea]-b['y'+eb]);
+            if (d > 2.5) continue;
+            // los extremos LEJANOS pasan a ser la pared única
+            var fa = ea === '1' ? '2' : '1', fb = eb === '1' ? '2' : '1';
+            var nx1 = a['x'+fa], ny1 = a['y'+fa], nx2 = b['x'+fb], ny2 = b['y'+fb];
+            // la unión debe seguir la misma línea (no doblar en V)
+            var Ln = Math.hypot(nx2-nx1, ny2-ny1);
+            var La2 = Math.hypot(a.x2-a.x1, a.y2-a.y1), Lb2 = Math.hypot(b.x2-b.x1, b.y2-b.y1);
+            if (Ln < (La2 + Lb2) * 0.985) continue;   // en V: se doblaría — no
+            a.x1 = nx1; a.y1 = ny1; a.x2 = nx2; a.y2 = ny2;
+            if ((b.t || 0) > (a.t || 0)) { a.type = b.type; a.t = b.t; }
+            a.rids = (a.rids || []).concat(b.rids || []);
+            a._fus = true;
+            walls.splice(j, 1);
+            cambio = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   /* 🔗 MICRO-SOLDADURA: dos puntas a 3-4 pulgadas una de otra no son una
      esquina, son LA MISMA esquina con ruido (medido 28/08: (351,194) contra
      (351,197) dejaba un hueco visible y sin inglete). Se llevan al medio. */
@@ -7070,6 +7189,7 @@ window.MAXPOWER_SUPABASE = {
       if (Math.hypot(ix - ax, iy - ay) > 30 || Math.hypot(ix - bx, iy - by) > 30) return;
       // ¿hay una puerta/abertura viva asomada al hueco? entonces es una entrada
       var mx = (ax + bx) / 2, my = (ay + by) / 2, entrada = false;
+      if (esHuecoQuerido(mx, my)) return;   // Edgar borró pared aquí: se respeta
       state.openings.forEach(function (op) {
         if (entrada) return;
         var wo = null;
@@ -7188,6 +7308,9 @@ window.MAXPOWER_SUPABASE = {
           var gap = Math.max(a1, b1) - Math.min(a2, b2);   // >0 = hueco entre tramos
           if (gap > MAXGAP) continue;
           if (gap < -2) continue;                            // encimados: eso es de mergeParallel
+          // si Edgar borró pared justo AHÍ, ese hueco es una puerta suya
+          var gmid = (Math.min(a2, b2) + Math.max(a1, b1)) / 2;
+          if (esHuecoQuerido(H ? gmid : (axA + axB) / 2, H ? (axA + axB) / 2 : gmid)) continue;
           var ax2 = Math.round((axA + axB) / 2), lo = Math.min(a1, b1), hi = Math.max(a2, b2);
           if (H) { a.y1 = ax2; a.y2 = ax2; a.x1 = lo; a.x2 = hi; }
           else { a.x1 = ax2; a.x2 = ax2; a.y1 = lo; a.y2 = hi; }
@@ -8133,6 +8256,7 @@ window.MAXPOWER_SUPABASE = {
     state.leaders = o.state.leaders || [];
     state.panels = o.state.panels || [];
     state.guia = o.state.guia || [];
+    state.huecos = o.state.huecos || [];
     state.precision = o.state.precision || 4;
     $('#pjPrec').value = String(state.precision);
     state.printScale = o.state.printScale || 'fit';
