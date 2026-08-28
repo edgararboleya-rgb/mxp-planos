@@ -1233,7 +1233,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v24.Z';
+  var APP_VERSION = 'v25.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3873,7 +3873,14 @@ window.MAXPOWER_SUPABASE = {
     refresh();
   }
 
-  /* ---------------- conteo de materiales ---------------- */
+  /* ---------------- conteo de materiales ----------------
+     OJO (auditoría 08/28): las aberturas cuyo muro ya no existe seguían
+     contando en el takeoff, el CSV y el estimado. Se cuenta solo lo vivo. */
+  function aberturasVivas() {
+    return state.openings.filter(function (o) {
+      return state.walls.some(function (w) { return w.id === o.wallId; });
+    });
+  }
   function refreshCounts() {
     var body = $('#countsBody');
     var rows = '';
@@ -3893,7 +3900,7 @@ window.MAXPOWER_SUPABASE = {
     });
     // aberturas
     var openCount = {};
-    state.openings.forEach(function (o) { openCount[o.type] = (openCount[o.type] || 0) + 1; });
+    aberturasVivas().forEach(function (o) { openCount[o.type] = (openCount[o.type] || 0) + 1; });
     if (Object.keys(openCount).length) {
       rows += '<tr class="cat"><td colspan="2">Doors &amp; Windows</td></tr>';
       Object.keys(openCount).forEach(function (k) {
@@ -3949,7 +3956,7 @@ window.MAXPOWER_SUPABASE = {
       rows.push([SYMBOL_CATS[d.cat] || d.cat, d.name, '', byCat[k], '', '', '']);
     });
     var openCount = {};
-    state.openings.forEach(function (o) { openCount[o.type] = (openCount[o.type] || 0) + 1; });
+    aberturasVivas().forEach(function (o) { openCount[o.type] = (openCount[o.type] || 0) + 1; });
     Object.keys(openCount).forEach(function (k) {
       rows.push(['Doors & Windows', OPEN_NAMES[k], '', openCount[k], '', '', '']);
     });
@@ -5076,6 +5083,9 @@ window.MAXPOWER_SUPABASE = {
     } else {
       state.walls = trabajo;
     }
+    // la marca de fusión no puede quedarse pegada: si se guarda en el
+    // proyecto, la próxima soldadura exime a esa pared del candado
+    state.walls.forEach(function (w) { delete w._fus; });
     // reconectar aberturas. Tres reglas que salieron de medir el daño:
     //  a) si la pared de siempre sobrevivió y sigue cerca, la puerta NO se
     //     muda a la pared vecina (antes saltaba hasta 10")
@@ -6173,17 +6183,27 @@ window.MAXPOWER_SUPABASE = {
       sumaSup(rm.openings, 'aberturas');
       return unCuarto2(rm);
     }
+    function flatM(t) { return Array.isArray(t[0]) ? [].concat(t[0], t[1], t[2], t[3]) : t; }
     function unCuarto2(rm) {          // solo la superficie del piso
+      // OJO (auditoría 08/28): polygonCorners viene en coordenadas LOCALES
+      // de la superficie — su Z es ~0. Tomando la Z, el área salía CERO y el
+      // recibo daba falsa alarma en cualquier escaneo sin mxpMeta. Hay que
+      // pasar los puntos por la matriz, igual que hace el importador.
       var mejor = 0;
       (rm.floors || []).forEach(function (f) {
         var pc = f.polygonCorners;
         if (!Array.isArray(pc) || pc.length < 3) return;
+        var t = f.transform ? flatM(f.transform) : null;
+        var pts = pc.map(function (c) {
+          if (!t) return [c[0] * M, (c[2] != null ? c[2] : c[1]) * M];
+          var wx = t[0] * c[0] + t[4] * c[1] + t[8] * (c[2] || 0) + t[12];
+          var wz = t[2] * c[0] + t[6] * c[1] + t[10] * (c[2] || 0) + t[14];
+          return [wx * M, wz * M];
+        });
         var a = 0;
-        for (var i = 0; i < pc.length; i++) {
-          var p1 = pc[i], p2 = pc[(i + 1) % pc.length];
-          var x1 = p1[0] * M, z1 = (p1[2] != null ? p1[2] : p1[1]) * M;
-          var x2 = p2[0] * M, z2 = (p2[2] != null ? p2[2] : p2[1]) * M;
-          a += x1 * z2 - x2 * z1;
+        for (var i = 0; i < pts.length; i++) {
+          var p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+          a += p1[0] * p2[1] - p2[0] * p1[1];
         }
         mejor = Math.max(mejor, Math.abs(a / 2) / 144);
       });
