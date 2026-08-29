@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.Z';
+  var APP_VERSION = 'v26.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -404,6 +404,48 @@
     return sn ? { p: [sn.x, sn.y], sn: sn } : { p: p, sn: null };
   }
 
+  // FILLET al dibujar: la punta que se pasa del cruce se RECORTA y la que
+  // se queda a una rendija se EXTIENDE — exacto al cruce de EJES con la
+  // pared vecina. Solo se toca la pared NUEVA, nunca las existentes.
+  // (De la foto de Edgar calcando el bano de Caroline: puntas asomadas
+  // dentro del bloque y rendijas en la esquina.)
+  function recortaPuntas(w) {
+    var TRIM = 8, EXT = 4;   // pulgadas: pasado hasta 8" se recorta, corto hasta 4" se alarga
+    ['s', 'e'].forEach(function (fin) {
+      var P = fin === 's' ? [w.x1, w.y1] : [w.x2, w.y2];
+      var O = fin === 's' ? [w.x2, w.y2] : [w.x1, w.y1];
+      var L = Math.hypot(P[0] - O[0], P[1] - O[1]);
+      if (L < 2) return;
+      var ux = (P[0] - O[0]) / L, uy = (P[1] - O[1]) / L;
+      // si la punta ya cayo en un extremo de otra pared (osnap), no se toca
+      for (var i = 0; i < state.walls.length; i++) {
+        var q = state.walls[i];
+        if (Math.hypot(P[0] - q.x1, P[1] - q.y1) < 0.6 || Math.hypot(P[0] - q.x2, P[1] - q.y2) < 0.6) return;
+      }
+      var mejor = null;
+      state.walls.forEach(function (h) {
+        var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
+        if (hL < 2) return;
+        var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
+        var cr = ux * hy - uy * hx;
+        if (Math.abs(cr) < 0.05) return;                     // casi paralelas
+        // cruce de ejes: O + s*u  =  h1 + t*hdir
+        var dx = h.x1 - O[0], dy = h.y1 - O[1];
+        var sA = (dx * hy - dy * hx) / cr;
+        var tH = (dx * uy - dy * ux) / cr;
+        if (tH < -1 || tH > hL + 1) return;                  // el cruce cae fuera de la vecina
+        var delta = L - sA;                                   // >0 = pasada, <0 = corta
+        if (delta > TRIM || delta < -EXT || sA < 6) return;   // sA<6: cruzaria en la otra punta
+        if (!mejor || Math.abs(delta) < Math.abs(mejor.delta)) {
+          mejor = { delta: delta, x: O[0] + ux * sA, y: O[1] + uy * sA };
+        }
+      });
+      if (!mejor) return;
+      var nx = Math.round(mejor.x * 64) / 64, ny = Math.round(mejor.y * 64) / 64;
+      if (fin === 's') { w.x1 = nx; w.y1 = ny; } else { w.x2 = nx; w.y2 = ny; }
+    });
+  }
+
   function snapWallPt(p) {
     // 1) extremos y puntos medios de paredes existentes (las esquinas mandan)
     for (var i = 0; i < state.walls.length; i++) {
@@ -684,7 +726,7 @@
     return { joins: joins, cuts: cuts };
   }
 
-  function edgeLines(w, g, t, sg, sign, sPt, ePt, cutList) {
+  function edgeLines(w, g, t, sg, sign, sPt, ePt, cutList, cls) {
     var pieces = [[sg[0], sg[1]]];
     (cutList || []).forEach(function (c) {
       var next = [];
@@ -699,7 +741,7 @@
     pieces.forEach(function (p) {
       var P1 = (p[0] === sg[0]) ? sPt : offPt(w, g, p[0], sign, t);
       var P2 = (p[1] === sg[1]) ? ePt : offPt(w, g, p[1], sign, t);
-      s += '<line class="wall-edge" x1="' + P1[0] + '" y1="' + P1[1] + '" x2="' + P2[0] + '" y2="' + P2[1] + '"/>';
+      s += '<line class="' + (cls || 'wall-edge') + '" x1="' + P1[0] + '" y1="' + P1[1] + '" x2="' + P2[0] + '" y2="' + P2[1] + '"/>';
     });
     return s;
   }
@@ -710,7 +752,9 @@
     state.walls.forEach(function (w) {
       var info = wallSegs(w), g = info.g, t = w.t / 2;
       var J = jc.joins[w.id], cut = jc.cuts[w.id];
-      var fillCls = (w.type === 'block' || w.type === 'block12' || w.type === 'blockdry') ? 'wall-fill-block' : 'wall-fill-drywall';
+      var esBloque = (w.type === 'block' || w.type === 'block12' || w.type === 'blockdry');
+      var fillCls = esBloque ? 'wall-fill-block' : 'wall-fill-drywall';
+      var ecls = esBloque ? 'wall-edge' : 'wall-edge dry';   // el plano profesional: mamposteria gruesa, division liviana
       info.segs.forEach(function (sg) {
         var atS = sg[0] < 0.01, atE = sg[1] > g.len - 0.01;
         var aP = atS ? J.s.p : offPt(w, g, sg[0], 1, t);
@@ -718,10 +762,10 @@
         var bP = atE ? J.e.p : offPt(w, g, sg[1], 1, t);
         var bM = atE ? J.e.m : offPt(w, g, sg[1], -1, t);
         out += '<path class="' + fillCls + '" d="M' + aP + ' L' + bP + ' L' + bM + ' L' + aM + ' Z"/>';
-        out += edgeLines(w, g, t, sg, 1, aP, bP, cut.plus);
-        out += edgeLines(w, g, t, sg, -1, aM, bM, cut.minus);
-        if (atS ? J.s.cap : true) out += '<line class="wall-edge" x1="' + aP[0] + '" y1="' + aP[1] + '" x2="' + aM[0] + '" y2="' + aM[1] + '"/>';
-        if (atE ? J.e.cap : true) out += '<line class="wall-edge" x1="' + bP[0] + '" y1="' + bP[1] + '" x2="' + bM[0] + '" y2="' + bM[1] + '"/>';
+        out += edgeLines(w, g, t, sg, 1, aP, bP, cut.plus, ecls);
+        out += edgeLines(w, g, t, sg, -1, aM, bM, cut.minus, ecls);
+        if (atS ? J.s.cap : true) out += '<line class="' + ecls + '" x1="' + aP[0] + '" y1="' + aP[1] + '" x2="' + aM[0] + '" y2="' + aM[1] + '"/>';
+        if (atE ? J.e.cap : true) out += '<line class="' + ecls + '" x1="' + bP[0] + '" y1="' + bP[1] + '" x2="' + bM[0] + '" y2="' + bM[1] + '"/>';
       });
       // screen enclosure: palitos perpendiculares cada 24" (los postes de
       // aluminio del pool cage, como en el plano de la cliente)
@@ -2069,7 +2113,9 @@
     if (Math.hypot(b[0] - drawing.last[0], b[1] - drawing.last[1]) > 2) {
       pushUndo();
       var wt = $('#wallType').value;
-      state.walls.push({ id: uid(), x1: drawing.last[0], y1: drawing.last[1], x2: b[0], y2: b[1], type: wt, t: WALL_TYPES[wt].t });
+      var wNueva = { id: uid(), x1: drawing.last[0], y1: drawing.last[1], x2: b[0], y2: b[1], type: wt, t: WALL_TYPES[wt].t };
+      recortaPuntas(wNueva);
+      state.walls.push(wNueva);
       drawing.last = b;
       renderWalls(); refreshCounts();
     }
