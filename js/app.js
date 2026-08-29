@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.A';
+  var APP_VERSION = 'v26.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -409,6 +409,38 @@
   // pared vecina. Solo se toca la pared NUEVA, nunca las existentes.
   // (De la foto de Edgar calcando el bano de Caroline: puntas asomadas
   // dentro del bloque y rendijas en la esquina.)
+  // Dibujar drywall ENCIMA de un bloque no crea una pared duplicada — en la
+  // obra eso es UNA pared: bloque con drywall por dentro (furring). El bloque
+  // se convierte en '8" Block + Drywall' con la línea fina del lado dibujado.
+  // (De la tercera foto de Edgar: dos paredes encimadas jamás sueldan.)
+  function absorbeEnBloque(w) {
+    if (String(w.type).indexOf('drywall') !== 0) return false;
+    var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    if (L < 12) return false;
+    var ux = (w.x2 - w.x1) / L, uy = (w.y2 - w.y1) / L;
+    var mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+    for (var i = 0; i < state.walls.length; i++) {
+      var h = state.walls[i];
+      if (h.type !== 'block' && h.type !== 'blockdry') continue;
+      var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
+      if (hL < 12) continue;
+      var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
+      if (Math.abs(ux * hy - uy * hx) > 0.07) continue;          // no son paralelas (±4°)
+      var r = distToSeg(mx, my, h.x1, h.y1, h.x2, h.y2);
+      if (r.d > h.t / 2 + w.t / 2 + 1) continue;                  // las bandas ni se tocan
+      var t1 = (w.x1 - h.x1) * hx + (w.y1 - h.y1) * hy;
+      var t2 = (w.x2 - h.x1) * hx + (w.y2 - h.y1) * hy;
+      var lo = Math.max(0, Math.min(t1, t2)), hi = Math.min(hL, Math.max(t1, t2));
+      if (hi - lo < L * 0.6) continue;                            // no corre por encima de verdad
+      var lado = ((mx - h.x1) * -hy + (my - h.y1) * hx) >= 0 ? 1 : -1;
+      h.type = 'blockdry'; h.drySide = lado;
+      renderWalls();
+      setHint('🧱 Ese bloque ya lleva su drywall: quedó como "8\" Block + Drywall" con la línea fina del lado que dibujaste — UNA pared, no dos encimadas (el lado se cambia en Propiedades)');
+      return true;
+    }
+    return false;
+  }
+
   function recortaPuntas(w) {
     var TRIM = 8, EXT = 4;   // pulgadas: pasado hasta 8" se recorta, corto hasta 4" se alarga
     ['s', 'e'].forEach(function (fin) {
@@ -2114,6 +2146,11 @@
       pushUndo();
       var wt = $('#wallType').value;
       var wNueva = { id: uid(), x1: drawing.last[0], y1: drawing.last[1], x2: b[0], y2: b[1], type: wt, t: WALL_TYPES[wt].t };
+      if (absorbeEnBloque(wNueva)) {
+        drawing.last = b;
+        refreshCounts();
+        return;
+      }
       recortaPuntas(wNueva);
       state.walls.push(wNueva);
       drawing.last = b;
