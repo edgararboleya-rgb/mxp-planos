@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.R';
+  var APP_VERSION = 'v25.S';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5441,6 +5441,10 @@ window.MAXPOWER_SUPABASE = {
             body: JSON.stringify({ ping: true })
           }).then(function (r) { return r.json(); }).then(function (d) {
             if (d.texto === 'pong') setHint('🔌 ✓ Cerebro conectado de verdad' + (d.modelo ? ' (' + d.modelo + ')' : ''));
+            // "Falta la pregunta" ante un ping = worker anterior al ping: la
+            // dirección y el token son buenos, lo viejo es el worker
+            else if (/Falta la pregunta/.test(d.error || ''))
+              setHint('🔌 ⚠️ Dirección y token BIEN — el cerebro contestó. Lo que está viejo es el worker: en la laptop, cd max-power-app\\mxp-brain · git pull · wrangler deploy');
             else setHint('🔌 ✗ ' + (d.error || 'Esa dirección contesta, pero no es el cerebro MXP'));
           }).catch(function (e) { setHint('🔌 ✗ No se llega al cerebro: ' + e.message); });
         }
