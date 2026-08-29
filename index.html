@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.S';
+  var APP_VERSION = 'v25.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5440,7 +5440,9 @@ window.MAXPOWER_SUPABASE = {
             headers: { 'content-type': 'application/json', 'x-mxp-token': c2.tok },
             body: JSON.stringify({ ping: true })
           }).then(function (r) { return r.json(); }).then(function (d) {
-            if (d.texto === 'pong') setHint('🔌 ✓ Cerebro conectado de verdad' + (d.modelo ? ' (' + d.modelo + ')' : ''));
+            if (d.texto === 'pong') setHint('🔌 ✓ Cerebro conectado de verdad' +
+              (d.modelo ? ' (' + d.modelo + ')' : '') +
+              (d.cerebro ? ' · instrucciones: ' + d.cerebro : ''));
             // "Falta la pregunta" ante un ping = worker anterior al ping: la
             // dirección y el token son buenos, lo viejo es el worker
             else if (/Falta la pregunta/.test(d.error || ''))
