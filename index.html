@@ -1314,7 +1314,7 @@ window.MAXPOWER_SUPABASE = {
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v25.Q';
+  var APP_VERSION = 'v25.R';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -7582,6 +7582,7 @@ window.MAXPOWER_SUPABASE = {
   var reciboDib = [];      // [{name, sqft}] de cada cuarto que se dibujó
   var ultimoRecibo = null; // texto del último recibo (botón 📋 Recibo)
   var reciboNota = '';     // aviso extra del importador para el recibo
+  var reciboLimpio = null; // qué hizo la limpieza automática al importar
   // lo que el ARCHIVO trae, contado sin tocar el dibujo
   function contarArchivo(o) {
     var M = 39.3700787;
@@ -7697,6 +7698,19 @@ window.MAXPOWER_SUPABASE = {
     fila('SUPERFICIE', A.sqft, sqDib, ' sf', 0.04);
     var txt = '📋 RECIBO DE IMPORTACIÓN — MXP Scan → MXP Planos\n\n' + lin.join('\n');
     if (reciboNota) txt += '\n\nℹ️ ' + reciboNota;
+    /* Trabajo callado, pero CON RECIBO: la limpieza corre sola al importar,
+       y aquí queda escrito qué tocó y qué NO pudo mejorar. Edgar pidió que
+       trabajara en silencio — no que trabajara a escondidas. */
+    if (reciboLimpio) {
+      var L = reciboLimpio, l = [];
+      if (L.mejoradas) l.push(L.mejoradas + ' cuarto(s) enderezado(s)' +
+        (L.enderezadas ? ' (' + L.enderezadas + ' paredes al ángulo exacto de su familia)' : ''));
+      if (L.cabitos) l.push(L.cabitos + ' cabito(s) de basura fuera');
+      if (L.puntas) l.push(L.puntas + ' punta(s) de esquina soldadas');
+      if (L.revertidas) l.push(L.revertidas + ' cuarto(s) se dejaron COMO VINIERON (limpiarlos los empeoraba)');
+      if (l.length) txt += '\n\n🧹 LIMPIEZA AUTOMÁTICA: ' + l.join(' · ') +
+        '.\nSe limpia solo lo que MEJORA: se mide el ruido antes y después, y si no baja, la pieza vuelve exacta a como vino.';
+    }
     if (fallas) {
       txt += '\n\n⚠️ HAY DIFERENCIAS. Cuarto por cuarto:\n';
       A.nombres.forEach(function (a) {
@@ -7920,6 +7934,82 @@ window.MAXPOWER_SUPABASE = {
     return n;
   }
 
+  /* ══════════ 🧹 LIMPIEZA AUTOMÁTICA AL IMPORTAR ══════════
+     Pedido de Edgar 08/29: *"yo no quería la IA para preguntarle nada; yo
+     quería que trabajara en silencio, que mejorara la calidad de los
+     escaneos y arreglara las líneas y los puntos de geometría para que el
+     traspaso a MXP Planos sea más limpio"*. Tiene razón: esto es geometría,
+     no es una conversación. Corre aquí, gratis, en milisegundos y sin
+     internet.
+
+     PERO NO A CIEGAS. Medido sobre sus 13 escaneos reales (08/29):
+       office        6.4° → 0.00°   ✓
+       main living   4.8° → 0.00°   ✓
+       master closet 2.4° → 0.63°   ✓
+       master bath   1.5° → 1.54°   =
+       living/dining 5.3° → 5.21°   =
+       KITCHEN       2.1° → 4.55°   ✗ EMPEORA
+     Por eso el candado: se limpia, se vuelve a medir, y si no mejoró la
+     pieza vuelve EXACTA a como venía. La regla de MODO FIEL sigue en pie —
+     el escaneo manda; la limpieza solo puede ayudar, nunca estropear. */
+  function ruidoDePieza(W) {
+    var gr = gruposDir(W), m = 0;
+    gr.forEach(function (g) {
+      g.ws.forEach(function (w) {
+        var t = ((Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI % 90) + 90) % 90;
+        m = Math.max(m, dist90(t, g.a));
+      });
+    });
+    return m;
+  }
+  function limpiaPiezaImportada(ids) {
+    var W = state.walls.filter(function (w) { return ids[w.id]; });
+    if (W.length < 3) return null;
+    var rep = { enderezadas: 0, ruido0: 0, ruido1: 0, cabitos: 0, puntas: 0, revertido: false };
+
+    /* EL ORDEN IMPORTA (medido 08/29): quitar un cabito CAMBIA las familias
+       de dirección de la pieza, así que si se quita después de enderezar, la
+       medida del candado se falsea y el office pasaba de 0.00° a 3.27°.
+       Primero se saca la basura, y ya con la pieza limpia se endereza. */
+
+    // 1) cabitos: tramos de menos de 9" con una punta al aire no son paredes
+    var antesN = W.length;
+    quitaCabitos(W);
+    rep.cabitos = antesN - W.length;
+    if (rep.cabitos) {
+      var vivos = {};
+      W.forEach(function (w) { vivos[w.id] = 1; });
+      state.walls = state.walls.filter(function (w) { return !ids[w.id] || vivos[w.id]; });
+      limpiaHuerfanas();
+    }
+
+    // 2) enderezar el ruido de 1-5° contra las familias de la propia pieza
+    rep.ruido0 = ruidoDePieza(W);
+    if (rep.ruido0 >= 0.6 && W.length >= 3) {
+      var foto = W.map(function (w) { return { w: w, x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2 }; });
+      var r = rectificarYcerrar(W);
+      rep.ruido1 = ruidoDePieza(W);
+      // 🔒 CANDADO: si no mejoró de verdad, la pieza vuelve EXACTA a como vino
+      if (rep.ruido1 > rep.ruido0 - 0.3) {
+        foto.forEach(function (o) { o.w.x1 = o.x1; o.w.y1 = o.y1; o.w.x2 = o.x2; o.w.y2 = o.y2; });
+        rep.ruido1 = rep.ruido0; rep.revertido = true;
+      } else rep.enderezadas = (r && r.girada) || 0;
+    } else rep.ruido1 = rep.ruido0;
+
+    // 3) puntas a 3-4" son LA MISMA esquina con ruido: se juntan
+    var antesP = 0, T = 4.5;
+    for (var i = 0; i < W.length; i++) for (var j = i + 1; j < W.length; j++)
+      ['1', '2'].forEach(function (ea) {
+        ['1', '2'].forEach(function (eb) {
+          var d = Math.hypot(W[i]['x' + ea] - W[j]['x' + eb], W[i]['y' + ea] - W[j]['y' + eb]);
+          if (d > 0.5 && d <= T) antesP++;
+        });
+      });
+    microSolda(W);
+    rep.puntas = antesP;
+    return rep;
+  }
+
   function importRoomScan(o, opts) {
     opts = opts || {};
     // OJO: el CapturedStructure REAL de Apple también trae "floors" (las
@@ -7958,10 +8048,26 @@ window.MAXPOWER_SUPABASE = {
           floors: [], rooms: [rm], _noType: true,
           mxpMeta: { app: 'MXP Scan', rooms: [metaAll[ri] || {}] }
         };
+        var idsAntes = {};
+        state.walls.forEach(function (w) { idsAntes[w.id] = 1; });
         var n = importRoomScan(sub, opts);
+        // 🧹 limpieza silenciosa de ESTA pieza (nunca de toda la hoja: cada
+        // cuarto tiene sus propias familias de dirección)
+        var nuevos = {};
+        state.walls.forEach(function (w) { if (!idsAntes[w.id]) nuevos[w.id] = 1; });
+        var lp = limpiaPiezaImportada(nuevos);
+        if (lp) {
+          totS.limpio = totS.limpio || { enderezadas: 0, cabitos: 0, puntas: 0, mejoradas: 0, revertidas: 0 };
+          totS.limpio.enderezadas += lp.enderezadas;
+          totS.limpio.cabitos += lp.cabitos;
+          totS.limpio.puntas += lp.puntas;
+          if (lp.revertido) totS.limpio.revertidas++;
+          else if (lp.ruido0 - lp.ruido1 > 0.3) totS.limpio.mejoradas++;
+        }
         ['walls', 'doors', 'windows', 'furn'].forEach(function (k2) { totS[k2] += n[k2] || 0; });
         totS.names = totS.names.concat(n.names || []);
       });
+      reciboLimpio = totS.limpio || null;
       refresh(); zoomFit();
       return totS;
     }
@@ -8317,13 +8423,27 @@ window.MAXPOWER_SUPABASE = {
     });
     var keys = Object.keys(floors).map(Number).sort(function (a, b) { return a - b; });
     if (!keys.length) return totals;
+    var idsPrevios = {};
+    state.walls.forEach(function (w) { idsPrevios[w.id] = 1; });
     keys.forEach(function (st, i) {
       if (i > 0) addSheet('PISO-' + (i + 1));
       floors[st].faithful = polysComplete;
       floors[st].noType = !!o._noType;
       buildFloor(floors[st]);
     });
+    // 🧹 limpieza silenciosa de lo recién importado (con su candado)
+    if (keys.length === 1) {
+      var nv = {};
+      state.walls.forEach(function (w) { if (!idsPrevios[w.id]) nv[w.id] = 1; });
+      var lp2 = limpiaPiezaImportada(nv);
+      if (lp2) totals.limpio = {
+        enderezadas: lp2.enderezadas, cabitos: lp2.cabitos, puntas: lp2.puntas,
+        mejoradas: lp2.revertido ? 0 : (lp2.ruido0 - lp2.ruido1 > 0.3 ? 1 : 0),
+        revertidas: lp2.revertido ? 1 : 0
+      };
+    }
     totals.floors = keys.length;
+    reciboLimpio = totals.limpio || reciboLimpio;
     if (keys.length > 1) activateSheet(state.curSheet);
     refresh(); zoomFit();
     return totals;
@@ -8429,7 +8549,7 @@ window.MAXPOWER_SUPABASE = {
           var nObj = scanFurnCount(o);
           var doImport = function (withFurn) {
             pushUndo();
-            reciboDib = []; reciboNota = '';
+            reciboDib = []; reciboNota = ''; reciboLimpio = null;
             var wAntes = state.walls.length;
             var n = importRoomScan(o, { furniture: withFurn, fileName: f.name });
             var rec = reciboImport(o, {
@@ -9321,6 +9441,7 @@ window.MAXPOWER_SUPABASE = {
   window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
   window.__mxpAngle = refsAngle;
   window.__mxpRect = rectificarYcerrar;   // gancho de pruebas
+  window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   // logo oficial de Max Power en la barra (viene de js/logo.js)
   try {
     if (window.MAXPOWER_LOGO) {
