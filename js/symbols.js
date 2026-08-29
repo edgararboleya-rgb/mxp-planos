@@ -219,6 +219,13 @@
   S.lavatory = { name: 'Vanity Sink', cat: 'plumbing', layer: 'furniture', w: 26, h: 22,
     svg: R(-13, -10.5, 26, 21) + '<ellipse cx="0" cy="0.5" rx="7.5" ry="5.5"/>' + C(0, -7, 1) };
 
+  // vanity DOBLE (dos lavamanos, 60x22 tipico) — estirable a la medida
+  // real con Ancho/Fondo, como todos los de tamano real
+  S.lavatory2 = { name: 'Double Vanity Sink', short: 'Vanity 2', cat: 'plumbing', layer: 'furniture', w: 60, h: 22,
+    svg: R(-30, -10.5, 60, 21) +
+      '<ellipse cx="-15" cy="0.5" rx="7.5" ry="5.5"/>' + C(-15, -7, 1) +
+      '<ellipse cx="15" cy="0.5" rx="7.5" ry="5.5"/>' + C(15, -7, 1) };
+
   S.sink_pedestal = { name: 'Pedestal Sink', cat: 'plumbing', layer: 'furniture', w: 22, h: 20,
     svg: '<ellipse cx="0" cy="0" rx="10" ry="8.5"/>' + '<ellipse cx="0" cy="0.5" rx="6.5" ry="5"/>' + C(0, -5.5, 1) };
 
@@ -432,6 +439,36 @@
 
   S.pool = { name: 'Pool 12×24', cat: 'site', layer: 'furniture', w: 290, h: 148,
     svg: R(-144, -72, 288, 144, 10) + R(-136, -64, 272, 128, 8) };
+
+
+  /* —— del plano profesional de la cliente (08/29) —— */
+
+  // chimenea: cajón con jambas rayadas + hogar al frente (family room)
+  S.fireplace = { name: 'Fireplace 48"', cat: 'furniture', layer: 'furniture', w: 48, h: 28,
+    svg: R(-24, -14, 48, 20) + R(-14, -12, 28, 16) +
+      '<path d="M-24,-14 L-14,-4 M-20,-14 L-14,-8 M14,-4 L24,-14 M14,-8 L20,-14"/>' +
+      '<path d="M-18,6 H18 M-18,10 H18 M-18,6 V10 M18,6 V10"/>' };
+
+  // poste de aluminio/madera del porch o lanai
+  S.post8 = { name: 'Column / Post 8×8', cat: 'site', layer: 'furniture', w: 8, h: 8,
+    svg: R(-4, -4, 8, 8) + L(-4, -4, 4, 4) + L(-4, 4, 4, -4) };
+
+  // spa octogonal pegado a la piscina (como el del plano)
+  S.spa = { name: 'Spa / Hot Tub 7 ft', cat: 'site', layer: 'furniture', w: 84, h: 84,
+    svg: (function () {
+      function oct(r) {
+        var d = '', i, a;
+        for (i = 0; i < 8; i++) { a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+          d += (i ? ' L' : 'M') + (r * Math.cos(a)).toFixed(1) + ',' + (r * Math.sin(a)).toFixed(1); }
+        return '<path d="' + d + ' Z"/>';
+      }
+      return oct(42) + oct(34) + C(0, 0, 3);
+    })() };
+
+  // estante con barra de closet (línea del estante + barra discontinua)
+  S.shelfrod = { name: 'Closet Shelf & Rod 48"', cat: 'furniture', layer: 'furniture', w: 48, h: 12,
+    svg: R(-24, -6, 48, 12) +
+      '<line x1="-24" y1="2" x2="24" y2="2" stroke-dasharray="4 3"/>' };
 
   // grosores de línea afinados por categoría (los alzados van más finos y refinados)
   Object.keys(S).forEach(function (k) {
