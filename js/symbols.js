@@ -216,12 +216,43 @@
   S.toilet = { name: 'Toilet', cat: 'plumbing', layer: 'furniture', w: 22, h: 30,
     svg: R(-10, -14.5, 20, 7.5, 1.5) + '<ellipse cx="0" cy="2.5" rx="8" ry="9.5"/>' };
 
-  S.lavatory = { name: 'Vanity Sink', cat: 'plumbing', layer: 'furniture', w: 26, h: 22,
+  // VANITIES POR MEDIDA (Edgar, 08/30: "hazme mas vanity de 60, 36, 30 y 24;
+  // tenemos solo uno y no se de que medida es"). Todos con 21" de fondo, que
+  // es el estandar; el ancho es el que da nombre al mueble en la tienda.
+  // Se dibujan iguales entre si para que la familia se lea de un vistazo.
+  function vanity(an, dobleP) {
+    var f = 21, hf = f / 2, ha = an / 2;
+    var s2 = R(-ha, -hf, an, f);
+    if (dobleP) {
+      var q4 = an / 4;
+      s2 += '<ellipse cx="' + (-q4) + '" cy="0.5" rx="7.5" ry="5.5"/>' + C(-q4, -7, 1);
+      s2 += '<ellipse cx="' + q4 + '" cy="0.5" rx="7.5" ry="5.5"/>' + C(q4, -7, 1);
+    } else {
+      var rx = Math.min(7.5, ha - 3);
+      s2 += '<ellipse cx="0" cy="0.5" rx="' + rx + '" ry="5.5"/>' + C(0, -7, 1);
+    }
+    return s2;
+  }
+  S.vanity24 = { name: 'Vanity 24" (1 lavamanos)', short: 'Vanity 24"',
+    cat: 'plumbing', layer: 'furniture', w: 24, h: 21, svg: vanity(24) };
+  S.vanity30 = { name: 'Vanity 30" (1 lavamanos)', short: 'Vanity 30"',
+    cat: 'plumbing', layer: 'furniture', w: 30, h: 21, svg: vanity(30) };
+  S.vanity36 = { name: 'Vanity 36" (1 lavamanos)', short: 'Vanity 36"',
+    cat: 'plumbing', layer: 'furniture', w: 36, h: 21, svg: vanity(36) };
+  S.vanity48 = { name: 'Vanity 48" (1 lavamanos)', short: 'Vanity 48"',
+    cat: 'plumbing', layer: 'furniture', w: 48, h: 21, svg: vanity(48) };
+  S.vanity60 = { name: 'Vanity 60" doble (2 lavamanos)', short: 'Vanity 60" doble',
+    cat: 'plumbing', layer: 'furniture', w: 60, h: 21, svg: vanity(60, true) };
+  S.vanity72 = { name: 'Vanity 72" doble (2 lavamanos)', short: 'Vanity 72" doble',
+    cat: 'plumbing', layer: 'furniture', w: 72, h: 21, svg: vanity(72, true) };
+
+  // el de siempre, ahora con su medida en el nombre para no adivinar
+  S.lavatory = { name: 'Vanity 26" (el de siempre)', cat: 'plumbing', layer: 'furniture', w: 26, h: 22,
     svg: R(-13, -10.5, 26, 21) + '<ellipse cx="0" cy="0.5" rx="7.5" ry="5.5"/>' + C(0, -7, 1) };
 
   // vanity DOBLE (dos lavamanos, 60x22 tipico) — estirable a la medida
   // real con Ancho/Fondo, como todos los de tamano real
-  S.lavatory2 = { name: 'Double Vanity Sink', short: 'Vanity 2', cat: 'plumbing', layer: 'furniture', w: 60, h: 22,
+  S.lavatory2 = { name: 'Vanity 60" doble (el de siempre)', short: 'Vanity 60 viejo', cat: 'plumbing', layer: 'furniture', w: 60, h: 22,
     svg: R(-30, -10.5, 60, 21) +
       '<ellipse cx="-15" cy="0.5" rx="7.5" ry="5.5"/>' + C(-15, -7, 1) +
       '<ellipse cx="15" cy="0.5" rx="7.5" ry="5.5"/>' + C(15, -7, 1) };
