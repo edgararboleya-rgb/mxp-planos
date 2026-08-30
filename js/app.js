@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.D';
+  var APP_VERSION = 'v26.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -123,6 +123,10 @@
     drywall35: { name: 'Drywall 3½"', t: 3.5 },
     drywall: { name: 'Drywall 4½" (2x4 + gyp)', t: 4.5 },
     drywall6: { name: 'Drywall 6" (2x6)', t: 6 },
+    // medias paredes (no llegan al techo): mostradores, barras, divisiones
+    // bajas — se dibujan con la línea de centro discontinua y su altura
+    pony30: { name: 'Half Wall 30" (media pared)', t: 4.5, pony: 30 },
+    pony42: { name: 'Half Wall 42" (barra)', t: 4.5, pony: 42 },
     // malla del pool cage / lanai (plano de la cliente 08/29): línea fina
     // con palitos regulares = los postes de aluminio del screen enclosure
     screen: { name: 'Screen Enclosure / Malla 2"', t: 2, screen: true }
@@ -827,6 +831,13 @@
         if (atS ? J.s.cap : true) out += '<line class="' + ecls + '" x1="' + aP[0] + '" y1="' + aP[1] + '" x2="' + aM[0] + '" y2="' + aM[1] + '"/>';
         if (atE ? J.e.cap : true) out += '<line class="' + ecls + '" x1="' + bP[0] + '" y1="' + bP[1] + '" x2="' + bM[0] + '" y2="' + bM[1] + '"/>';
       });
+      // media pared: línea de centro discontinua = no llega al techo
+      if (WALL_TYPES[w.type] && WALL_TYPES[w.type].pony) {
+        info.segs.forEach(function (sg) {
+          var C1 = offPt(w, g, sg[0], 1, 0), C2 = offPt(w, g, sg[1], 1, 0);
+          out += '<line class="furr-line" stroke-dasharray="5 4" x1="' + C1[0] + '" y1="' + C1[1] + '" x2="' + C2[0] + '" y2="' + C2[1] + '"/>';
+        });
+      }
       // screen enclosure: palitos perpendiculares cada 24" (los postes de
       // aluminio del pool cage, como en el plano de la cliente)
       if (WALL_TYPES[w.type] && WALL_TYPES[w.type].screen) {
