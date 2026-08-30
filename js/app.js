@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.A';
+  var APP_VERSION = 'v27.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1440,12 +1440,25 @@
       s += '<path class="door-arc" d="M' + E1[0] + ',' + E1[1] + ' A' + half + ',' + half + ' 0 0,' + (c1 > 0 ? 1 : 0) + ' ' + Mm[0] + ',' + Mm[1] + '"/>';
       s += '<path class="door-arc" d="M' + E2[0] + ',' + E2[1] + ' A' + half + ',' + half + ' 0 0,' + (c2 > 0 ? 1 : 0) + ' ' + Mm[0] + ',' + Mm[1] + '"/>';
     } else if (o.type === 'bifold') {
-      // paneles plegables en zigzag desde ambas jambas al centro
-      var Mb = ptAlong(w, g, o.pos), swb = o.swing || 1, q = o.w / 4;
-      var P1 = [A[0] + g.ux * q + g.nx * swb * q, A[1] + g.uy * q + g.ny * swb * q];
-      var P2 = [B[0] - g.ux * q + g.nx * swb * q, B[1] - g.uy * q + g.ny * swb * q];
-      s += '<path class="door-leaf" d="M' + A[0] + ',' + A[1] + ' L' + P1[0] + ',' + P1[1] + ' L' + Mb[0] + ',' + Mb[1] + '" fill="none"/>';
-      s += '<path class="door-leaf" d="M' + B[0] + ',' + B[1] + ' L' + P2[0] + ',' + P2[1] + ' L' + Mb[0] + ',' + Mb[1] + '" fill="none"/>';
+      // BIFOLD (acordeon de closet). Se dibuja como en el plano de la
+      // cliente: cada juego de dos hojas plegadas hace un PICO hacia adentro
+      // del cuarto. Una puerta angosta (pantry, hasta 3 ft) lleva UN pico;
+      // una de closet de cuarto lleva DOS, uno por cada lado — el simbolo
+      // que se lee de un vistazo y no se confunde con una hoja normal.
+      var swb = o.swing || 1;
+      var juegos = o.w > 40 ? 2 : 1;
+      var lj = o.w / juegos;                  // ancho de cada juego de dos hojas
+      var alt = lj / 2;                       // el pico entra media hoja al cuarto
+      for (var jb = 0; jb < juegos; jb++) {
+        var da = d0 + jb * lj, db2 = da + lj;
+        var Pa = ptAlong(w, g, da), Pb2 = ptAlong(w, g, db2);
+        var Pico = ptAlong(w, g, da + lj / 2);
+        var px = Pico[0] + g.nx * swb * alt, py = Pico[1] + g.ny * swb * alt;
+        s += '<path class="door-leaf" d="M' + Pa[0] + ',' + Pa[1] + ' L' + px + ',' + py +
+          ' L' + Pb2[0] + ',' + Pb2[1] + '" fill="none"/>';
+        // la linea de riel discontinua, dentro del vano
+        s += '<line class="door-arc" x1="' + Pa[0] + '" y1="' + Pa[1] + '" x2="' + Pb2[0] + '" y2="' + Pb2[1] + '"/>';
+      }
     } else if (o.type === 'pocket') {
       // hoja medio abierta sobre la línea central + bolsillo discontinuo dentro de la pared
       var Mp = ptAlong(w, g, o.pos);
@@ -9138,8 +9151,14 @@
         var sel2 = curDoorType === 'door' && curDoorW === t2[0];
         html += '<div class="tmItem' + (sel2 ? ' cur' : '') + '" data-k="door" data-w="' + t2[0] + '"><span>Door ' + t2[1] + ' (' + t2[0] + '\")</span></div>';
       });
+      html += '<div class="tmHead">Closet / Pantry (bifold, acordeon)</div>';
+      [[24, "2'0\" pantry"], [30, "2'6\" pantry"], [36, "3'0\" pantry"],
+       [48, "4'0\" closet"], [60, "5'0\" closet"], [72, "6'0\" closet"]].forEach(function (t4) {
+        var sel4 = curDoorType === 'bifold' && curDoorW === t4[0];
+        html += '<div class="tmItem' + (sel4 ? ' cur' : '') + '" data-k="bifold" data-w="' + t4[0] + '"><span>Bifold ' + t4[1] + '</span></div>';
+      });
       html += '<div class="tmHead">Otras puertas</div>';
-      ['double', 'bifold', 'pocket', 'slider', 'bypass', 'opening'].forEach(function (k) {
+      ['double', 'pocket', 'slider', 'bypass', 'opening'].forEach(function (k) {
         html += '<div class="tmItem' + (k === curDoorType ? ' cur' : '') + '" data-k="' + k + '"><span>' + esc(OPEN_NAMES[k]) + ' (' + fmtFtIn(OPEN_DEFAULT[k]) + ')</span></div>';
       });
       html += '<div class="tmHead">Garage / Overhead</div>';
