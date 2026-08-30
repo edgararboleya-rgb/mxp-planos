@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.L';
+  var APP_VERSION = 'v27.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -688,8 +688,11 @@
     guiasVivas = '';
     if (ev && ev.altKey) return p;                 // Alt = a mano alzada, sin guías
     var soloRecto = !!(ev && ev.shiftKey);
-    var TOL = 8 / (view.z || 1);                   // píxeles de pantalla
-    var x = p[0], y = p[1], gs = [];
+    // 16 px de alcance (medido 08/30: con 8 px, a zoom 4x había que acertar a
+    // menos de 1¾" y la guía no llegaba a aparecer — Edgar no la veía nunca).
+    // Sigue yendo en píxeles, así que al acercarte exige más puntería.
+    var TOL = 16 / (view.z || 1);
+    var x = p[0], y = p[1], gs = [], refs = [];
 
     // (1) PERPENDICULAR / RECTO respecto al punto de partida — guía ámbar.
     // Con SHIFT se fuerza SIEMPRE (es lo que pediste al apretarlo, no una
@@ -719,10 +722,41 @@
       if (mejorX) {
         x = mejorX.q[0];
         gs.push({ x1: x, y1: mejorX.q[1], x2: x, y2: y, c: '#0a8f3c' });
+        refs.push(mejorX.q);                       // de dónde viene la referencia
       }
       if (mejorY) {
         y = mejorY.q[1];
         gs.push({ x1: mejorY.q[0], y1: y, x2: x, y2: y, c: '#0a8f3c' });
+        refs.push(mejorY.q);
+      }
+      // (3) PROLONGACIÓN: la línea de gabinete que sigue al otro lado del
+      // refrigerador. Si el cursor cae cerca de la RECTA que prolonga un
+      // tramo ya dibujado, se pega a ella aunque la punta quede lejos.
+      if (!mejorX && !mejorY) {
+        var mejorP = null;
+        state.areas.forEach(function (a) {
+          if (!a.pts || a.pts.length < 2) return;
+          for (var t2 = 0; t2 + 1 < a.pts.length; t2++) {
+            var A2 = a.pts[t2], B2 = a.pts[t2 + 1];
+            var vx2 = B2[0] - A2[0], vy2 = B2[1] - A2[1];
+            var L2 = Math.hypot(vx2, vy2);
+            if (L2 < 6) continue;
+            var ux2 = vx2 / L2, uy2 = vy2 / L2;
+            var dPerp = Math.abs((x - A2[0]) * -uy2 + (y - A2[1]) * ux2);
+            var along = (x - A2[0]) * ux2 + (y - A2[1]) * uy2;
+            if (along > -6 && along < L2 + 6) continue;      // eso ya es la línea misma
+            if (dPerp < TOL && (!mejorP || dPerp < mejorP.d)) {
+              mejorP = { d: dPerp, A: A2, ux: ux2, uy: uy2, along: along };
+            }
+          }
+        });
+        if (mejorP) {
+          x = mejorP.A[0] + mejorP.ux * mejorP.along;
+          y = mejorP.A[1] + mejorP.uy * mejorP.along;
+          var puntaP = [mejorP.A[0] + mejorP.ux * (mejorP.along > 0 ? 1e9 : -1e9), 0];
+          gs.push({ x1: mejorP.A[0], y1: mejorP.A[1], x2: x, y2: y, c: '#0a8f3c' });
+          refs.push([mejorP.A[0], mejorP.A[1]]);
+        }
       }
     }
     if (gs.length) {
@@ -730,6 +764,14 @@
         return '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + g.x2 + '" y2="' + g.y2 +
           '" stroke="' + g.c + '" stroke-width="' + (0.8 / (view.z || 1)) + '" stroke-dasharray="' +
           (6 / (view.z || 1)) + ' ' + (4 / (view.z || 1)) + '"/>';
+      }).join('') +
+      // el CUADRADO VERDE: marca de dónde sale la referencia (la punta del
+      // gabinete al otro lado del refrigerador), y el círculo, dónde va a caer
+      refs.map(function (q) {
+        var rr2 = 3.5 / (view.z || 1);
+        return '<rect x="' + (q[0] - rr2) + '" y="' + (q[1] - rr2) + '" width="' + (rr2 * 2) +
+          '" height="' + (rr2 * 2) + '" fill="none" stroke="#0a8f3c" stroke-width="' +
+          (1.4 / (view.z || 1)) + '"/>';
       }).join('') +
       '<circle cx="' + x + '" cy="' + y + '" r="' + (4 / (view.z || 1)) + '" fill="none" stroke="' +
         (soloRecto ? '#e6a100' : '#0a8f3c') + '" stroke-width="' + (1.2 / (view.z || 1)) + '"/>';
@@ -2585,7 +2627,11 @@
     }
     // indicador verde de OSNAP
     if (SNAP_TOOLS[tool]) {
-      if (hadPreview && drawing) { if (snapMark) G.prev.innerHTML += snapMark; }
+      // OJO: la condición pedía 'drawing' además de hadPreview, así que la
+      // vista previa que se dibuja ANTES del primer clic — las guías de
+      // alineación del refrigerador — se borraba justo después de pintarse.
+      // Por eso Edgar nunca veía el cuadrado verde (medido 08/30).
+      if (hadPreview) { if (snapMark) G.prev.innerHTML += snapMark; }
       else G.prev.innerHTML = snapMark;
     }
   }
