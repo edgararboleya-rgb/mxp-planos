@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.N';
+  var APP_VERSION = 'v27.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -443,7 +443,25 @@
       var t2 = (w.x2 - h.x1) * hx + (w.y2 - h.y1) * hy;
       var lo = Math.max(0, Math.min(t1, t2)), hi = Math.min(hL, Math.max(t1, t2));
       if (hi - lo < L * 0.6) continue;                            // no corre por encima de verdad
-      var lado = ((mx - h.x1) * -hy + (my - h.y1) * hx) >= 0 ? 1 : -1;
+      // de que LADO del bloque quedo el forro. Si el drywall cayo calcado sobre
+      // el EJE, este numero sale de la basura de coma flotante (1e-16) y el
+      // signo se decide al azar: asi es como el drywall terminaba dibujado por
+      // FUERA de la casa. Sin lado definido no se absorbe y se deja como pared.
+      var perp = (mx - h.x1) * -hy + (my - h.y1) * hx, lado;
+      if (Math.abs(perp) >= 0.5) {
+        lado = perp > 0 ? 1 : -1;
+      } else {
+        // el forro cayó CALCADO sobre el eje del bloque: el lado no está
+        // definido y el signo lo decidía la basura de coma flotante — así es
+        // como el drywall terminaba dibujado por fuera de la casa. Se decide por
+        // geometría: el lado que mira al centro del dibujo, que es el interior.
+        var cx = 0, cy = 0, nC = 0;
+        state.walls.forEach(function (q) { cx += (q.x1 + q.x2) / 2; cy += (q.y1 + q.y2) / 2; nC++; });
+        if (!nC) continue;
+        var pc = (cx / nC - h.x1) * -hy + (cy / nC - h.y1) * hx;
+        if (Math.abs(pc) < 0.5) continue;      // ni así se puede decidir: mejor no absorber
+        lado = pc > 0 ? 1 : -1;
+      }
       h.type = 'blockdry'; h.drySide = lado;
       renderWalls();
       setHint('🧱 Ese bloque ya lleva su drywall: quedó como "8\" Block + Drywall" con la línea fina del lado que dibujaste — UNA pared, no dos encimadas (el lado se cambia en Propiedades)');
@@ -487,20 +505,21 @@
         // el cruce vale dentro de la vecina Y hasta 8" mas alla de sus puntas
         // (asi se cierran las esquinas donde las dos paredes se quedan cortas)
         if (tH < -8 || tH > hL + 8) return;
-        var delta = L - sA;                                   // >0 = pasada, <0 = corta
-        if (delta > TRIM || delta < -EXT || sA < 6) return;   // sA<6: cruzaria en la otra punta
         var famH = String(h.type).indexOf('block') === 0 ? 'block'
                  : (h.type === 'screen' ? 'screen' : 'drywall');
         // misma familia: la punta va al CRUCE DE EJES (esquina/tee continuo).
         // Otra familia: va a la CARA que enfrenta (el drywall muere contra la
         // cara del bloque, nunca enterrado hasta su centro)
         var sFin = sA;
-        if (famH !== famW) {
-          sFin = sA - (h.t / 2) / Math.abs(cr);
-          if (sFin < 6) return;
-          delta = L - sFin;
-          if (delta > TRIM || delta < -EXT) return;
-        }
+        if (famH !== famW) sFin = sA - (h.t / 2) / Math.abs(cr);
+        if (sFin < 6) return;                 // cruzaria en la otra punta
+        // la ventana se mide SIEMPRE contra la meta real. Antes se filtraba
+        // primero contra el eje y despues contra la cara, asi que contra una
+        // pared de otra familia la mitad "corta" de la ventana se comia el
+        // medio grosor del vecino: una division a 2" de la cara del bloque
+        // nunca se estiraba y quedaba la rendija abierta.
+        var delta = L - sFin;                 // >0 = pasada, <0 = corta
+        if (delta > TRIM || delta < -EXT) return;
         var cand = { delta: delta, x: O[0] + ux * sFin, y: O[1] + uy * sFin,
                      h: h, tH: tH, hL: hL, mismo: famH === famW };
         if (famH === famW) {
@@ -576,6 +595,61 @@
     return n;
   }
 
+  // EL DRYWALL DEL BLOQUE VA SIEMPRE PARA ADENTRO.
+  // drySide es relativo al SENTIDO en que se dibujó (+1 = a la derecha del
+  // avance), así que trazar el perímetro al revés dejaba TODO el drywall por
+  // fuera de la casa — y las dos versiones se parecen tanto de un vistazo que
+  // el error no se descubre hasta que se imprime el plano. Al cerrar el lazo se
+  // orienta solo: se encadenan las paredes de bloque, se mira si la vuelta va
+  // en sentido horario en pantalla y se manda la línea fina al interior.
+  // Una pared que el usuario volteó a mano (dryManual) no se toca jamás.
+  // soloMapa = true: no toca nada, sólo devuelve {idPared: ladoInterior} para
+  // que el panel pueda decir si el drywall está adentro o AFUERA
+  function orientaDrySide(soloMapa) {
+    var mapa = {};
+    var bl = state.walls.filter(function (w) { return String(w.type).indexOf('block') === 0; });
+    if (bl.length < 3) return mapa;
+    var usada = {};
+    bl.forEach(function (w0) {
+      if (usada[w0.id]) return;
+      usada[w0.id] = 1;
+      var cad = [{ w: w0, fw: true }];
+      var ini = [w0.x1, w0.y1], fin = [w0.x2, w0.y2], sigue = true;
+      while (sigue) {
+        sigue = false;
+        for (var i = 0; i < bl.length; i++) {
+          var q = bl[i];
+          if (usada[q.id]) continue;
+          if (Math.hypot(q.x1 - fin[0], q.y1 - fin[1]) < 0.6) {
+            usada[q.id] = 1; cad.push({ w: q, fw: true }); fin = [q.x2, q.y2]; sigue = true; break;
+          }
+          if (Math.hypot(q.x2 - fin[0], q.y2 - fin[1]) < 0.6) {
+            usada[q.id] = 1; cad.push({ w: q, fw: false }); fin = [q.x1, q.y1]; sigue = true; break;
+          }
+        }
+      }
+      if (cad.length < 3) return;
+      if (Math.hypot(fin[0] - ini[0], fin[1] - ini[1]) > 0.6) return;   // la vuelta no cierra
+      var pts = cad.map(function (c) { return c.fw ? [c.w.x1, c.w.y1] : [c.w.x2, c.w.y2]; });
+      var A = 0;
+      for (var a = 0, b = pts.length - 1; a < pts.length; b = a++) {
+        A += pts[b][0] * pts[a][1] - pts[a][0] * pts[b][1];
+      }
+      // con la Y hacia abajo, A>0 es una vuelta HORARIA en pantalla; y como la
+      // normal (nx,ny) gira 90° horario respecto al avance, en ese caso el
+      // interior queda del lado +1
+      var dentro = A > 0 ? 1 : -1;
+      cad.forEach(function (c) {
+        mapa[c.w.id] = dentro * (c.fw ? 1 : -1);
+        if (soloMapa) return;
+        if (!WALL_TYPES[c.w.type] || !WALL_TYPES[c.w.type].dry) return;
+        if (c.w.dryManual) return;
+        c.w.drySide = mapa[c.w.id];
+      });
+    });
+    return mapa;
+  }
+
   function snapWallPt(p) {
     // 1) extremos y puntos medios de paredes existentes (las esquinas mandan)
     for (var i = 0; i < state.walls.length; i++) {
@@ -592,8 +666,35 @@
     var eje = null;
     var tolEje = 6 / view.z + 2;
     state.walls.forEach(function (w2) {
+      var Lw2 = Math.hypot(w2.x2 - w2.x1, w2.y2 - w2.y1);
+      if (Lw2 < 0.01) return;
       var r = distToSeg(p[0], p[1], w2.x1, w2.y1, w2.x2, w2.y2);
-      if (r.d < tolEje && (!eje || r.d < eje.d)) eje = { d: r.d, w: w2, t: r.t };
+      if (r.d < tolEje && (!eje || r.d < eje.d)) eje = { d: r.d, w: w2, t: r.t, off: 0 };
+      // IMÁN A LA CARA, no sólo al eje. La cara es la línea que el electricista
+      // VE y sobre la que apunta al forrar un bloque. En un bloque de 8" la cara
+      // queda a 4" del eje, dentro del alcance del imán del eje: el clic sobre
+      // la cara se lo tragaba el eje y el mismo gesto daba un resultado distinto
+      // en cada zoom (el forro desaparecía absorbido, o salía del lado de
+      // afuera). Con las dos candidatas gana la más cercana, que es lo que el
+      // usuario está mirando.
+      var hm = (w2.t || 0) / 2;
+      if (hm <= 0.75) return;                                  // pared fina: cara y eje son lo mismo
+      var ux2 = (w2.x2 - w2.x1) / Lw2, uy2 = (w2.y2 - w2.y1) / Lw2;
+      var alo = (p[0] - w2.x1) * ux2 + (p[1] - w2.y1) * uy2;
+      if (alo < -tolEje || alo > Lw2 + tolEje) return;          // ni siquiera va a lo largo de esa pared
+      var lat = (p[0] - w2.x1) * -uy2 + (p[1] - w2.y1) * ux2;
+      var dCara = Math.abs(Math.abs(lat) - hm);
+      if (dCara < tolEje && (!eje || dCara < eje.d)) {
+        // el forro SE APOYA sobre la cara, no se clava en ella: su EJE va a
+        // media pared más allá, así la cara terminada cae donde debe. Antes el
+        // eje aterrizaba en la propia cara y un Furring de 1½" quedaba 0.75"
+        // ENTERRADO en el bloque — se fundía con la línea de cara y no se veía
+        // (auditoría 08/30). Solo cuando la nueva es más fina que la anfitriona.
+        var tNva = 0;
+        try { tNva = (WALL_TYPES[$('#wallType').value] || {}).t || 0; } catch (e9) {}
+        var apoyo = hm + (tNva > 0 && tNva < (w2.t || 0) ? tNva / 2 : 0);
+        eje = { d: dCara, w: w2, t: Math.max(0, Math.min(1, alo / Lw2)), off: (lat >= 0 ? 1 : -1) * apoyo };
+      }
     });
     if (eje) {
       // la posición A LO LARGO del eje también se cuantiza a la precisión
@@ -602,8 +703,10 @@
       var we = eje.w, Lw = Math.hypot(we.x2 - we.x1, we.y2 - we.y1);
       var gsE = 1 / (state.precision || 4);
       var aAlong = Math.max(0, Math.min(Lw, Math.round(eje.t * Lw / gsE) * gsE));
-      return [Math.round((we.x1 + (we.x2 - we.x1) * (aAlong / Lw)) * 64) / 64,
-              Math.round((we.y1 + (we.y2 - we.y1) * (aAlong / Lw)) * 64) / 64];
+      var uxe = (we.x2 - we.x1) / Lw, uye = (we.y2 - we.y1) / Lw;
+      var oX = -uye * (eje.off || 0), oY = uxe * (eje.off || 0);
+      return [Math.round((we.x1 + uxe * aAlong + oX) * 64) / 64,
+              Math.round((we.y1 + uye * aAlong + oY) * 64) / 64];
     }
     // 3) libre: se respeta la precisión elegida en el panel (1/4" por
     //    defecto) — antes había una rejilla fija de 6" que corría el punto
@@ -698,22 +801,58 @@
     var step = Math.PI / 4;
     var snapAng = Math.round(ang / step) * step;
     if (Math.abs(ang - snapAng) < (10 * Math.PI / 180)) {
-      var len = Math.hypot(dx, dy);
+      // el largo es la PROYECCIÓN sobre la dirección ya elegida, cuantizada a la
+      // precisión del panel: con la hipotenusa cruda salían medidas sucias
+      // (236.0339) y las cotas se caían del cuarto de pulgada
+      var gsO = 1 / (state.precision || 4);
+      var len = Math.round((dx * Math.cos(snapAng) + dy * Math.sin(snapAng)) / gsO) * gsO;
       return [a[0] + Math.cos(snapAng) * len, a[1] + Math.sin(snapAng) * len];
     }
     return b;
   }
 
   /* ---------------- render: paredes ---------------- */
+  // CORTES PRESTADOS. Una puerta pertenece a UNA pared, pero en la obra el vano
+  // atraviesa también el forro que va pegado a esa pared. Cuando el bloque y su
+  // furring son dos paredes distintas, la banda del forro cruzaba el vano de
+  // punta a punta: el plano decía que había drywall construido por delante de
+  // la puerta. Aquí se toman prestados los vanos de la pared pegada y paralela
+  // SOLO para partir el cuerpo; los símbolos (hoja, arco, conteo) siguen siendo
+  // los propios, así que no se duplican.
+  function wallCortes(w) {
+    var g = wallGeom(w);
+    var out = wallOpenings(w).map(function (o) { return { pos: o.pos, w: o.w }; });
+    if (!state.openings.length) return out;
+    var esBl = String(w.type).indexOf('block') === 0;
+    state.walls.forEach(function (h) {
+      if (h.id === w.id) return;
+      // sólo entre mampostería y su forro: dos tabiques espalda con espalda de
+      // un chase son paredes de verdad distintas y no se cortan entre sí
+      if (!esBl && String(h.type).indexOf('block') !== 0) return;
+      var hg = wallGeom(h);
+      if (Math.abs(g.ux * hg.uy - g.uy * hg.ux) > 0.07) return;      // no son paralelas (±4°)
+      var sep = Math.abs((h.x1 - w.x1) * g.nx + (h.y1 - w.y1) * g.ny);
+      if (sep > w.t / 2 + h.t / 2 + 1) return;                       // no están pegadas cara con cara
+      wallOpenings(h).forEach(function (o) {
+        var P = ptAlong(h, hg, o.pos);
+        var d = (P[0] - w.x1) * g.ux + (P[1] - w.y1) * g.uy;         // proyectado a MI eje
+        if (d > -o.w && d < g.len + o.w) out.push({ pos: d, w: o.w });
+      });
+    });
+    return out.sort(function (a, b) { return a.pos - b.pos; });
+  }
+
   function wallSegs(w) {
-    var g = wallGeom(w), ops = wallOpenings(w), segs = [], d = 0, i;
+    var g = wallGeom(w), ops = wallCortes(w), segs = [], d = 0, i;
     for (i = 0; i < ops.length; i++) {
       var o = ops[i], d0 = Math.max(0, o.pos - o.w / 2), d1 = Math.min(g.len, o.pos + o.w / 2);
       if (d0 > d) segs.push([d, d0]);
       d = Math.max(d, d1);
     }
     if (d < g.len - 0.01) segs.push([d, g.len]);
-    return { g: g, segs: segs, ops: ops };
+    // ops = SÓLO los míos: los prestados parten el cuerpo pero no vuelven a
+    // dibujar hoja ni arco de barrido (si no, salen puertas fantasma dobles)
+    return { g: g, segs: segs, ops: wallOpenings(w) };
   }
 
   /* --- uniones limpias entre paredes (esquinas a inglete, T y cruces) --- */
@@ -728,7 +867,9 @@
     var nodes = [];
     state.walls.forEach(function (w) {
       joins[w.id] = { s: null, e: null };
-      cuts[w.id] = { plus: [], minus: [] };
+      // plus/minus: huecos de la CARA. dryPlus/dryMinus: huecos de la línea fina
+      // de furring, que se interrumpe aunque la rama sea de otro material
+      cuts[w.id] = { plus: [], minus: [], dryPlus: [], dryMinus: [] };
     });
     function nodeFor(x, y) {
       for (var i = 0; i < nodes.length; i++) {
@@ -774,18 +915,71 @@
     }
     var PESO = { block: 3, drywall: 2, screen: 1 };
 
+    // lo que hay que saber de la pared VECINA en un punto de inglete
+    function infoVecina(nb, esP) {
+      var wt = WALL_TYPES[nb.e.w.type] || {};
+      return {
+        u: [nb.ux, nb.uy],
+        bloque: String(nb.e.w.type).indexOf('block') === 0,
+        furr: !!wt.dry && (((nb.e.w.drySide || 1) > 0) === esP)
+      };
+    }
+
+    // ¿las dos puntas se encuentran EN ÁNGULO? (si van casi en la misma línea
+    // no hay esquina que ingletear: es un empalme a tope)
+    function enAngulo(a, b) {
+      var ga = wallGeom(a.w), gb = wallGeom(b.w);
+      return Math.abs(ga.ux * gb.uy - ga.uy * gb.ux) >= 0.05;
+    }
+
     // nodos donde coinciden extremos de dos o más paredes.
-    // Se sueldan con inglete las paredes de la MISMA FAMILIA: una pared de
-    // drywall que llega a una esquina de bloque se recorta contra la cara del
-    // bloque (más abajo, como unión en T) en vez de meterse dentro.
-    nodes.forEach(function (nd) {
-      if (nd.ends.length < 2) return;
+    // Con TRES o más puntas se sueldan con inglete las de la MISMA FAMILIA:
+    // una pared de drywall que llega a una esquina de bloque ya ocupada se
+    // recorta contra la cara del bloque (más abajo, como unión en T).
+    // Con DOS puntas es una ESQUINA en L de verdad y se ingletea SIEMPRE,
+    // aunque cambien material y grosor: separadas por familia cada grupo
+    // quedaba con k=1, las dos caían a la unión en T, y el liviano conservaba
+    // su medio espesor a los dos lados del eje del pesado — asomaba por fuera
+    // de la tapa y su boca se quedaba sin línea porque la cara del pesado ya
+    // se había acabado ahí.
+    function miterNode(nd) {
+      if (!nd.ends || nd.ends.length < 2) return;
       var byType = {};
-      nd.ends.forEach(function (e) { var f = famDe(e.w.type); (byType[f] = byType[f] || []).push(e); });
+      if (nd.ends.length === 2 && enAngulo(nd.ends[0], nd.ends[1])) {
+        byType.L = nd.ends;
+      } else {
+        nd.ends.forEach(function (e) { var f = famDe(e.w.type); (byType[f] = byType[f] || []).push(e); });
+      }
       Object.keys(byType).forEach(function (ty) {
         var grp = byType[ty];
         var k = grp.length;
         if (k < 2) return;   // extremo suelto de otro material: lo resuelve la unión en T
+        // si el nodo cae sobre el CUERPO de una pared de familia más pesada que
+        // no es del grupo, no hay esquina que ingletear: cada rama muere contra
+        // la cara de la mampostería (lo resuelve la unión en T de más abajo).
+        // Sin esto, dos tabiques que arrancan del mismo punto sobre un bloque se
+        // sueldan ENTRE ELLOS, pintan su relleno encima del rayado y disparan
+        // una punta de lanza que atraviesa el bloque y asoma al otro lado.
+        var pesoGrp = 0;
+        grp.forEach(function (e) { pesoGrp = Math.max(pesoGrp, PESO[famDe(e.w.type)]); });
+        var pesado = false;
+        if (pesoGrp < 3) state.walls.forEach(function (h) {   // 3 = bloque: nada pesa más
+          if (pesado) return;
+          if (PESO[famDe(h.type)] <= pesoGrp) return;
+          for (var gi = 0; gi < grp.length; gi++) if (grp[gi].w.id === h.id) return;
+          var hg2 = wallGeom(h);
+          // mismo criterio que la unión en T: una pared PARALELA no sirve de
+          // anfitrión para recortar, y si la dejáramos entrar aquí romperíamos
+          // ingletes buenos convirtiéndolos en punta abierta
+          var util = false;
+          grp.forEach(function (e) {
+            var wg2 = wallGeom(e.w);
+            if (Math.abs(wg2.ux * hg2.uy - wg2.uy * hg2.ux) >= 0.05) util = true;
+          });
+          if (!util) return;
+          if (distToSeg(nd.x, nd.y, h.x1, h.y1, h.x2, h.y2).d <= h.t / 2 + 0.75) pesado = true;
+        });
+        if (pesado) return;
         var ends = grp.map(function (e) {
           var g = wallGeom(e.w);
           return { e: e, ux: e.atStart ? g.ux : -g.ux, uy: e.atStart ? g.uy : -g.uy, t: e.w.t };
@@ -796,14 +990,77 @@
         for (var m = 0; m < k; m++) Q.push(miterPoint(nd, ends[m], ends[(m + 1) % k]));
         for (m = 0; m < k; m++) {
           var a = ends[m];
+          var nxt = ends[(m + 1) % k], prv = ends[(m - 1 + k) % k];
           var qCCW = Q[m], qCW = Q[(m - 1 + k) % k];
           // mit: esta unión es una ESQUINA a inglete (no un tee) — la línea de
-          // furring la necesita para doblar la esquina en vez de pasarse
-          setJoin(a.e.w, a.e.atStart,
-            a.e.atStart ? { p: qCCW, m: qCW, cap: false, mit: true } : { p: qCW, m: qCCW, cap: false, mit: true });
+          // furring la necesita para doblar la esquina en vez de pasarse.
+          // pu/mu: hacia dónde sale la pared VECINA en cada punto de inglete. El
+          // pico lo comparten dos paredes distintas, así que ningún trazo de una
+          // sola las puede unir; con esto el render pinta la cuña que le falta.
+          // Q[m] lo comparte con nxt (y es el punto 'p' de nxt sólo si nxt NO
+          // arranca ahí); Q[m-1] lo comparte con prv (y es su 'p' sólo si prv sí
+          // arranca ahí). Se guarda de la vecina lo que el render necesita: por
+          // dónde sale, qué material es, y si SU línea de furring pasa por ese
+          // mismo pico (si no pasa, la cuña de furring quedaría colgando en el
+          // aire — la pared vecina de drywall no lleva línea fina ninguna).
+          var iNxt = infoVecina(nxt, !nxt.e.atStart);
+          var iPrv = infoVecina(prv, prv.e.atStart);
+          var jo = a.e.atStart
+            ? { p: qCCW, m: qCW, cap: false, mit: true, pu: iNxt, mu: iPrv }
+            : { p: qCW, m: qCCW, cap: false, mit: true, pu: iPrv, mu: iNxt };
+          // ¿esta punta ATRAVIESA el nodo? (hay otra igual saliendo justo al
+          // revés). Entonces no es una esquina: la pared SIGUE DE LARGO y su
+          // boca en el nodo es PLANA. Con el inglete los rellenos de las dos
+          // mitades formaban un moño y dejaban una mella triangular de fondo
+          // justo en el cruce — la T de tabique más común del plano. pf/mf las
+          // usa SÓLO el relleno; las líneas se quedan en el inglete, que ahí sí
+          // es lo correcto (la cara se abre para dejar pasar la rama).
+          var pasa = false;
+          for (var m2 = 0; m2 < k; m2++) {
+            if (m2 === m || Math.abs(a.t - ends[m2].t) > 0.01) continue;
+            if (a.ux * ends[m2].ux + a.uy * ends[m2].uy < -0.999) pasa = true;
+          }
+          if (pasa) {
+            var gA = wallGeom(a.e.w);
+            jo.pf = [nd.x + gA.nx * a.t / 2, nd.y + gA.ny * a.t / 2];
+            jo.mf = [nd.x - gA.nx * a.t / 2, nd.y - gA.ny * a.t / 2];
+          }
+          setJoin(a.e.w, a.e.atStart, jo);
         }
       });
+    }
+    nodes.forEach(miterNode);
+
+    // ESQUINA DESALINEADA: dos puntas libres que no llegaron a compartir nodo
+    // (se pasaron o se quedaron cortas más de TOL=1") pero que siguen dentro
+    // del grosor una de la otra. Físicamente las paredes se solapan, así que la
+    // esquina se suelda igual. El vértice es el CRUCE DE LOS EJES, no el punto
+    // medio: así el inglete sale limpio en vez del cuadrado hueco que quedaba.
+    var libres = [];
+    state.walls.forEach(function (w) {
+      if (!joins[w.id].s) libres.push({ w: w, atStart: true, P: [w.x1, w.y1] });
+      if (!joins[w.id].e) libres.push({ w: w, atStart: false, P: [w.x2, w.y2] });
     });
+    for (var i1 = 0; i1 < libres.length; i1++) {
+      for (var j1 = i1 + 1; j1 < libres.length; j1++) {
+        var A = libres[i1], B = libres[j1];
+        if (A.w.id === B.w.id) continue;
+        if (joins[A.w.id][A.atStart ? 's' : 'e'] || joins[B.w.id][B.atStart ? 's' : 'e']) continue;
+        // el alcance es exactamente la ventana que hoy se rompe: más lejos que
+        // esto las dos paredes de verdad no se tocan y cada una lleva su tapa
+        var lim = Math.max(A.w.t, B.w.t) / 2 + 0.75;
+        if (Math.hypot(A.P[0] - B.P[0], A.P[1] - B.P[1]) > lim) continue;
+        var ga = wallGeom(A.w), gb = wallGeom(B.w);
+        var cr = ga.ux * gb.uy - ga.uy * gb.ux;
+        if (Math.abs(cr) < 0.05) continue;                      // casi paralelas: no hay esquina
+        var ddx = B.P[0] - A.P[0], ddy = B.P[1] - A.P[1];
+        var sA = (ddx * gb.uy - ddy * gb.ux) / cr;
+        var V = [A.P[0] + sA * ga.ux, A.P[1] + sA * ga.uy];      // cruce de los EJES
+        if (Math.hypot(V[0] - A.P[0], V[1] - A.P[1]) > 1.5 * lim) continue;
+        if (Math.hypot(V[0] - B.P[0], V[1] - B.P[1]) > 1.5 * lim) continue;
+        miterNode({ x: V[0], y: V[1], ends: [{ w: A.w, atStart: A.atStart }, { w: B.w, atStart: B.atStart }] });
+      }
+    }
 
     // uniones en T: extremo libre que cae sobre el cuerpo de otra pared
     state.walls.forEach(function (w) {
@@ -813,21 +1070,26 @@
         var P = atStart ? [w.x1, w.y1] : [w.x2, w.y2];
         var other = atStart ? [w.x2, w.y2] : [w.x1, w.y1];
         var wg = wallGeom(w);
-        var host = null, hr = null;
+        var host = null, hr = null, hostL = null, hrL = null;
         state.walls.forEach(function (h) {
           if (h.id === w.id) return;
-          // el material pesado no se recorta contra el liviano: un bloque
-          // jamás muere contra la cara de un drywall (queda con su esquina
-          // cuadrada y es el drywall el que se recorta contra él)
-          if (PESO[famDe(h.type)] < PESO[famDe(w.type)]) return;
           var hg2 = wallGeom(h);
           if (Math.abs(wg.ux * hg2.uy - wg.uy * hg2.ux) < 0.05) return;   // casi paralelas: no hay cara contra la cual recortar
           var r = distToSeg(P[0], P[1], h.x1, h.y1, h.x2, h.y2);
           var d = r.t * hg2.len;
-          if (r.d <= h.t / 2 + 0.75 && (!host || r.d < hr.dist)) {
-            host = h; hr = { d: d, dist: r.d };
+          if (r.d > h.t / 2 + 0.75) return;
+          // el material pesado no se recorta contra el liviano si tiene otro
+          // anfitrión de su peso: un bloque conserva su esquina cuadrada y es el
+          // drywall el que se recorta contra él. Pero si NO hay otro anfitrión,
+          // mejor que muera en la cara del tabique que dejarlo enterrado hasta
+          // el eje, con su tapa negra flotando dentro del relleno del tabique.
+          if (PESO[famDe(h.type)] < PESO[famDe(w.type)]) {
+            if (!hostL || r.d < hrL.dist) { hostL = h; hrL = { d: d, dist: r.d }; }
+            return;
           }
+          if (!host || r.d < hr.dist) { host = h; hr = { d: d, dist: r.d }; }
         });
+        if (!host && hostL) { host = hostL; hr = hrL; }
         if (!host) { setJoin(w, atStart, plainEnd(w, atStart)); return; }
         var hg = wallGeom(host);
         var cross = wg.ux * hg.uy - wg.uy * hg.ux;
@@ -842,11 +1104,30 @@
           var s2 = (dx * hg.uy - dy * hg.ux) / cross;
           return [E[0] + s2 * wg.ux, E[1] + s2 * wg.uy];
         }
-        setJoin(w, atStart, { p: edgeHit(1), m: edgeHit(-1), cap: false });
+        var Ep = edgeHit(1), Em = edgeHit(-1);
+        // ¿la boca de la rama queda TAPADA por la línea de cara del anfitrión?
+        // Esa cara sólo existe entre 0 y hg.len: si la boca se sale de ese tramo
+        // (la rama muere contra la PUNTA del host, no contra su cuerpo) no hay
+        // nada que la cierre y el relleno se queda al aire. Entonces la tapa la
+        // dibujamos nosotros.
+        var dP = (Ep[0] - host.x1) * hg.ux + (Ep[1] - host.y1) * hg.uy;
+        var dM = (Em[0] - host.x1) * hg.ux + (Em[1] - host.y1) * hg.uy;
+        var tapada = Math.min(dP, dM) >= -0.01 && Math.max(dP, dM) <= hg.len + 0.01;
+        var mismaFam = famDe(host.type) === famDe(w.type);
+        // y si el que muere es el PESADO contra un liviano, cierra con SU línea
+        // gruesa: la línea fina del tabique no alcanza a tapar una boca de 8"
+        var pesadoEnLiviano = PESO[famDe(host.type)] < PESO[famDe(w.type)];
+        setJoin(w, atStart, { p: Ep, m: Em, cap: !tapada || pesadoEnLiviano });
         // misma familia: se abre la cara del host para que la unión sea continua
         // (drywall que tee en bloque NO la abre: la cara de mampostería sigue)
-        if (famDe(host.type) === famDe(w.type)) {
+        if (mismaFam && tapada) {
           (sside > 0 ? cuts[host.id].plus : cuts[host.id].minus).push([hr.d - w.t / 2, hr.d + w.t / 2]);
+        }
+        // la línea fina del furring SÍ se abre siempre: el yeso se interrumpe
+        // aunque la rama sea de otro material. Si no, la raya cruza por delante
+        // del tabique y que se vea o no depende del orden de dibujo.
+        if (tapada) {
+          (sside > 0 ? cuts[host.id].dryPlus : cuts[host.id].dryMinus).push([hr.d - w.t / 2, hr.d + w.t / 2]);
         }
       });
     });
@@ -878,6 +1159,31 @@
     return s;
   }
 
+  // CUÑA DE INGLETE. El pico de una esquina lo comparten DOS paredes distintas,
+  // así que ningún trazo de una sola pared puede cerrarlo: la línea de una cara
+  // moría a tope en el vértice y la de la otra arrancaba ahí mismo, dejando
+  // mordido un cuadradito de fondo justo en la punta (y un diente en los
+  // quiebres de 45°). Estas dos patitas caen EXACTAMENTE encima de las líneas de
+  // cara que ya se dibujan; lo único que aportan es el inglete que rellena el
+  // pico. Se pinta dos veces por esquina, una por pared: es la misma tinta.
+  // stroke-miterlimit alto porque en las puntas agudas el límite por defecto
+  // (4) recortaría el inglete y volvería a dejar el escalón.
+  function cunaMiter(cls, Q, uOwn, uNb, d) {
+    if (!Q || !uNb) return '';
+    return '<path class="' + cls + '" fill="none" stroke-linejoin="miter" stroke-miterlimit="20" d="M' +
+      (Q[0] + uOwn[0] * d) + ',' + (Q[1] + uOwn[1] * d) + ' L' + Q[0] + ',' + Q[1] +
+      ' L' + (Q[0] + uNb[0] * d) + ',' + (Q[1] + uNb[1] * d) + '"/>';
+  }
+  function cunasDe(g, J, atStart, esBloque, Qp, Qm, d) {
+    if (!J || !J.mit) return '';
+    var uO = [atStart ? g.ux : -g.ux, atStart ? g.uy : -g.uy];
+    // la patita se apoya encima de la cara de la VECINA: si una de las dos es
+    // liviana se usa el trazo fino, para no engordarle la línea al tabique
+    function cl(nb) { return (esBloque && nb && nb.bloque) ? 'wall-edge' : 'wall-edge dry'; }
+    return cunaMiter(cl(J.pu), Qp, uO, J.pu && J.pu.u, d) +
+           cunaMiter(cl(J.mu), Qm, uO, J.mu && J.mu.u, d);
+  }
+
   function renderWalls() {
     var jc = computeJoins();
     var out = '';
@@ -896,29 +1202,92 @@
       hatchUsados[k] = 1;
       return 'hb' + k;
     }
-    state.walls.forEach(function (w) {
+    // EL ORDEN DE DIBUJO NO DEBE CAMBIAR EL PLANO. Antes se pintaba en el orden
+    // en que el usuario dibujó, así que la misma escena salía bien o rota según
+    // quién quedara encima. Se pinta por peso de material — primero lo liviano,
+    // la mampostería al final — para que ningún relleno de tabique pueda
+    // borrarle el rayado ni las líneas de cara a un muro de bloque.
+    var pesoDib = { screen: 1, drywall: 2, block: 3 };
+    var ordenDib = state.walls.map(function (w, i) { return { w: w, i: i }; });
+    ordenDib.sort(function (a, b) {
+      var fa = a.w.type === 'screen' ? 'screen' : (String(a.w.type).indexOf('block') === 0 ? 'block' : 'drywall');
+      var fb = b.w.type === 'screen' ? 'screen' : (String(b.w.type).indexOf('block') === 0 ? 'block' : 'drywall');
+      return (pesoDib[fa] - pesoDib[fb]) || (a.i - b.i);
+    });
+    ordenDib.forEach(function (od) {
+      var w = od.w;
       var info = wallSegs(w), g = info.g, t = w.t / 2;
       var J = jc.joins[w.id], cut = jc.cuts[w.id];
       var esBloque = String(w.type).indexOf('block') === 0;
       var fillCls = esBloque ? 'wall-fill-block' : 'wall-fill-drywall';
       var fillSty = esBloque ? ' style="fill:url(#' + hatchDe(w) + ')"' : '';
       var ecls = esBloque ? 'wall-edge' : 'wall-edge dry';   // el plano profesional: mamposteria gruesa, division liviana
+      var dCuna = Math.min(Math.max(0.8, w.t / 4), g.len / 3);
       info.segs.forEach(function (sg) {
         var atS = sg[0] < 0.01, atE = sg[1] > g.len - 0.01;
         var aP = atS ? J.s.p : offPt(w, g, sg[0], 1, t);
         var aM = atS ? J.s.m : offPt(w, g, sg[0], -1, t);
         var bP = atE ? J.e.p : offPt(w, g, sg[1], 1, t);
         var bM = atE ? J.e.m : offPt(w, g, sg[1], -1, t);
-        out += '<path class="' + fillCls + '"' + fillSty + ' d="M' + aP + ' L' + bP + ' L' + bM + ' L' + aM + ' Z"/>';
-        out += edgeLines(w, g, t, sg, 1, aP, bP, cut.plus, ecls);
-        out += edgeLines(w, g, t, sg, -1, aM, bM, cut.minus, ecls);
-        if (atS ? J.s.cap : true) out += '<line class="' + ecls + '" x1="' + aP[0] + '" y1="' + aP[1] + '" x2="' + aM[0] + '" y2="' + aM[1] + '"/>';
-        if (atE ? J.e.cap : true) out += '<line class="' + ecls + '" x1="' + bP[0] + '" y1="' + bP[1] + '" x2="' + bM[0] + '" y2="' + bM[1] + '"/>';
+        // el relleno usa la boca PLANA cuando la pared atraviesa el nodo (pf/mf)
+        var fP1 = atS ? (J.s.pf || aP) : aP, fM1 = atS ? (J.s.mf || aM) : aM;
+        var fP2 = atE ? (J.e.pf || bP) : bP, fM2 = atE ? (J.e.mf || bM) : bM;
+        out += '<path class="' + fillCls + '"' + fillSty + ' d="M' + fP1 + ' L' + fP2 + ' L' + fM2 + ' L' + fM1 + ' Z"/>';
+        var capS = atS ? J.s.cap : true, capE = atE ? J.e.cap : true;
+        // el contorno del REMATE va en UN SOLO trazo con inglete: cuatro <line>
+        // sueltas dejaban las cuatro esquinas de la punta mordidas (a cada pico
+        // le faltaba medio grosor de línea). Con cortes de por medio hay que
+        // seguir partiendo cara por cara.
+        if (!cut.plus.length && !cut.minus.length && (capS || capE)) {
+          var dd = capS && capE ? 'M' + aP + ' L' + bP + ' L' + bM + ' L' + aM + ' Z'
+                 : capE ? 'M' + aP + ' L' + bP + ' L' + bM + ' L' + aM
+                        : 'M' + bM + ' L' + aM + ' L' + aP + ' L' + bP;
+          out += '<path class="' + ecls + '" fill="none" stroke-linejoin="miter" stroke-miterlimit="20" d="' + dd + '"/>';
+        } else {
+          out += edgeLines(w, g, t, sg, 1, aP, bP, cut.plus, ecls);
+          out += edgeLines(w, g, t, sg, -1, aM, bM, cut.minus, ecls);
+          if (capS) out += '<line class="' + ecls + '" x1="' + aP[0] + '" y1="' + aP[1] + '" x2="' + aM[0] + '" y2="' + aM[1] + '"/>';
+          if (capE) out += '<line class="' + ecls + '" x1="' + bP[0] + '" y1="' + bP[1] + '" x2="' + bM[0] + '" y2="' + bM[1] + '"/>';
+        }
+        if (atS) out += cunasDe(g, J.s, true, esBloque, aP, aM, dCuna);
+        if (atE) out += cunasDe(g, J.e, false, esBloque, bP, bM, dCuna);
       });
-      // media pared: línea de centro discontinua = no llega al techo
+      // media pared: línea de centro discontinua = no llega al techo.
+      // Arranca DONDE ARRANCA EL CUERPO (la cara de la pared anfitriona o el
+      // inglete), no en el eje crudo: si no, la raya se entierra en la
+      // mampostería del vecino y queda un guioncito suelto en medio del rayado.
       if (WALL_TYPES[w.type] && WALL_TYPES[w.type].pony) {
+        // hasta dónde llega el cuerpo, medido a lo largo del eje: el medio de la
+        // boca de la unión (en una T, la cara del anfitrión; en un extremo
+        // suelto, la punta misma)
+        var dMed = function (Jx) {
+          return ((Jx.p[0] + Jx.m[0]) / 2 - w.x1) * g.ux + ((Jx.p[1] + Jx.m[1]) / 2 - w.y1) * g.uy;
+        };
+        // y en una esquina a inglete contra MAMPOSTERÍA se para antes: en la
+        // CARA del bloque. El cruce de ejes cae medio muro adentro y el
+        // guioncito se lee como mugre encima del rayado.
+        var topeBloque = function (Jx, esIni) {
+          if (!Jx.mit) return null;
+          var best = null;
+          [['p', 'pu'], ['m', 'mu']].forEach(function (kk) {
+            var nb = Jx[kk[1]];
+            if (!nb || !nb.bloque) return;
+            var Q = Jx[kk[0]];
+            var cr2 = g.ux * nb.u[1] - g.uy * nb.u[0];
+            if (Math.abs(cr2) < 1e-6) return;
+            var s2 = ((Q[0] - w.x1) * nb.u[1] - (Q[1] - w.y1) * nb.u[0]) / cr2;
+            if (best === null || (esIni ? s2 > best : s2 < best)) best = s2;
+          });
+          return best;
+        };
+        var dIni = dMed(J.s), dFin = dMed(J.e);
+        var tb0 = topeBloque(J.s, true); if (tb0 != null) dIni = Math.max(dIni, tb0);
+        var tb1 = topeBloque(J.e, false); if (tb1 != null) dFin = Math.min(dFin, tb1);
         info.segs.forEach(function (sg) {
-          var C1 = offPt(w, g, sg[0], 1, 0), C2 = offPt(w, g, sg[1], 1, 0);
+          var a0 = sg[0] < 0.01 ? dIni : sg[0];
+          var a1 = sg[1] > g.len - 0.01 ? dFin : sg[1];
+          if (a1 - a0 < 0.01) return;
+          var C1 = ptAlong(w, g, a0), C2 = ptAlong(w, g, a1);
           out += '<line class="furr-line" stroke-dasharray="5 4" x1="' + C1[0] + '" y1="' + C1[1] + '" x2="' + C2[0] + '" y2="' + C2[1] + '"/>';
         });
       }
@@ -941,18 +1310,52 @@
       // líneas de furring — misma bisectriz, otro radio.
       if (WALL_TYPES[w.type] && WALL_TYPES[w.type].dry) {
         var sideD = w.drySide || 1, offD = t + 1.5, kF = offD / t;
+        var cutF = sideD > 0 ? cut.dryPlus : cut.dryMinus;
+        // dónde queda la unión medida a lo largo del eje (el medio de la boca)
+        var dJoin = function (Jx) {
+          return ((Jx.p[0] + Jx.m[0]) / 2 - w.x1) * g.ux + ((Jx.p[1] + Jx.m[1]) / 2 - w.y1) * g.uy;
+        };
+        // dónde muere la raya en la esquina: si la vecina también lleva
+        // furring, las dos rayas se encuentran en la prolongación del inglete;
+        // si no lleva (un tabique, un bloque pelado), el yeso topa contra la
+        // CARA de esa vecina y ahí se acaba
+        var finFurr = function (Jx, nb, A) {
+          if (!nb || nb.furr) return null;
+          var Q = sideD > 0 ? Jx.p : Jx.m;
+          var cr2 = g.ux * nb.u[1] - g.uy * nb.u[0];
+          if (Math.abs(cr2) < 1e-6) return null;
+          var s2 = ((Q[0] - A[0]) * nb.u[1] - (Q[1] - A[1]) * nb.u[0]) / cr2;
+          return [A[0] + s2 * g.ux, A[1] + s2 * g.uy];
+        };
         info.segs.forEach(function (sg) {
           var atSf = sg[0] < 0.01, atEf = sg[1] > g.len - 0.01;
-          var P1 = offPt(w, g, sg[0], sideD, offD), P2 = offPt(w, g, sg[1], sideD, offD);
+          // en una T la raya arranca en la unión, no en el extremo crudo (si no
+          // saca un bigote que se mete en el rayado del vecino)
+          var d0 = (atSf && !J.s.mit) ? Math.max(sg[0], dJoin(J.s)) : sg[0];
+          var d1 = (atEf && !J.e.mit) ? Math.min(sg[1], dJoin(J.e)) : sg[1];
+          if (d1 - d0 < 0.01) return;
+          var P1 = offPt(w, g, d0, sideD, offD), P2 = offPt(w, g, d1, sideD, offD);
+          // la cuña de la raya de furring SÓLO si la vecina también trae su raya
+          // por ese mismo pico (contra un tabique de drywall no hay nada que
+          // enlazar y quedaría un palito colgando en el aire)
+          var nbS = atSf && J.s.mit ? (sideD > 0 ? J.s.pu : J.s.mu) : null;
+          var nbE = atEf && J.e.mit ? (sideD > 0 ? J.e.pu : J.e.mu) : null;
           if (atSf && J.s.mit) {
             var Qs = sideD > 0 ? J.s.p : J.s.m;
-            P1 = [w.x1 + (Qs[0] - w.x1) * kF, w.y1 + (Qs[1] - w.y1) * kF];
+            P1 = finFurr(J.s, nbS, P1) ||
+                 [w.x1 + (Qs[0] - w.x1) * kF, w.y1 + (Qs[1] - w.y1) * kF];
           }
           if (atEf && J.e.mit) {
             var Qe = sideD > 0 ? J.e.p : J.e.m;
-            P2 = [w.x2 + (Qe[0] - w.x2) * kF, w.y2 + (Qe[1] - w.y2) * kF];
+            P2 = finFurr(J.e, nbE, P2) ||
+                 [w.x2 + (Qe[0] - w.x2) * kF, w.y2 + (Qe[1] - w.y2) * kF];
           }
-          out += '<line class="furr-line" x1="' + P1[0] + '" y1="' + P1[1] + '" x2="' + P2[0] + '" y2="' + P2[1] + '"/>';
+          // se dibuja con edgeLines para que SE ABRA en el ancho de los tabiques
+          // que mueren en ella: antes cruzaba por encima y que se viera o no
+          // dependía del orden en que se hubieran dibujado las paredes
+          out += edgeLines(w, g, offD, [d0, d1], sideD, P1, P2, cutF, 'furr-line');
+          if (nbS && nbS.furr) out += cunaMiter('furr-line', P1, [g.ux, g.uy], nbS.u, dCuna);
+          if (nbE && nbE.furr) out += cunaMiter('furr-line', P2, [-g.ux, -g.uy], nbE.u, dCuna);
         });
       }
       info.ops.forEach(function (o) { out += renderOpening(w, g, o); });
@@ -1876,7 +2279,7 @@
     }
     switch (tool) {
       case 'select': return selectDown(p, ev);
-      case 'wall': return wallDown(p);
+      case 'wall': return wallDown(p, ev);
       case 'area': return areaDown(p);
       case 'rect': case 'ellipse': return shapeDown(p, tool, ev);
       case 'cloud': return shapeDown(p, 'cloud', ev);
@@ -1918,9 +2321,20 @@
       var raw = snapWallPt(p);
       var b = wantOrtho(ev) ? orthoLock(drawing.last, raw) : orthoSnap(drawing.last, raw);
       var len = Math.hypot(b[0] - drawing.last[0], b[1] - drawing.last[1]);
-      var t = WALL_TYPES[$('#wallType').value].t / 2;
+      var wtPrev = WALL_TYPES[$('#wallType').value];
+      var t = wtPrev.t / 2;
+      // en el bloque forrado, el fantasma enseña de qué LADO va a caer la línea
+      // fina ANTES de soltar el clic: el drySide sale a la derecha del avance y
+      // trazar el perímetro al revés lo dejaba todo por fuera de la casa
+      var gp = '';
+      if (wtPrev.dry && len > 1) {
+        var upx = (b[0] - drawing.last[0]) / len, upy = (b[1] - drawing.last[1]) / len;
+        var opx = -upy * (t + 1.5), opy = upx * (t + 1.5);
+        gp = '<line x1="' + (drawing.last[0] + opx) + '" y1="' + (drawing.last[1] + opy) +
+          '" x2="' + (b[0] + opx) + '" y2="' + (b[1] + opy) + '" stroke="#0b84ff" stroke-width="0.9" stroke-dasharray="4 3"/>';
+      }
       G.prev.innerHTML = '<g class="preview">' +
-        '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' +
+        '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' + gp +
         '<text class="lbl" x="' + ((drawing.last[0] + b[0]) / 2 + 8) + '" y="' + ((drawing.last[1] + b[1]) / 2 - 8) + '" font-size="9" font-weight="bold">' + fmtFtIn(len) + '</text></g>';
       drawing.cursor = b;
     } else if (drawing && drawing.mode === 'shape2') {
@@ -2284,27 +2698,46 @@
   }
 
   /* --- paredes --- */
-  function wallDown(p) {
+  // CON EL DEDO NO HAY "MOVER ANTES DE TOCAR". Se usaba drawing.cursor — el
+  // punto que dejó la ÚLTIMA vista previa — así que en una tableta cada pared
+  // salía UNA PULSACIÓN TARDE (y con un toque perfectamente quieto, que no
+  // manda ningún move, no salía nada). El punto bueno ya se calcula aquí: np.
+  // Se le aplica el mismo ortho que usa la vista previa, así el ratón se
+  // comporta exactamente igual que antes.
+  function wallDown(p, ev) {
     var np = snapWallPt(p);
     if (!drawing) { drawing = { mode: 'wallchain', last: np, cursor: np }; return; }
-    var b = drawing.cursor || orthoSnap(drawing.last, np);
+    var b = wantOrtho(ev) ? orthoLock(drawing.last, np) : orthoSnap(drawing.last, np);
     if (Math.hypot(b[0] - drawing.last[0], b[1] - drawing.last[1]) > 2) {
       pushUndo();
       var wt = $('#wallType').value;
       var wNueva = { id: uid(), x1: drawing.last[0], y1: drawing.last[1], x2: b[0], y2: b[1], type: wt, t: WALL_TYPES[wt].t };
       if (absorbeEnBloque(wNueva)) {
-        drawing.last = b;
+        drawing.last = b; drawing.cursor = b;
+        G.prev.innerHTML = '';
         refreshCounts();
         return;
       }
       recortaPuntas(wNueva);
       state.walls.push(wNueva);
       ajustaVecinas(wNueva);
-      drawing.last = b;
+      // en cuanto la vuelta cierra, el forro del bloque salta solo al interior
+      orientaDrySide();
+      // la cadena sigue desde el extremo REAL de la pared que quedó dibujada,
+      // no desde el punto sin corregir: si no, el tramo de cierre se engancha a
+      // una punta enterrada y arrastra el error hasta el final de la vuelta
+      drawing.last = [wNueva.x2, wNueva.y2];
+      drawing.cursor = drawing.last;
+      G.prev.innerHTML = '';
       renderWalls(); refreshCounts();
     }
   }
-  function finishWallChain() { drawing = null; G.prev.innerHTML = ''; }
+  function finishWallChain() {
+    drawing = null; G.prev.innerHTML = '';
+    // al cerrar la vuelta, el forro del bloque salta solo al INTERIOR (dibujar
+    // el perímetro al revés lo dejaba todo por fuera de la casa)
+    orientaDrySide(); renderWalls();
+  }
 
   /* --- superficies / techos --- */
   function areaDown(p) {
@@ -3236,6 +3669,7 @@
         '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">🧩 Calzar con lo puesto</button>' +
         '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">🎯 Encajar en el plano (guía)</button>' +
         '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">🧭 Convertir en guía (survey)</button>' +
+        '<button id="prFlipDryG" style="width:100%;margin-bottom:6px" title="Cambia de lado la línea fina del drywall en TODAS las paredes de bloque seleccionadas — un clic en vez de una por una">↕ Lado del drywall (grupo)</button>' +
         '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
@@ -3251,6 +3685,19 @@
       if (bgd) bgd.addEventListener('click', function () { hacerGuia(); });
       var ben = $('#prEncaja');
       if (ben) ben.addEventListener('click', function () { encajarSel(); });
+      // voltear el lado del drywall en TODO el grupo: en una casa de 12 tramos
+      // de bloque eran 12 selecciones y 12 clics
+      var bfd = $('#prFlipDryG');
+      if (bfd) bfd.addEventListener('click', function () {
+        pushUndo();
+        selGroup.forEach(function (r) {
+          if (r.kind !== 'wall') return;
+          var q = entityOf(r);
+          if (!q || !WALL_TYPES[q.type] || !WALL_TYPES[q.type].dry) return;
+          q.drySide = -(q.drySide || 1); q.dryManual = 1;
+        });
+        refresh();
+      });
       return;
     }
     var e = findSel();
@@ -3270,7 +3717,11 @@
       var wAng = Math.atan2(e.y2 - e.y1, e.x2 - e.x1) * 180 / Math.PI;
       html += '<div class="row"><label>Ángulo</label><input id="prWallAng" type="number" step="0.5" value="' + (Math.round(wAng * 10) / 10) + '"></div>';
       if (WALL_TYPES[e.type] && WALL_TYPES[e.type].dry) {
-        html += '<button id="prFlipDry">↕ Lado del drywall</button>';
+        // el botón dice de qué lado está AHORA: el error de tener el drywall por
+        // fuera de la casa es invisible de un vistazo, así que se escribe
+        var intr = orientaDrySide(true)[e.id];
+        var dice = intr == null ? '' : ((e.drySide || 1) === intr ? ': adentro' : ': AFUERA ⚠');
+        html += '<button id="prFlipDry">↕ Drywall' + dice + '</button>';
       }
       html += '<button class="danger" id="prDelete">🗑 Borrar pared</button>';
     } else if (sel.kind === 'opening') {
@@ -3429,7 +3880,9 @@
       var v = parseDist(n.value); if (!v || v < 6) return;
       pushUndo(); e.w = v; refresh();
     });
-    on('prFlipDry', 'click', function () { pushUndo(); e.drySide = -(e.drySide || 1); refresh(); });
+    // dryManual: el volteo A MANO manda. El orientador automático de la vuelta
+    // no vuelve a tocar nunca una pared que el usuario decidió él mismo.
+    on('prFlipDry', 'click', function () { pushUndo(); e.drySide = -(e.drySide || 1); e.dryManual = 1; refresh(); });
     on('prFlipSwing', 'click', function () { pushUndo(); e.swing = -(e.swing || 1); refresh(); });
     on('prFlipHinge', 'click', function () { pushUndo(); e.hinge = e.hinge ? 0 : 1; refresh(); });
     on('prRot', 'change', function (n) { pushUndo(); e.rot = parseFloat(n.value) || 0; refresh(); });
@@ -5649,6 +6102,7 @@
       return Math.hypot(w.x2 - w.x1, w.y2 - w.y1) >= 2;
     });
     limpiaHuerfanas();
+    orientaDrySide();          // el forro del bloque, siempre para adentro
     refresh(); refreshCounts();
     setHint('🧲 ' + (soloSel ? 'Soldadas solo las paredes seleccionadas' : 'Armado soldado') + ': ' +
       antes + '→' + state.walls.length + ' paredes' + (soloSel ? '' : ', ' + rooms.length + ' cuarto(s) cerrados') +
@@ -8546,7 +9000,10 @@
         // pedido de Edgar: Escape SIEMPRE cancela lo que este a medias y
         // devuelve a Select — como en un CAD de verdad
         if (drawing) {
-          drawing = null; G.prev.innerHTML = '';
+          // una cadena de paredes se cierra por su puerta (finishWallChain), no
+          // a lo bruto: ahí es donde el forro del bloque se orienta al interior
+          if (drawing.mode === 'wallchain') finishWallChain();
+          else { drawing = null; G.prev.innerHTML = ''; }
           measure = null; renderAnnot();
           setTool('select');
         } else if (tool !== 'select') {
