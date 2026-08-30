@@ -18,8 +18,17 @@ self.addEventListener('activate', function (e) {
 });
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET' || e.request.url.indexOf(self.location.origin) !== 0) return;
+  // no-cache: cada carga REVALIDA contra el servidor (ETag → 304 baratito).
+  // Sin esto, GitHub Pages deja el js viejo 10 minutos en el caché HTTP y
+  // la versión nueva "no llega" aunque ya esté publicada.
+  var req;
+  try {
+    req = e.request.mode === 'navigate'
+      ? new Request(e.request.url, { cache: 'no-cache' })
+      : new Request(e.request, { cache: 'no-cache' });
+  } catch (err) { req = e.request; }
   e.respondWith(
-    fetch(e.request).then(function (res) {
+    fetch(req).then(function (res) {
       try {
         if (res && res.ok) {
           var copy = res.clone();
