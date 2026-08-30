@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.T';
+  var APP_VERSION = 'v27.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -139,6 +139,15 @@
   var PAT_STROKE = ' stroke="#8a8578" stroke-width="0.7" fill="none"';
   var AREA_PATTERNS = {
     none: { name: 'Outline only (no fill)', w: 4, h: 4, content: '' },
+    // GABINETE ELEVADO (Edgar, 08/30: "un poligono en lineas discontinuas
+    // parecido a los gabinetes elevados, pero que arriba de un countertop le
+    // pueda dar color blanco"). En el plano el upper cabinet va DISCONTINUO
+    // —porque queda por encima del corte— y OPACO, para que el granito del
+    // mostrador no se le vea por dentro. El preset trae las dos cosas.
+    upper: { name: '▨ Upper Cabinet — gabinete elevado (blanco + discontinua)',
+      solid: '#fbfaf7', dash: 'dashed', w: 4, h: 4, content: '' },
+    solid: { name: '⬜ Blanco sólido (tapa lo de abajo)', solid: '#fbfaf7', w: 4, h: 4, content: '' },
+    solid_gris: { name: '⬛ Gris claro sólido', solid: '#e9e7e1', w: 4, h: 4, content: '' },
     wood_floor: { name: 'Wood / Laminate Floor', w: 36, h: 10,
       content: '<path d="M0,0 H36 M0,5 H36 M18,0 V5 M6,5 V10"' + PAT_STROKE + '/>' },
     tile18: { name: 'Tile 18×18', w: 18, h: 18,
@@ -1992,11 +2001,14 @@
   function renderAreas() {
     var out = '';
     state.areas.forEach(function (a) {
+      var pdef = AREA_PATTERNS[a.pattern];
       var fill;
-      if (a.open || a.pattern === 'none' || !AREA_PATTERNS[a.pattern]) fill = 'none';
+      if (a.open || a.pattern === 'none' || !pdef) fill = 'none';
+      else if (pdef.solid) fill = pdef.solid;
       else fill = 'url(#' + ensurePattern(a.pattern, a.rot || 0) + ')';
       var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open) : areaPath(a);
-      var est = LINE_STYLES[a.lineStyle] || LINE_STYLES.solid;
+      // el preset trae su tipo de linea; si el usuario eligio otra, manda la suya
+      var est = LINE_STYLES[a.lineStyle] || (pdef && pdef.dash && !a.open ? LINE_STYLES[pdef.dash] : null) || LINE_STYLES.solid;
       var dash = est.dash ? ' stroke-dasharray="' + est.dash + '"' : '';
       var col = a.color || '#14161a', lw = a.lw || est.lw || 0.9;
       // el borde de la piscina va DEBAJO: el agua se dibuja dentro de el
@@ -9920,6 +9932,10 @@
   /* --- flyout: elegir tipo de pared / superficie desde el botón de la herramienta --- */
   function patternSwatch(k) {
     var p = AREA_PATTERNS[k];
+    if (p && p.solid) {
+      return '<svg width="36" height="20"><rect x="1" y="1" width="34" height="18" fill="' + p.solid +
+        '" stroke="#14161a" stroke-width="0.9"' + (p.dash ? ' stroke-dasharray="4 2.5"' : '') + '/></svg>';
+    }
     if (!p || !p.content) return '<svg width="36" height="20"><rect x="1" y="1" width="34" height="18" fill="none" stroke="#999" stroke-dasharray="3 2"/></svg>';
     var pid = 'tmpat_' + k;
     return '<svg width="36" height="20"><defs><pattern id="' + pid + '" width="' + p.w + '" height="' + p.h + '" patternUnits="userSpaceOnUse" patternTransform="scale(0.55)' + (p.rot ? ' rotate(' + p.rot + ')' : '') + '">' + p.content + '</pattern></defs>' +
@@ -10052,8 +10068,11 @@
           setHint('Pared: ' + WALL_TYPES[k].name + ' — haz clic para empezar a dibujar');
         } else if (kind === 'area') {
           curAreaPattern = k;
+          if (AREA_PATTERNS[k].dash) curLineStyle = AREA_PATTERNS[k].dash;
           setTool('area');
-          setHint('Superficie: ' + AREA_PATTERNS[k].name + ' — marca los puntos del área (doble clic o Enter termina)');
+          setHint(k === 'upper'
+            ? 'Gabinete elevado: marca las esquinas — sale blanco opaco y con línea discontinua (doble clic o Enter termina)'
+            : 'Superficie: ' + AREA_PATTERNS[k].name + ' — marca los puntos del área (doble clic o Enter termina)');
         } else if (kind === 'door') {
           curDoorType = k;
           curDoorW = parseInt(it.dataset.w, 10) || 0;
