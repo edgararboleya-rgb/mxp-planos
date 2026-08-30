@@ -117,8 +117,13 @@
           .mxp { background:#f5f4ef; }
           .mxp .sym, .mxp .arch { stroke:#14161a; fill:none; stroke-width:1; stroke-linecap:round; stroke-linejoin:round; }
           .mxp .sym text, .mxp text.lbl { fill:#14161a; stroke:none; font-family:Arial, Helvetica, sans-serif; }
-          .mxp .wall-edge { stroke:#14161a; stroke-width:1.6; fill:none; }
-          .mxp .wall-edge.dry { stroke-width:1.0; }
+          /* GROSOR DE LÍNEA (Edgar 08/30: "las veo muy grandes"). Medido: el
+             borde iba a 1.6" de grosor centrado en la cara, así que un bloque
+             de 8" se veía de 9.6" — un 20% más gordo de lo real. A 0.9" el
+             bloque se ve 8.9" y sigue leyéndose fuerte al imprimir; las
+             divisiones a 0.6". La MEDIDA no cambia: 8" siguen siendo 8". */
+          .mxp .wall-edge { stroke:#14161a; stroke-width:0.9; fill:none; }
+          .mxp .wall-edge.dry { stroke-width:0.6; }
           .mxp .wall-fill-drywall { fill:#e8e6df; stroke:none; }
           .mxp .wall-fill-block { fill:url(#hatchBlock); stroke:none; }
           .mxp .jamb { stroke:#14161a; stroke-width:1.2; }
