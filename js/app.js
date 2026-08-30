@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.A';
+  var APP_VERSION = 'v28.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2348,6 +2348,7 @@
     });
     state.texts.forEach(function (t) {
       var sz = t.size || 9;
+      var gir = (t.rot ? ' transform="rotate(' + (+t.rot).toFixed(2) + ' ' + t.x + ' ' + t.y + ')"' : '');
       if (t.style === 'circle' || t.style === 'hex') {
         // LA FIGURA ABRAZA AL TEXTO (Edgar, 08/30, con foto: "ve qué grande
         // sale el hexágono; se vería mucho mejor si está bien pegado al texto
@@ -2357,7 +2358,7 @@
         // la figura se estira a lo ancho, que es como se dibuja una key note
         // larga en un plano de verdad.
         var cj = textCaja(t, sz), hw = cj.w / 2, hh = cj.h / 2;
-        s += '<g class="sym" data-id="' + t.id + '"' + opAttr(t) + '>';
+        s += '<g class="sym" data-id="' + t.id + '"' + gir + opAttr(t) + '>';
         if (t.style === 'circle') {
           // cápsula: con una o dos letras sale un círculo; con texto largo, un óvalo
           var rr = Math.min(hw, hh);
@@ -2378,7 +2379,7 @@
       } else {
         var anc = TEXT_ANCHOR[t.align || 'left'] || 'start';
         s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz +
-          '" text-anchor="' + anc + '"' + textAttrs(t) + opAttr(t) + '>' + textTspans(t, sz, t.x) + '</text>';
+          '" text-anchor="' + anc + '"' + gir + textAttrs(t) + opAttr(t) + '>' + textTspans(t, sz, t.x) + '</text>';
       }
     });
     G.annot.innerHTML = s;
@@ -2565,6 +2566,8 @@
           }
         } else if (sel.kind === 'text') {
           var szS = e.size || 9;
+          var girS = e.rot ? ' transform="rotate(' + (+e.rot).toFixed(2) + ' ' + e.x + ' ' + e.y + ')"' : '';
+          if (girS) s += '<g' + girS + '>';
           if (e.style === 'circle' || e.style === 'hex') {
             var cjS = textCaja(e, szS);
             s += '<rect class="sel" x="' + (e.x - cjS.w / 2 - 3) + '" y="' + (e.y - cjS.h / 2 - 3) +
@@ -2573,6 +2576,7 @@
             s += '<rect class="sel" x="' + (textIzq(e, szS) - 3) + '" y="' + (e.y - szS) + '" width="' + (textAncho(e, szS) + 6) +
               '" height="' + (textAlto(e, szS) + 6) + '"/>';
           }
+          if (girS) s += '</g>';
         } else if (sel.kind === 'dim') {
           s += '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
           var dhr = (document.body.classList.contains('touch') ? 9 : 5) / view.z + 2;
@@ -2703,16 +2707,23 @@
       for (i = 0; i < state.texts.length; i++) {
         e = state.texts[i];
         var sz = e.size || 9;
+        // con el texto girado hay que medir en SU marco, no en el del papel
+        var pT = p;
+        if (e.rot) {
+          var rT = -e.rot * Math.PI / 180, cT = Math.cos(rT), sT = Math.sin(rT);
+          var oxT = p[0] - e.x, oyT = p[1] - e.y;
+          pT = [e.x + oxT * cT - oyT * sT, e.y + oxT * sT + oyT * cT];
+        }
         if (e.style === 'circle' || e.style === 'hex') {
           var cjH = textCaja(e, sz);
-          var bx = Math.max(0, Math.abs(p[0] - e.x) - cjH.w / 2);
-          var by = Math.max(0, Math.abs(p[1] - e.y) - cjH.h / 2);
+          var bx = Math.max(0, Math.abs(pT[0] - e.x) - cjH.w / 2);
+          var by = Math.max(0, Math.abs(pT[1] - e.y) - cjH.h / 2);
           var dt = Math.hypot(bx, by);
           if (dt <= PX(3)) pon('text', e.id, dt, 6);
         } else {
           var tw = textAncho(e, sz), tx0 = textIzq(e, sz);
-          var qx1 = Math.max(0, Math.max(tx0 - p[0], p[0] - (tx0 + tw)));
-          var qy1 = Math.max(0, Math.max((e.y - sz) - p[1], p[1] - (e.y + textAlto(e, sz) - sz)));
+          var qx1 = Math.max(0, Math.max(tx0 - pT[0], pT[0] - (tx0 + tw)));
+          var qy1 = Math.max(0, Math.max((e.y - sz) - pT[1], pT[1] - (e.y + textAlto(e, sz) - sz)));
           var dt2 = Math.hypot(qx1, qy1);
           if (dt2 <= PX(3)) pon('text', e.id, dt2, 6);
         }
@@ -4036,7 +4047,9 @@
         var p = rot(e.x, e.y);
         e.x = p[0]; e.y = p[1];
         if (e.tx != null) { var t2 = rot(e.tx, e.ty); e.tx = t2[0]; e.ty = t2[1]; }
-        if (r.kind === 'symbol') e.rot = (((e.rot || 0) + deg) % 360 + 360) % 360;
+        // el TEXTO gira como un simbolo: si solo se moviera su punto, la
+        // letra seguiria horizontal y el rotulo no giraria nunca
+        if (r.kind === 'symbol' || r.kind === 'text') e.rot = (((e.rot || 0) + deg) % 360 + 360) % 360;
       }
     });
   }
@@ -4686,6 +4699,10 @@
         '<button class="alBtn ' + (alAct === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
         '<button class="alBtn ' + (alAct === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
         '<span class="sep"></span>' +
+        '<button id="prTxtGirL" title="Girar 90° a la izquierda">↺</button>' +
+        '<input id="prTxtAng" class="n" type="number" step="5" value="' + (+(e.rot || 0)).toFixed(0) + '" title="Ángulo exacto en grados — o arrastra el círculo azul de arriba">' +
+        '<button id="prTxtGirR" title="Girar 90° a la derecha">↻</button>' +
+        '<span class="sep"></span>' +
         COLOR_PRESETS.map(function (c8) {
           return '<span class="sw' + ((e.color || '#14161a') === c8[0] ? ' cur' : '') + '" data-c="' + c8[0] + '" title="' + c8[1] + '" style="background:' + c8[0] + '"></span>';
         }).join('') +
@@ -4794,7 +4811,7 @@
         'title="Deja el objeto atenuado sin borrarlo — para lo que es de referencia">' +
         '<span id="prOpacN" class="muted small" style="width:38px;text-align:right">' + opAct + '%</span></div>';
     }
-    if (sel && /^(wall|dim|wire|area|leader)$/.test(sel.kind)) {
+    if (sel && /^(wall|dim|wire|area|leader|text)$/.test(sel.kind)) {
       html += '<div style="display:flex;gap:6px;margin-top:6px">' +
         '<button id="prRotSelL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotSelR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
@@ -4899,6 +4916,21 @@
         var et = findSel(); if (!et) return;
         pushUndo(); et.color = sw2.dataset.c; refresh(); showProps();
       });
+    });
+    // GIRO DEL TEXTO (Edgar, 08/30: "que tengan las dos opciones, los 90 que
+    // tu me pones, y que ademas yo lo pueda girar y darle el angulo que
+    // quiera"). Los 90 con los botones, el angulo exacto escrito aqui, y a
+    // mano con el circulito azul de arriba (Alt = paso fino).
+    function giraTxt(d) {
+      var et = findSel(); if (!et) return;
+      pushUndo(); rotateRefs([sel], d); refresh(); renderSel(); showProps();
+    }
+    var bGL = $('#prTxtGirL'); if (bGL) bGL.addEventListener('click', function () { giraTxt(-90); });
+    var bGR = $('#prTxtGirR'); if (bGR) bGR.addEventListener('click', function () { giraTxt(90); });
+    on('prTxtAng', 'change', function (n) {
+      var et = findSel(); if (!et) return;
+      var v = parseFloat(n.value); if (!isFinite(v)) return;
+      pushUndo(); giraTxt(v - (+(et.rot || 0)));
     });
     $$('.txtBar .alBtn').forEach(function (ab) {
       ab.addEventListener('click', function () {
