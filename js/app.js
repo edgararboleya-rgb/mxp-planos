@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.D';
+  var APP_VERSION = 'v27.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2454,7 +2454,10 @@
         var cr3 = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
         for (var ci = 0; ci < 4; ci++) {
           if (Math.hypot(p[0] - cs[ci][0], p[1] - cs[ci][1]) < cr3) {
-            drag = { mode: 'symResize', e: se, opp: cs[(ci + 2) % 4], snap: snapshot(), moved: false };
+            var kP = symK(sdef), esc0 = (se.scale || 1) * kP;
+            var W0 = sdef.w * esc0 * (se.sx || 1), H0 = sdef.h * esc0 * (se.sy || 1);
+            drag = { mode: 'symResize', e: se, opp: cs[(ci + 2) % 4], snap: snapshot(), moved: false,
+                     prop: (H0 > 0 ? W0 / H0 : 1) };   // para el SHIFT: conservar la forma
             return;
           }
         }
@@ -2641,12 +2644,30 @@
       var lw = vx * c4 + vy * s4, lh = -vx * s4 + vy * c4;
       var W4 = Math.max(6, Math.round(Math.abs(lw)));
       var H4 = Math.max(6, Math.round(Math.abs(lh)));
+      // SHIFT: el objeto no pierde su forma (Edgar, 08/30 — el sink y el
+      // dishwasher se achataban al jalar la esquina). Se conserva la
+      // proporcion que TENIA al empezar a estirar, no la de fabrica: si ya
+      // lo habias ajustado a tu gusto, ese gusto se respeta. Va con Shift a
+      // secas, no con ∟90°, porque en el iPad ORTHO esta siempre encendido
+      // y entonces nunca podrias deformar a proposito.
+      var propOn = !!(ev && ev.shiftKey);
+      if (propOn) {
+        var prop4 = drag.prop || (d4.w / d4.h) || 1;
+        var lado = Math.max(W4, H4 * prop4);
+        W4 = Math.max(6, Math.round(lado));
+        H4 = Math.max(6, Math.round(lado / prop4));
+        // el vector diagonal se recalcula con la medida ya corregida
+        var lwA = (lw < 0 ? -1 : 1) * W4, lhA = (lh < 0 ? -1 : 1) * H4;
+        vx = lwA * c4 - lhA * s4;
+        vy = lwA * s4 + lhA * c4;
+      }
       e4.sx = W4 / (d4.w * (e4.scale || 1) * k4);
       e4.sy = H4 / (d4.h * (e4.scale || 1) * k4);
       e4.x = drag.opp[0] + vx / 2;
       e4.y = drag.opp[1] + vy / 2;
       drag.moved = true;
-      setHint('↔ ' + fmtFtIn(W4) + ' × ' + fmtFtIn(H4));
+      setHint('↔ ' + fmtFtIn(W4) + ' × ' + fmtFtIn(H4) +
+        (propOn ? ' — 🔒 Shift: conserva la forma' : ' — Shift para no deformarlo'));
       refresh(); renderSel();
       return;
     }
