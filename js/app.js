@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.Z';
+  var APP_VERSION = 'v28.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2263,6 +2263,21 @@
   // borde izquierdo del bloque: con el texto centrado o a la derecha, la X
   // del objeto ya no es el arranque — sin esto el clic y el marco quedaban
   // corridos justo cuando mas se usan (rotulos de cuarto, centrados)
+  // caja de la figura (burbuja / hexágono): el texto medido de verdad más un
+  // margen chico, no un radio sacado del número de letras
+  function textCaja(t, sz) {
+    var w = textAncho(t, sz), h = textAlto(t, sz);
+    var px = sz * 0.60, py = sz * 0.45;
+    var cj = { w: Math.max(w + px * 2, sz * 1.7), h: Math.max(h + py * 2, sz * 1.55) };
+    if (t.style === 'hex') {
+      // el pico del hexágono va POR FUERA del texto: si no, la parte plana
+      // (que es la única con altura completa) se queda corta y el renglón se
+      // sale por el chaflán — se veía en una key note de dos líneas
+      cj.pt = Math.min(cj.h / 2 * 0.85, Math.max(sz * 0.5, cj.w / 2 * 0.35));
+      cj.w += cj.pt * 2;
+    }
+    return cj;
+  }
   function textIzq(t, sz) {
     var w = textAncho(t, sz), a = t.align || 'left';
     return a === 'center' ? t.x - w / 2 : (a === 'right' ? t.x - w : t.x);
@@ -2334,20 +2349,32 @@
     state.texts.forEach(function (t) {
       var sz = t.size || 9;
       if (t.style === 'circle' || t.style === 'hex') {
-        var r = Math.max(sz * 0.95, String(t.text).replace(/\r?\n/g, ' ').length * sz * 0.34 + 2.5);
+        // LA FIGURA ABRAZA AL TEXTO (Edgar, 08/30, con foto: "ve qué grande
+        // sale el hexágono; se vería mucho mejor si está bien pegado al texto
+        // y fuera mucho más chiquito"). Antes el radio salía del NÚMERO DE
+        // LETRAS y luego se inflaba otro 10%: con un rótulo de 33 caracteres
+        // daba un hexágono de 19 pies. Ahora se mide la caja real del texto y
+        // la figura se estira a lo ancho, que es como se dibuja una key note
+        // larga en un plano de verdad.
+        var cj = textCaja(t, sz), hw = cj.w / 2, hh = cj.h / 2;
         s += '<g class="sym" data-id="' + t.id + '"' + opAttr(t) + '>';
         if (t.style === 'circle') {
-          s += '<circle cx="' + t.x + '" cy="' + t.y + '" r="' + r + '" fill="none"/>';
+          // cápsula: con una o dos letras sale un círculo; con texto largo, un óvalo
+          var rr = Math.min(hw, hh);
+          s += '<rect x="' + (t.x - hw).toFixed(2) + '" y="' + (t.y - hh).toFixed(2) +
+            '" width="' + cj.w.toFixed(2) + '" height="' + cj.h.toFixed(2) +
+            '" rx="' + rr.toFixed(2) + '" ry="' + rr.toFixed(2) + '" fill="none"/>';
         } else {
-          var hp = [];
-          for (var hi = 0; hi < 6; hi++) {
-            var ha = Math.PI / 6 + hi * Math.PI / 3;
-            hp.push((t.x + r * 1.1 * Math.cos(ha)).toFixed(1) + ',' + (t.y + r * 1.1 * Math.sin(ha)).toFixed(1));
-          }
-          s += '<polygon points="' + hp.join(' ') + '" fill="none"/>';
+          var pt = cj.pt || Math.min(hh * 0.85, hw * 0.35);   // cuánto sobresale la punta
+          var hx = [[t.x - hw, t.y], [t.x - hw + pt, t.y - hh], [t.x + hw - pt, t.y - hh],
+                    [t.x + hw, t.y], [t.x + hw - pt, t.y + hh], [t.x - hw + pt, t.y + hh]];
+          s += '<polygon points="' + hx.map(function (q) { return q[0].toFixed(2) + ',' + q[1].toFixed(2); }).join(' ') + '" fill="none"/>';
         }
-        s += '<text x="' + t.x + '" y="' + (t.y + sz * 0.34) + '" font-size="' + sz + '" text-anchor="middle" font-weight="bold"' +
-          textAttrs(t) + '>' + esc(String(t.text).replace(/\r?\n/g, ' ')) + '</text></g>';
+        // los renglones, centrados en la figura
+        var lsB = textLineas(t), lhB = sz * 1.25;
+        var y0B = t.y - (lsB.length - 1) * lhB / 2 + sz * 0.34;
+        s += '<text x="' + t.x + '" y="' + y0B.toFixed(2) + '" font-size="' + sz + '" text-anchor="middle" font-weight="bold"' +
+          textAttrs(t) + '>' + textTspans(t, sz, t.x) + '</text></g>';
       } else {
         var anc = TEXT_ANCHOR[t.align || 'left'] || 'start';
         s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz +
@@ -2538,8 +2565,14 @@
           }
         } else if (sel.kind === 'text') {
           var szS = e.size || 9;
-          s += '<rect class="sel" x="' + (textIzq(e, szS) - 3) + '" y="' + (e.y - szS) + '" width="' + (textAncho(e, szS) + 6) +
-            '" height="' + (textAlto(e, szS) + 6) + '"/>';
+          if (e.style === 'circle' || e.style === 'hex') {
+            var cjS = textCaja(e, szS);
+            s += '<rect class="sel" x="' + (e.x - cjS.w / 2 - 3) + '" y="' + (e.y - cjS.h / 2 - 3) +
+              '" width="' + (cjS.w + 6) + '" height="' + (cjS.h + 6) + '"/>';
+          } else {
+            s += '<rect class="sel" x="' + (textIzq(e, szS) - 3) + '" y="' + (e.y - szS) + '" width="' + (textAncho(e, szS) + 6) +
+              '" height="' + (textAlto(e, szS) + 6) + '"/>';
+          }
         } else if (sel.kind === 'dim') {
           s += '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
           var dhr = (document.body.classList.contains('touch') ? 9 : 5) / view.z + 2;
@@ -2671,9 +2704,11 @@
         e = state.texts[i];
         var sz = e.size || 9;
         if (e.style === 'circle' || e.style === 'hex') {
-          var br = Math.max(sz * 0.95, String(e.text).replace(/\r?\n/g, ' ').length * sz * 0.34 + 2.5) * 1.2;
-          var dt = Math.hypot(p[0] - e.x, p[1] - e.y) - br;
-          if (dt <= PX(3)) pon('text', e.id, Math.max(0, dt), 6);
+          var cjH = textCaja(e, sz);
+          var bx = Math.max(0, Math.abs(p[0] - e.x) - cjH.w / 2);
+          var by = Math.max(0, Math.abs(p[1] - e.y) - cjH.h / 2);
+          var dt = Math.hypot(bx, by);
+          if (dt <= PX(3)) pon('text', e.id, dt, 6);
         } else {
           var tw = textAncho(e, sz), tx0 = textIzq(e, sz);
           var qx1 = Math.max(0, Math.max(tx0 - p[0], p[0] - (tx0 + tw)));
