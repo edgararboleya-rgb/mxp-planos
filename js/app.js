@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.E';
+  var APP_VERSION = 'v26.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -419,7 +419,9 @@
   // se convierte en '8" Block + Drywall' con la línea fina del lado dibujado.
   // (De la tercera foto de Edgar: dos paredes encimadas jamás sueldan.)
   function absorbeEnBloque(w) {
-    if (String(w.type).indexOf('drywall') !== 0) return false;
+    var famA = w.type === 'screen' ? 'screen'
+             : (String(w.type).indexOf('block') === 0 ? 'block' : 'drywall');
+    if (famA !== 'drywall') return false;
     var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
     if (L < 12) return false;
     var ux = (w.x2 - w.x1) / L, uy = (w.y2 - w.y1) / L;
@@ -485,7 +487,17 @@
         if (delta > TRIM || delta < -EXT || sA < 6) return;   // sA<6: cruzaria en la otra punta
         var famH = String(h.type).indexOf('block') === 0 ? 'block'
                  : (h.type === 'screen' ? 'screen' : 'drywall');
-        var cand = { delta: delta, x: O[0] + ux * sA, y: O[1] + uy * sA,
+        // misma familia: la punta va al CRUCE DE EJES (esquina/tee continuo).
+        // Otra familia: va a la CARA que enfrenta (el drywall muere contra la
+        // cara del bloque, nunca enterrado hasta su centro)
+        var sFin = sA;
+        if (famH !== famW) {
+          sFin = sA - (h.t / 2) / Math.abs(cr);
+          if (sFin < 6) return;
+          delta = L - sFin;
+          if (delta > TRIM || delta < -EXT) return;
+        }
+        var cand = { delta: delta, x: O[0] + ux * sFin, y: O[1] + uy * sFin,
                      h: h, tH: tH, hL: hL, mismo: famH === famW };
         if (famH === famW) {
           if (!mejorMismo || Math.abs(delta) < Math.abs(mejorMismo.delta)) mejorMismo = cand;
@@ -494,7 +506,31 @@
         }
       });
       var mejor = mejorMismo || mejorOtro;
-      if (!mejor) return;
+      if (!mejor) {
+        // A RAS: el forro que viaja pegado a otra pared (casi paralela, banda
+        // con banda) termina alineado con la punta de esa vecina — la puntica
+        // asomada por encima del bloque se recoge sola
+        var ras = null;
+        state.walls.forEach(function (h) {
+          var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
+          if (hL < 12) return;
+          var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
+          if (Math.abs(ux * hy - uy * hx) > 0.07) return;      // solo casi paralelas
+          var dLat = Math.abs((P[0] - h.x1) * hy - (P[1] - h.y1) * hx);
+          if (dLat < h.t / 2 - 1 || dLat > h.t / 2 + w.t / 2 + 3) return;   // no viaja pegada
+          var dirW = (ux * hx + uy * hy) >= 0 ? 1 : -1;
+          var tP = (P[0] - h.x1) * hx + (P[1] - h.y1) * hy;
+          var sobra = tP > hL ? tP - hL : (tP < 0 ? tP : 0);   // + pasada del fin, - pasada del inicio
+          if (sobra === 0 || Math.abs(sobra) > 8) return;
+          if (!ras || Math.abs(sobra) < Math.abs(ras.sobra)) ras = { sobra: sobra, dirW: dirW };
+        });
+        if (ras) {
+          var rx = Math.round((P[0] - ux * ras.sobra * ras.dirW) * 64) / 64;
+          var ry = Math.round((P[1] - uy * ras.sobra * ras.dirW) * 64) / 64;
+          if (fin === 's') { w.x1 = rx; w.y1 = ry; } else { w.x2 = rx; w.y2 = ry; }
+        }
+        return;
+      }
       var nx = Math.round(mejor.x * 64) / 64, ny = Math.round(mejor.y * 64) / 64;
       if (fin === 's') { w.x1 = nx; w.y1 = ny; } else { w.x2 = nx; w.y2 = ny; }
       // cerrar la esquina COMPLETA: si el cruce cae un palmo mas alla de la
@@ -514,10 +550,10 @@
     // 1) extremos y puntos medios de paredes existentes (las esquinas mandan)
     for (var i = 0; i < state.walls.length; i++) {
       var w = state.walls[i];
-      if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < 9 / view.z + 4) return [w.x1, w.y1];
-      if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < 9 / view.z + 4) return [w.x2, w.y2];
+      if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < 9 / view.z + 2) return [w.x1, w.y1];
+      if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < 9 / view.z + 2) return [w.x2, w.y2];
       var mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
-      if (Math.hypot(p[0] - mx, p[1] - my) < 9 / view.z + 4) return [mx, my];
+      if (Math.hypot(p[0] - mx, p[1] - my) < 9 / view.z + 2) return [mx, my];
     }
     // 2) el EJE de una pared existente: al sobreescribir/calcar encima, el
     //    cursor agarra la línea de CENTRO y la pared nueva se inserta sobre
@@ -604,7 +640,7 @@
 
   // tipo activo de cada herramienta (se elige con la flechita ▾ del botón)
   var curAreaPattern = 'pavers';
-  var curDoorType = 'door', curWinType = 'window';
+  var curDoorType = 'door', curWinType = 'window', curDoorW = 0;   // 0 = ancho por defecto del tipo
   var pendingAreaLabel = false;   // la próxima área/polilínea muestra su medida en el plano
 
   // ORTHO 90°: como en AutoCAD (F8) — las líneas se mantienen rectas sin apretar Shift
@@ -2267,7 +2303,7 @@
   function openingDown(p, type) {
     var near = nearestWall(p);
     if (!near) { setHint('Acércate a una pared para colocar la ' + OPEN_NAMES[type].toLowerCase()); return; }
-    var g = wallGeom(near.wall), w = OPEN_DEFAULT[type], ajust = false;
+    var g = wallGeom(near.wall), w = (curDoorW && type === curDoorType) ? curDoorW : OPEN_DEFAULT[type], ajust = false;
     // pared corta (las de ángulo del escaneo lo son casi siempre): en vez de
     // negarse, la abertura se achica a lo que cabe — luego se afina el Ancho
     if (g.len < w + 4) {
@@ -8546,9 +8582,19 @@
         html += '<div class="tmItem' + (k === curAreaPattern ? ' cur' : '') + '" data-k="' + k + '">' + patternSwatch(k) + '<span>' + esc(AREA_PATTERNS[k].name) + '</span></div>';
       });
     } else if (kind === 'door') {
-      html += '<div class="tmHead">Tipo de puerta</div>';
-      ['door', 'double', 'bifold', 'pocket', 'slider', 'bypass', 'opening', 'garage'].forEach(function (k) {
+      html += '<div class="tmHead">Puerta sencilla (swing)</div>';
+      [[24, "2'0\""], [28, "2'4\""], [30, "2'6\""], [32, "2'8\""], [36, "3'0\""]].forEach(function (t2) {
+        var sel2 = curDoorType === 'door' && curDoorW === t2[0];
+        html += '<div class="tmItem' + (sel2 ? ' cur' : '') + '" data-k="door" data-w="' + t2[0] + '"><span>Door ' + t2[1] + ' (' + t2[0] + '\")</span></div>';
+      });
+      html += '<div class="tmHead">Otras puertas</div>';
+      ['double', 'bifold', 'pocket', 'slider', 'bypass', 'opening'].forEach(function (k) {
         html += '<div class="tmItem' + (k === curDoorType ? ' cur' : '') + '" data-k="' + k + '"><span>' + esc(OPEN_NAMES[k]) + ' (' + fmtFtIn(OPEN_DEFAULT[k]) + ')</span></div>';
+      });
+      html += '<div class="tmHead">Garage / Overhead</div>';
+      [[192, "16'0\" doble"], [108, "9'0\" sencillo"], [72, "6'0\" golf cart"]].forEach(function (t3) {
+        var sel3 = curDoorType === 'garage' && curDoorW === t3[0];
+        html += '<div class="tmItem' + (sel3 ? ' cur' : '') + '" data-k="garage" data-w="' + t3[0] + '"><span>Garage ' + t3[1] + '</span></div>';
       });
     } else if (kind === 'window') {
       html += '<div class="tmHead">Tipo de ventana</div>';
@@ -8593,8 +8639,9 @@
           setHint('Superficie: ' + AREA_PATTERNS[k].name + ' — marca los puntos del área (doble clic o Enter termina)');
         } else if (kind === 'door') {
           curDoorType = k;
+          curDoorW = parseInt(it.dataset.w, 10) || 0;
           setTool('door');
-          setHint(OPEN_NAMES[k] + ' — haz clic sobre una pared para colocarla');
+          setHint(OPEN_NAMES[k] + (curDoorW ? ' de ' + fmtFtIn(curDoorW) : '') + ' — haz clic sobre una pared para colocarla');
         } else if (kind === 'window') {
           curWinType = k;
           setTool('window');
