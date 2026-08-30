@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.E';
+  var APP_VERSION = 'v27.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -773,6 +773,21 @@
 
   // tipo activo de cada herramienta (se elige con la flechita ▾ del botón)
   var curAreaPattern = 'pavers';
+  // TIPOS DE LÍNEA (Edgar, 08/30: "que me dé la opción de discontinua,
+  // discontinua pequeña, recta y de varias formas"). Son los del plano de
+  // verdad, cada uno con su significado en obra. El patrón va en pulgadas
+  // reales, así que se ve igual de proporcionado a cualquier zoom.
+  var LINE_STYLES = {
+    solid:    { name: '——— Continua (lo que se ve)', dash: '' },
+    dashed:   { name: '– – – Discontinua (oculto / sobre el techo)', dash: '7 4' },
+    dashfina: { name: '- - - Discontinua corta (detalle oculto)', dash: '3 2.5' },
+    dotted:   { name: '· · · Punteada (bajo el piso, tubería)', dash: '0.8 3' },
+    centro:   { name: '—·—·— Eje (línea de centro)', dash: '12 3 1 3' },
+    fantasma: { name: '—··—··— Fantasma (lote, lo que se quita)', dash: '14 3 1 3 1 3' },
+    gruesa:   { name: '▬▬▬ Gruesa (contorno destacado)', dash: '', lw: 2.2 },
+    cloud:    { name: '☁ Nube de revisión', dash: '' }
+  };
+  var curLineStyle = 'solid';
   var curDoorType = 'door', curWinType = 'window', curDoorW = 0;   // 0 = ancho por defecto del tipo
   var pendingAreaLabel = false;   // la próxima área/polilínea muestra su medida en el plano
 
@@ -1543,8 +1558,9 @@
       if (a.open || a.pattern === 'none' || !AREA_PATTERNS[a.pattern]) fill = 'none';
       else fill = 'url(#' + ensurePattern(a.pattern, a.rot || 0) + ')';
       var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open) : areaPath(a);
-      var dash = a.lineStyle === 'dashed' ? ' stroke-dasharray="6 4"' : '';
-      var col = a.color || '#14161a', lw = a.lw || 0.9;
+      var est = LINE_STYLES[a.lineStyle] || LINE_STYLES.solid;
+      var dash = est.dash ? ' stroke-dasharray="' + est.dash + '"' : '';
+      var col = a.color || '#14161a', lw = a.lw || est.lw || 0.9;
       out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + '/>';
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
@@ -2848,7 +2864,7 @@
     }
     pushUndo();
     var e = { id: uid(), pts: pts, pattern: isLine ? 'none' : curAreaPattern, rot: 0 };
-    if (isLine) e.open = true;
+    if (isLine) { e.open = true; if (curLineStyle !== 'solid') e.lineStyle = curLineStyle; }
     if (pendingAreaLabel) e.showLabel = true;
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
@@ -3867,9 +3883,10 @@
         html += '<div class="row"><label>Rotación</label><input id="prAreaRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
       }
       html += '<div class="row"><label>Line</label><select id="prAreaLine">' +
-        '<option value="solid"' + (!e.lineStyle || e.lineStyle === 'solid' ? ' selected' : '') + '>Solid</option>' +
-        '<option value="dashed"' + (e.lineStyle === 'dashed' ? ' selected' : '') + '>Dashed</option>' +
-        '<option value="cloud"' + (e.lineStyle === 'cloud' ? ' selected' : '') + '>Cloud (revisión)</option></select></div>';
+        Object.keys(LINE_STYLES).map(function (k5) {
+          var act = (e.lineStyle || 'solid') === k5;
+          return '<option value="' + k5 + '"' + (act ? ' selected' : '') + '>' + esc(LINE_STYLES[k5].name) + '</option>';
+        }).join('') + '</select></div>';
       // muestrario fijo de colores: el selector nativo no abre dentro del visor
       html += '<div class="row"><label>Color</label><div class="swRow" id="prColorRow">' +
         COLOR_PRESETS.map(function (c) {
@@ -9212,6 +9229,13 @@
       ['window', 'slider'].forEach(function (k) {
         html += '<div class="tmItem' + (k === curWinType ? ' cur' : '') + '" data-k="' + k + '"><span>' + esc(OPEN_NAMES[k]) + ' (' + fmtFtIn(OPEN_DEFAULT[k]) + ')</span></div>';
       });
+    } else if (kind === 'pline') {
+      html += '<div class="tmHead">Tipo de línea</div>';
+      Object.keys(LINE_STYLES).forEach(function (k6) {
+        if (k6 === 'cloud') return;   // la nube tiene su propia herramienta
+        html += '<div class="tmItem' + (k6 === curLineStyle ? ' cur' : '') + '" data-k="' + k6 + '"><span>' +
+          esc(LINE_STYLES[k6].name) + '</span></div>';
+      });
     } else if (kind === 'measure') {
       html += '<div class="tmHead">Tipo de medición</div>';
       html += '<div class="tmItem" data-k="length"><span>📏 Length — distancia entre 2 puntos</span></div>';
@@ -9265,6 +9289,10 @@
           curWinType = k;
           setTool('window');
           setHint(OPEN_NAMES[k] + ' — haz clic sobre una pared para colocarla');
+        } else if (kind === 'pline') {
+          curLineStyle = k;
+          setTool('pline');
+          setHint('Línea: ' + LINE_STYLES[k].name + ' — marca los puntos (doble clic o Enter termina)');
         } else if (kind === 'measure') {
           if (k === 'length') { setTool('measure'); }
           else if (k === 'marea') {
