@@ -293,10 +293,12 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
      burbuja del chat (que cuelga del body) se IMPRIMIA encima del plano */
   body > * { display: none !important; }
   #printSheet { display: block !important; position: static; }
-  @page { size: landscape; margin: 8mm; }
+  /* la orientación la pone el JS en #printPageCss según la forma del plano */
 }
 #printSheet { background: #fff; color: #14161a; font-family: Arial, sans-serif; }
 #printSheet .sheetFrame { border: 2px solid #14161a; padding: 4px; height: 186mm; display: flex; flex-direction: column; page-break-after: always; }
+/* la hoja de pie: una casa mas alta que ancha aprovecha el papel entero */
+#printSheet.vert .sheetFrame { height: 265mm; }
 #printSheet .sheetFrame:last-child { page-break-after: auto; }
 /* hoja limpia: solo el plano, sin recuadro ni caratula (Edgar 08/30) */
 #printSheet .sheetFrame.sinMarco { border: 0; padding: 0; }

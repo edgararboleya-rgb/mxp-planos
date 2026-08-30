@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.C';
+  var APP_VERSION = 'v28.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9620,6 +9620,10 @@
     bgRect.setAttribute('width', b.w); bgRect.setAttribute('height', b.h);
     bgRect.setAttribute('fill', '#ffffff');
     clone.insertBefore(bgRect, world);
+    // el fondo del lienzo es beige (.mxp{background:#f5f4ef}) y en el papel se
+    // veia una banda beige alrededor del dibujo, con el plano en un recuadro
+    // blanco en el medio: en pantalla no se nota porque TODO es beige
+    clone.style.background = '#ffffff';
     unificaIds(clone);
     return clone;
   }
@@ -9647,8 +9651,24 @@
   /* ---------------- imprimir / PDF ---------------- */
   var PRINT_SCALES = { 24: '1/2" = 1\'-0"', 32: '3/8" = 1\'-0"', 48: '1/4" = 1\'-0"', 64: '3/16" = 1\'-0"', 96: '1/8" = 1\'-0"' };
   // arma una hoja imprimible con el dibujo ACTUALMENTE cargado y la agrega al contenedor
+  // ORIENTACION DE LA HOJA: la de la casa, no una fija. Con @page en
+  // landscape siempre, una casa mas alta que ancha se imprimia metida en una
+  // franja del medio con medio papel en blanco a los lados — y el plano salia
+  // la mitad de grande de lo que se ve en la app.
+  function ponOrientacion(vertical) {
+    var st = document.getElementById('printPageCss');
+    if (!st) {
+      st = document.createElement('style');
+      st.id = 'printPageCss';
+      document.head.appendChild(st);
+    }
+    st.textContent = '@media print{@page{size:' + (vertical ? 'portrait' : 'landscape') + ';margin:8mm}}';
+    var ps = document.getElementById('printSheet');
+    if (ps) ps.classList.toggle('vert', !!vertical);
+  }
   function buildPrintFrame(container) {
     var b = contentBBox();
+    ponOrientacion(b.h > b.w * 1.02);
     var clone = cleanSvgClone(b);
     clone.removeAttribute('width'); clone.removeAttribute('height');
     clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
