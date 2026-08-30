@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.R';
+  var APP_VERSION = 'v27.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1785,8 +1785,137 @@
     defs.appendChild(el);
     return id;
   }
+  /* CURVAS EN POLIGONOS Y POLILINEAS (Edgar, 08/30: "convertir el 90 en una
+   * curva... o convertir una linea recta o dos lineas rectas de un poligono
+   * en curvas"). Dos cosas distintas, y en el plano se usan las dos:
+   *   a.rc  = radio de esquina (fillet). El pico se cambia por un arco
+   *           TANGENTE a los dos lados — es el mostrador con esquina
+   *           redondeada y la pared curva de verdad.
+   *   a.bul[i] = flecha (sagitta) del lado i. El lado deja de ser recto y se
+   *           convierte en un arco que pasa por su punto medio corrido esa
+   *           distancia. Se arrastra el rombo del medio del lado.
+   * Todo son ARCOS DE CIRCULO, no curvas de dibujo: un plano se acota. */
+  function arcCmd(A, B, sag) {
+    var dx = B[0] - A[0], dy = B[1] - A[1], c = Math.hypot(dx, dy);
+    if (c < 0.01 || Math.abs(sag) < 0.01) return ' L' + B[0] + ',' + B[1];
+    var R = (c * c / 4 + sag * sag) / (2 * Math.abs(sag));
+    var largo = Math.abs(sag) > c / 2 ? 1 : 0;
+    var sweep = sag > 0 ? 0 : 1;
+    return ' A' + R.toFixed(2) + ',' + R.toFixed(2) + ' 0 ' + largo + ' ' + sweep + ' ' + B[0] + ',' + B[1];
+  }
+  // punto medio de un lado, ya corrido por su flecha (donde va el rombo)
+  function medioLado(a, i) {
+    var n = a.pts.length, A = a.pts[i], B = a.pts[(i + 1) % n];
+    var sag = (a.bul && a.bul[i]) || 0;
+    var dx = B[0] - A[0], dy = B[1] - A[1], c = Math.hypot(dx, dy) || 1;
+    return [+((A[0] + B[0]) / 2 - dy / c * sag).toFixed(2), +((A[1] + B[1]) / 2 + dx / c * sag).toFixed(2)];
+  }
+  function nLados(a) { return a.open ? a.pts.length - 1 : a.pts.length; }
+  // recorte del pico para la esquina redondeada: hasta donde llega cada lado
+  function filete(a, i) {
+    var rc = +(a.rc || 0);
+    if (!(rc > 0)) return null;
+    var n = a.pts.length;
+    if (a.open && (i === 0 || i === n - 1)) return null;   // las puntas sueltas no se redondean
+    var V = a.pts[i], P = a.pts[(i - 1 + n) % n], N = a.pts[(i + 1) % n];
+    var l1 = Math.hypot(P[0] - V[0], P[1] - V[1]), l2 = Math.hypot(N[0] - V[0], N[1] - V[1]);
+    if (l1 < 0.01 || l2 < 0.01) return null;
+    var u1 = [(P[0] - V[0]) / l1, (P[1] - V[1]) / l1], u2 = [(N[0] - V[0]) / l2, (N[1] - V[1]) / l2];
+    var cosA = Math.max(-1, Math.min(1, u1[0] * u2[0] + u1[1] * u2[1]));
+    var ang = Math.acos(cosA);
+    if (ang < 0.05 || ang > Math.PI - 0.05) return null;   // casi recto o casi doblado: no hay filete
+    var t = rc / Math.tan(ang / 2);
+    // nunca se come mas de la mitad de un lado: si no, dos esquinas seguidas
+    // se pisan y el contorno se cruza solo
+    t = Math.min(t, l1 / 2 - 0.01, l2 / 2 - 0.01);
+    if (!(t > 0.05)) return null;
+    var rr = t * Math.tan(ang / 2);
+    var cruz = u1[0] * u2[1] - u1[1] * u2[0];
+    return {
+      T1: [+(V[0] + u1[0] * t).toFixed(2), +(V[1] + u1[1] * t).toFixed(2)],
+      T2: [+(V[0] + u2[0] * t).toFixed(2), +(V[1] + u2[1] * t).toFixed(2)],
+      // el sentido del arco lo manda el giro de la esquina: con el flag al
+      // reves el filete mordia hacia ADENTRO y salia una muesca, no un redondeo
+      r: rr, sweep: cruz > 0 ? 0 : 1
+    };
+  }
+  // ANGULO Y RADIO de un lado curvo, a partir de la cuerda y la flecha
+  function arcoDe(c, sag) {
+    var as = Math.abs(sag);
+    if (c < 0.01 || as < 0.01) return null;
+    var R = (c * c / 4 + as * as) / (2 * as);
+    var th = 2 * Math.acos(Math.max(-1, Math.min(1, (R - as) / R)));   // angulo del arco
+    return { R: R, th: th };
+  }
+  // SUPERFICIE REAL con los lados curvos: al poligono se le suma o se le resta
+  // el trozo de circulo de cada lado. Sin esto, una peninsula con la punta
+  // redonda daba los sq ft del rectangulo — y eso se cotiza.
+  function areaDe(a) {
+    var base = polyArea(a.pts);
+    if (a.open || !a.bul) return base;
+    var n = a.pts.length, a2 = 0;
+    for (var i = 0; i < n; i++) {
+      var q1 = a.pts[i], q2 = a.pts[(i + 1) % n];
+      a2 += q1[0] * q2[1] - q2[0] * q1[1];
+    }
+    var sgn = a2 >= 0 ? 1 : -1;
+    for (var k = 0; k < n; k++) {
+      var sag = a.bul[k] || 0;
+      if (Math.abs(sag) < 0.01) continue;
+      var A = a.pts[k], B = a.pts[(k + 1) % n];
+      var c = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      var ar = arcoDe(c, sag);
+      if (!ar) continue;
+      base += -sgn * (sag >= 0 ? 1 : -1) * (ar.R * ar.R / 2) * (ar.th - Math.sin(ar.th));
+    }
+    return Math.max(0, base);
+  }
+  // PERIMETRO con los lados curvos (el arco mide mas que la cuerda)
+  function perimDe(a) {
+    var base = polyPerim(a.pts, !!a.open);
+    if (!a.bul) return base;
+    var n = a.pts.length, segs = nLados(a);
+    for (var k = 0; k < segs; k++) {
+      var sag = a.bul[k] || 0;
+      if (Math.abs(sag) < 0.01) continue;
+      var A = a.pts[k], B = a.pts[(k + 1) % n];
+      var c = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      var ar = arcoDe(c, sag);
+      if (ar) base += ar.R * ar.th - c;
+    }
+    return base;
+  }
   function areaPath(a) {
-    return 'M' + a.pts.map(function (p) { return p[0] + ',' + p[1]; }).join(' L') + (a.open ? '' : ' Z');
+    var n = a.pts.length;
+    if (n < 2) return 'M' + (a.pts[0] ? a.pts[0][0] + ',' + a.pts[0][1] : '0,0');
+    var bul = a.bul || [];
+    var curvo = function (i) { return Math.abs(bul[i] || 0) > 0.01; };
+    var tiene = (a.rc > 0);
+    for (var q = 0; q < n && !tiene; q++) if (curvo(q)) tiene = true;
+    if (!tiene) {
+      return 'M' + a.pts.map(function (p) { return p[0] + ',' + p[1]; }).join(' L') + (a.open ? '' : ' Z');
+    }
+    var segs = nLados(a);
+    // una esquina solo se redondea si SUS DOS lados son rectos: contra un arco
+    // no hay tangente que valga y el contorno se cruzaria solo
+    var fil = [];
+    for (var k = 0; k < n; k++) {
+      var ant = (k - 1 + segs) % segs;
+      fil.push((curvo(ant) || curvo(k)) ? null : filete(a, k));
+    }
+    var sal = function (i) { return fil[i] ? fil[i].T2 : a.pts[i]; };   // por donde SALE la esquina i
+    var ent = function (i) { return fil[i] ? fil[i].T1 : a.pts[i]; };   // por donde LLEGA a la esquina i
+    var d = 'M' + sal(0)[0] + ',' + sal(0)[1];
+    for (var i = 0; i < segs; i++) {
+      var j = (i + 1) % n;
+      var A = sal(i), B = ent(j);
+      d += curvo(i) ? arcCmd(A, B, bul[i]) : (' L' + B[0] + ',' + B[1]);
+      var f = fil[j];
+      if (f && !(a.open && j === n - 1)) {
+        d += ' A' + f.r.toFixed(2) + ',' + f.r.toFixed(2) + ' 0 0 ' + f.sweep + ' ' + f.T2[0] + ',' + f.T2[1];
+      }
+    }
+    return d + (a.open ? '' : ' Z');
   }
   // contorno de nube de revisión: arcos festoneados a lo largo de cada lado
   function cloudPath(pts, closed) {
@@ -1891,8 +2020,8 @@
         a.pts.forEach(function (q) { cx += q[0]; cy += q[1]; });
         cx /= a.pts.length; cy /= a.pts.length;
         var txt = a.open
-          ? fmtFtIn(polyPerim(a.pts, true))
-          : (polyArea(a.pts) / 144).toFixed(1) + ' sq ft';
+          ? fmtFtIn(perimDe(a))
+          : (areaDe(a) / 144).toFixed(1) + ' sq ft';
         if (a.open) { cy -= 6; }
         out += '<text x="' + cx + '" y="' + cy + '" font-size="9" font-weight="bold" text-anchor="middle" fill="#1c5fa8" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(txt) + '</text>';
       }
@@ -1908,6 +2037,26 @@
     // capa 'furniture' = objetos a TAMAÑO REAL (camas, toilet, tub, nevera
     // — vengan del escaneo o de la paleta); site (árboles) igual
     return (def && (def.layer === 'furniture' || def.cat === 'site')) ? 1 : 0.7;
+  }
+  /* FONDO OPACO DEL EQUIPO (Edgar, 08/30: "cuando yo haga un area, por ejemplo
+   * un counter, los equipos que ponga encima —un sink, un dishwasher— que no
+   * tengan el mismo fondo de granito, que se vean con fondo blanco"). Es lo
+   * que hace un plano de verdad: el aparato TAPA el rayado del mostrador, no
+   * se transparenta encima. Va por defecto en los MUEBLES/equipos; los
+   * simbolos electricos siguen calados, porque esos SI van encima de la pared
+   * y taparla los borraria. Se apaga por objeto en Propiedades.
+   * def.bg: 'rect' (por defecto), 'ellipse' para los redondos, 'none' para
+   * los que no deben tapar nada (la campana, el TV, lo que va por encima). */
+  var PAPEL = '#fbfaf7';
+  function fondoSym(s, def) {
+    var quiere = (s.bg == null) ? (def.layer === 'furniture' && def.bg !== 'none') : !!s.bg;
+    if (!quiere || def.bg === 'none') return '';
+    var w = def.w, h = def.h;
+    if (def.bg === 'ellipse') {
+      return '<ellipse cx="0" cy="0" rx="' + (w / 2) + '" ry="' + (h / 2) + '" fill="' + PAPEL + '" stroke="none"/>';
+    }
+    return '<rect x="' + (-w / 2) + '" y="' + (-h / 2) + '" width="' + w + '" height="' + h +
+      '" fill="' + PAPEL + '" stroke="none"/>';
   }
   function symTransform(s) {
     var k = symK(SYMBOLS[s.key]);
@@ -2022,7 +2171,8 @@
     state.symbols.forEach(function (s) {
       var def = SYMBOLS[s.key]; if (!def) return;
       var sw = def.lw ? ' style="stroke-width:' + def.lw + '"' : '';
-      var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + opAttr(s) + '>' + def.svg + '</g>';
+      var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + opAttr(s) + '>' +
+        fondoSym(s, def) + def.svg + '</g>';
       if (def.layer === 'electrical') elec += frag; else furn += frag;
     });
     G.elec.innerHTML = elec;
@@ -2310,6 +2460,14 @@
           e.pts.forEach(function (q, qi) {
             s += '<circle class="handle" data-v="' + qi + '" cx="' + q[0] + '" cy="' + q[1] + '" r="' + ahr + '"/>';
           });
+          // ROMBO en el medio de cada lado: arrastralo y el lado se curva
+          // (Edgar, 08/30: "convertir una linea recta de un poligono en curva")
+          var mhr = ahr * 0.8;
+          for (var mi = 0; mi < nLados(e); mi++) {
+            var MM = medioLado(e, mi);
+            s += '<rect class="handle" data-m="' + mi + '" x="' + (MM[0] - mhr) + '" y="' + (MM[1] - mhr) +
+              '" width="' + (mhr * 2) + '" height="' + (mhr * 2) + '" transform="rotate(45 ' + MM[0] + ' ' + MM[1] + ')"/>';
+          }
         } else if (sel.kind === 'wire') {
           s += '<path class="sel" d="' + wirePath(e).d + '"/>';
         } else if (sel.kind === 'leader') {
@@ -2889,6 +3047,13 @@
       var asel = findSel();
       if (asel && asel.pts) {
         var avr = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
+        for (var mj = 0; mj < nLados(asel); mj++) {
+          var MJ = medioLado(asel, mj);
+          if (Math.hypot(p[0] - MJ[0], p[1] - MJ[1]) < avr * 0.85) {
+            drag = { mode: 'areaBul', e: asel, i: mj, snap: snapshot(), moved: false };
+            return;
+          }
+        }
         for (var vi = 0; vi < asel.pts.length; vi++) {
           if (Math.hypot(p[0] - asel.pts[vi][0], p[1] - asel.pts[vi][1]) < avr) {
             drag = { mode: 'areaVtx', e: asel, i: vi, snap: snapshot(), moved: false,
@@ -3089,6 +3254,27 @@
       drag.moved = true;
       renderWalls(); renderSel(); return;
     }
+    if (drag.mode === 'areaBul') {
+      var eb = drag.e, ib = drag.i, nb2 = eb.pts.length;
+      var A2 = eb.pts[ib], B2 = eb.pts[(ib + 1) % nb2];
+      var dxb = B2[0] - A2[0], dyb = B2[1] - A2[1], cb = Math.hypot(dxb, dyb) || 1;
+      var nxb = -dyb / cb, nyb = dxb / cb;
+      var mxb = (A2[0] + B2[0]) / 2, myb = (A2[1] + B2[1]) / 2;
+      var sag = (p[0] - mxb) * nxb + (p[1] - myb) * nyb;
+      // SHIFT = medio punto exacto (semicirculo): el bullnose del mostrador
+      if (ev && ev.shiftKey) sag = (sag >= 0 ? 1 : -1) * cb / 2;
+      // pegado al medio = vuelve a ser recto (asi se deshace sin menus)
+      if (Math.abs(sag) < PX(4)) sag = 0;
+      eb.bul = eb.bul || [];
+      while (eb.bul.length < nLados(eb)) eb.bul.push(0);
+      eb.bul[ib] = +sag.toFixed(2);
+      drag.moved = true;
+      var R2 = Math.abs(sag) > 0.01 ? (cb * cb / 4 + sag * sag) / (2 * Math.abs(sag)) : 0;
+      setHint(sag === 0
+        ? 'Lado ' + (ib + 1) + ' RECTO — arrastra el rombo para curvarlo (SHIFT = medio punto)'
+        : 'Lado ' + (ib + 1) + ' curvo · radio ' + fmtFtIn(R2) + ' · flecha ' + fmtFtIn(Math.abs(sag)));
+      renderAreas(); renderSel(); return;
+    }
     if (drag.mode === 'areaVtx') {
       var ea = drag.e, ia = drag.i, na = ea.pts.length;
       // Alt = paso fino, igual que al estirar una pared
@@ -3243,7 +3429,7 @@
       refreshCounts();
     }
     if (drag.mode === 'areaVtx') G.prev.innerHTML = '';
-    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx') && drag.moved) {
+    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
     }
@@ -4341,6 +4527,9 @@
         html += '<div class="row"><label>Ancho</label><input id="prSymW" value="' + fmtFtIn(def2.w * (e.scale || 1) * (e.sx || 1)) + '"></div>';
         html += '<div class="row"><label>Fondo</label><input id="prSymH" value="' + fmtFtIn(def2.h * (e.scale || 1) * (e.sy || 1)) + '"></div>';
       }
+      var fdAct = (e.bg == null) ? (def2 && def2.layer === 'furniture' && def2.bg !== 'none') : !!e.bg;
+      html += '<div class="row"><label style="flex:1">Fondo opaco</label><input id="prSymBg" type="checkbox"' +
+        (fdAct ? ' checked' : '') + ' title="Tapa el patrón del mostrador o del piso que queda debajo"></div>';
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'text') {
@@ -4393,9 +4582,9 @@
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'area') {
       if (e.open) {
-        html += '<div><b>Length: ' + fmtFtIn(polyPerim(e.pts, true)) + '</b></div>';
+        html += '<div><b>Length: ' + fmtFtIn(perimDe(e)) + '</b></div>';
       } else {
-        html += '<div><b>Area: ' + (polyArea(e.pts) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(polyPerim(e.pts, false)) + '</div>';
+        html += '<div><b>Area: ' + (areaDe(e) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(perimDe(e)) + '</div>';
       }
       if (!e.open) {
         html += '<div class="row"><label>Fill</label><select id="prAreaPat">';
@@ -4423,9 +4612,22 @@
         [['0.5', 'Fina'], ['0.9', 'Normal'], ['1.5', 'Gruesa'], ['2.4', 'Extra gruesa']].map(function (o2) {
           return '<option value="' + o2[0] + '"' + ((e.lw || 0.9) === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
         }).join('') + '</select></div>';
+      html += '<div class="row"><label>Esquinas</label><select id="prRc">' +
+        [['0', '∟ Rectas'], ['2', 'Redondeadas r 2\"'], ['4', 'r 4\"'], ['6', 'r 6\"'], ['9', 'r 9\"'],
+         ['12', 'r 12\" (1 ft)'], ['18', 'r 18\"'], ['24', 'r 24\" (2 ft)'], ['36', 'r 36\" (3 ft)']].map(function (rr9) {
+          return '<option value="' + rr9[0] + '"' + ((+(e.rc || 0)) === parseFloat(rr9[0]) ? ' selected' : '') + '>' + rr9[1] + '</option>';
+        }).join('') + '</select></div>';
+      if (e.bul && e.bul.some(function (v9) { return Math.abs(v9 || 0) > 0.01; })) {
+        html += '<button id="prSinCurva" title="Todos los lados vuelven a ser rectos">⌐ Enderezar los lados curvos</button>';
+      }
       html += '<div class="row"><label style="flex:1">Mostrar medida</label><input id="prAreaLbl" type="checkbox"' + (e.showLabel ? ' checked' : '') + ' title="Escribe el sq ft (o la longitud) en el plano"></div>';
       if (e.open) {
+        // Edgar, 08/30: "hice un dibujo de un counter, que permita convertir
+        // en poligono, para poner una isla o peninsula como un counter"
+        html += '<button id="prToPoly">▦ Convertir en polígono (isla / counter)</button>';
         html += '<button id="prToWall">▬ Convertir en paredes</button>';
+      } else {
+        html += '<button id="prToLine">⌐ Convertir en línea (abrir el contorno)</button>';
       }
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     }
@@ -4500,6 +4702,10 @@
     on('prFlipDry', 'click', function () { pushUndo(); e.drySide = -(e.drySide || 1); e.dryManual = 1; refresh(); });
     on('prFlipSwing', 'click', function () { pushUndo(); e.swing = -(e.swing || 1); refresh(); });
     on('prFlipHinge', 'click', function () { pushUndo(); e.hinge = e.hinge ? 0 : 1; refresh(); });
+    on('prSymBg', 'change', function (n) {
+      var et = findSel(); if (!et) return;
+      pushUndo(); et.bg = n.checked ? 1 : 0; refresh();
+    });
     on('prRot', 'change', function (n) { pushUndo(); e.rot = parseFloat(n.value) || 0; refresh(); });
     on('prRot45', 'click', function () { pushUndo(); e.rot = ((e.rot || 0) + 45) % 360; refresh(); });
     on('prScale', 'change', function (n) { pushUndo(); e.scale = Math.max(0.2, parseFloat(n.value) || 1); refresh(); });
@@ -4537,6 +4743,30 @@
     });
     on('prAreaRot', 'change', function (n) { pushUndo(); e.rot = parseFloat(n.value) || 0; refresh(); });
     on('prCoping', 'change', function (n) { pushUndo(); e.coping = parseFloat(n.value) || 0; refresh(); showProps(); });
+    on('prRc', 'change', function (n) { pushUndo(); e.rc = parseFloat(n.value) || 0; refresh(); });
+    var bTP = $('#prToPoly');
+    if (bTP) bTP.addEventListener('click', function () {
+      var et = findSel();
+      if (!et || et.pts.length < 3) { setHint('Hacen falta al menos 3 puntos para cerrar el contorno'); return; }
+      pushUndo();
+      // si el ultimo punto cayo encima del primero (venia de cerrar a ojo), sobra
+      var lp = et.pts[et.pts.length - 1], fp = et.pts[0];
+      if (Math.hypot(lp[0] - fp[0], lp[1] - fp[1]) < 1.5) et.pts.pop();
+      et.open = false;
+      if (!et.pattern || et.pattern === 'none') et.pattern = 'countertop';
+      delete et.lineStyle;
+      refresh(); showProps();
+      setHint('Cerrado — ' + (polyArea(et.pts) / 144).toFixed(1) + ' sq ft de counter. Cambia el relleno en Propiedades.');
+    });
+    var bTL = $('#prToLine');
+    if (bTL) bTL.addEventListener('click', function () {
+      var et2 = findSel(); if (!et2) return;
+      pushUndo(); et2.open = true; et2.pattern = 'none'; et2.rc = 0;
+      refresh(); showProps();
+      setHint('Abierto — ahora es una polilínea (' + fmtFtIn(polyPerim(et2.pts, true)) + ')');
+    });
+    var bSC = $('#prSinCurva');
+    if (bSC) bSC.addEventListener('click', function () { pushUndo(); e.bul = null; refresh(); showProps(); });
     on('prAreaLine', 'change', function (n) { pushUndo(); e.lineStyle = n.value; refresh(); });
     $$('#prColorRow .sw').forEach(function (sw) {
       sw.addEventListener('click', function () {

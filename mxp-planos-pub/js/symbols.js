@@ -277,13 +277,13 @@
   // ovalo entero con su faldon, sin el rectangulo de la pared. Medidas de
   // catalogo: 66x36 la grande y 60x32 la mediana.
   S.tub_oval = { name: 'Tina exenta ovalada 66"', short: 'Tina ovalada 66"',
-    cat: 'plumbing', layer: 'furniture', w: 68, h: 38,
+    cat: 'plumbing', layer: 'furniture', bg: 'ellipse', w: 68, h: 38,
     svg: '<ellipse cx="0" cy="0" rx="33" ry="18"/>' +
          '<ellipse cx="0" cy="0" rx="29" ry="14.5"/>' +
          C(-24.5, 0, 1.6) + C(24, 0, 1.2) };
 
   S.tub_oval60 = { name: 'Tina exenta ovalada 60"', short: 'Tina ovalada 60"',
-    cat: 'plumbing', layer: 'furniture', w: 62, h: 34,
+    cat: 'plumbing', layer: 'furniture', bg: 'ellipse', w: 62, h: 34,
     svg: '<ellipse cx="0" cy="0" rx="30" ry="16"/>' +
          '<ellipse cx="0" cy="0" rx="26" ry="12.5"/>' +
          C(-22, 0, 1.6) + C(21.5, 0, 1.2) };
@@ -460,13 +460,13 @@
 
   /* ============================ EXTERIOR / SITIO ============================ */
 
-  S.tree_lg = { name: 'Tree (10 ft canopy)', cat: 'site', layer: 'furniture', w: 124, h: 124,
+  S.tree_lg = { name: 'Tree (10 ft canopy)', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 124, h: 124,
     svg: scallop(60, 14) + C(0, 0, 2, ' fill="#14161a"') };
 
-  S.tree_md = { name: 'Tree (6 ft canopy)', cat: 'site', layer: 'furniture', w: 76, h: 76,
+  S.tree_md = { name: 'Tree (6 ft canopy)', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 76, h: 76,
     svg: scallop(36, 11) + C(0, 0, 1.8, ' fill="#14161a"') };
 
-  S.shrub = { name: 'Shrub', cat: 'site', layer: 'furniture', w: 40, h: 40,
+  S.shrub = { name: 'Shrub', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 40, h: 40,
     svg: scallop(18, 8) };
 
   S.tree_evergreen = { name: 'Evergreen (spiky)', cat: 'site', layer: 'furniture', w: 76, h: 76,
@@ -519,7 +519,7 @@
     svg: R(-4, -4, 8, 8) + L(-4, -4, 4, 4) + L(-4, 4, 4, -4) };
 
   // spa octogonal pegado a la piscina (como el del plano)
-  S.spa = { name: 'Spa / Hot Tub 7 ft', cat: 'site', layer: 'furniture', w: 84, h: 84,
+  S.spa = { name: 'Spa / Hot Tub 7 ft', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 84, h: 84,
     svg: (function () {
       function oct(r) {
         var d = '', i, a;
@@ -545,12 +545,122 @@
 
   window.SYMBOLS = S;
 
+
+  /* ===================================================================
+   * COCINA EXTERIOR / SUMMER KITCHEN (Edgar, 08/30). En Florida casi todo
+   * lanai lleva una: grill de gas empotrado, wine cooler, ice maker y su
+   * nevera bajo mostrador. Todo esto son CARGAS del plano eléctrico —
+   * receptáculos GFCI/WR y circuitos dedicados — así que van dibujados a
+   * medida real, con la medida en el nombre para el takeoff.
+   * El quemador de GAS se dibuja distinto al eléctrico a propósito: la
+   * hornilla eléctrica es un círculo liso (la resistencia); la de gas lleva
+   * su parrilla en cruz, que es como se marca en el plano de mecánica.
+   * =================================================================== */
+  function gasBurner(cx, cy, r) {
+    var out = C(cx, cy, r) + C(cx, cy, r * 0.40);
+    for (var i = 0; i < 4; i++) {
+      var a = Math.PI / 4 + i * Math.PI / 2;
+      out += L(+(cx + Math.cos(a) * r * 0.40).toFixed(2), +(cy + Math.sin(a) * r * 0.40).toFixed(2),
+               +(cx + Math.cos(a) * r).toFixed(2), +(cy + Math.sin(a) * r).toFixed(2), 0.5);
+    }
+    return out;
+  }
+  // parrilla: barras paralelas dentro de la caja de coccion
+  function parrilla(x, y, w, h, n) {
+    var out = '', paso = h / (n + 1);
+    for (var i = 1; i <= n; i++) out += L(x, +(y + paso * i).toFixed(2), x + w, +(y + paso * i).toFixed(2), 0.5);
+    return out;
+  }
+
+  S.range_gas = { name: 'Gas Range 30" (cocina de gas)', short: 'Gas Range',
+    cat: 'outdoor', layer: 'furniture', w: 32, h: 30,
+    svg: R(-15, -14, 30, 28) +
+      gasBurner(-7.5, -7, 4.4) + gasBurner(7.5, -7, 4.4) +
+      gasBurner(-7.5, 4, 3.6) + gasBurner(7.5, 4, 3.6) +
+      L(-15, 9, 15, 9, 0.6) + T(0, 12.6, 4.2, 'GAS') };
+
+  S.cooktop_gas36 = { name: 'Gas Cooktop 36" (5 quemadores)', short: 'Gas Cooktop',
+    cat: 'outdoor', layer: 'furniture', w: 38, h: 26,
+    svg: R(-18, -12, 36, 24) +
+      gasBurner(-11, -5.5, 4) + gasBurner(11, -5.5, 4) +
+      gasBurner(-11, 3.5, 3.4) + gasBurner(11, 3.5, 3.4) + gasBurner(0, -1, 4.6) +
+      L(-18, 7.5, 18, 7.5, 0.6) + T(0, 10.9, 4.2, 'GAS') };
+
+  S.grill_bbq32 = { name: 'BBQ Grill 32" (gas, empotrado)', short: 'Grill 32',
+    cat: 'outdoor', layer: 'furniture', w: 34, h: 26,
+    svg: R(-17, -13, 34, 26, 1.5) +
+      R(-14.5, -10.5, 29, 16) + parrilla(-14.5, -10.5, 29, 16, 6) +
+      L(-17, 7, 17, 7, 0.6) +                       // banda de mandos
+      C(-14, 10, 1.4) + C(14, 10, 1.4) +
+      T(0, 11.4, 4, 'BBQ GAS') };
+
+  S.grill_bbq42 = { name: 'BBQ Grill 42" (gas, empotrado)', short: 'Grill 42',
+    cat: 'outdoor', layer: 'furniture', w: 44, h: 28,
+    svg: R(-22, -14, 44, 28, 1.5) +
+      R(-19, -11.5, 38, 17.5) + parrilla(-19, -11.5, 38, 17.5, 7) +
+      L(-22, 7.5, 22, 7.5, 0.6) +
+      C(-18.5, 10.8, 1.4) + C(-13, 10.8, 1.4) + C(13, 10.8, 1.4) + C(18.5, 10.8, 1.4) +
+      T(0, 12.2, 4.2, 'BBQ GAS') };
+
+  S.side_burner = { name: 'Side Burner 12" (gas)', short: 'Side Burner',
+    cat: 'outdoor', layer: 'furniture', w: 14, h: 22,
+    svg: R(-7, -11, 14, 22, 1) + gasBurner(0, -3, 4.6) + L(-7, 5, 7, 5, 0.6) + T(0, 9, 4.2, 'GAS') };
+
+  S.kamado = { name: 'Kamado / Egg Grill 22" (carbón)', short: 'Kamado',
+    cat: 'outdoor', layer: 'furniture', bg: 'ellipse', w: 26, h: 26,
+    svg: C(0, 0, 12) + C(0, 0, 9.5) + C(0, 0, 2.2) +
+      L(-9.5, 0, -12, 0, 0.6) + L(9.5, 0, 12, 0, 0.6) };
+
+  S.pizza_oven = { name: 'Pizza Oven 30" (exterior)', short: 'Pizza Oven',
+    cat: 'outdoor', layer: 'furniture', w: 32, h: 30,
+    svg: R(-15, -14, 30, 28, 2) +
+      '<path d="M-10,14 L-10,3 A10,10 0 0 1 10,3 L10,14" fill="none"/>' +
+      T(0, -8.5, 5, 'PIZZA') };
+
+  S.wine_cooler = { name: 'Wine Cooler 24" (bajo mostrador)', short: 'Wine',
+    cat: 'outdoor', layer: 'furniture', w: 25, h: 25,
+    svg: R(-12, -12, 24, 24) +
+      L(-12, -5, 12, -5, 0.5) + L(-12, 1, 12, 1, 0.5) + L(-12, 7, 12, 7, 0.5) +
+      T(0, -7.2, 5, 'WINE') };
+
+  S.ice_maker = { name: 'Ice Maker 15" (bajo mostrador)', short: 'Ice',
+    cat: 'outdoor', layer: 'furniture', w: 16, h: 25,
+    svg: R(-7.5, -12, 15, 24) +
+      R(-4.5, -8, 4, 4) + R(0.5, -3.5, 4, 4) + R(-4.5, 1, 4, 4) +
+      L(-7.5, 6.5, 7.5, 6.5, 0.6) + T(0, 10.6, 4.6, 'ICE') };
+
+  S.fridge_under = { name: 'Outdoor Fridge 24" (bajo mostrador)', short: 'Fridge U/C',
+    cat: 'outdoor', layer: 'furniture', w: 25, h: 25,
+    svg: R(-12, -12, 24, 24) + L(-12, 6, 12, 6, 0.6) + T(0, -2, 5.5, 'REF') };
+
+  S.kegerator = { name: 'Kegerator 24" (barril)', short: 'Keg',
+    cat: 'outdoor', layer: 'furniture', w: 25, h: 25,
+    svg: R(-12, -12, 24, 24) + C(0, -1, 7) + C(0, -1, 5) +
+      L(0, -8, 0, -12, 0.8) + L(-12, 6, 12, 6, 0.6) + T(0, 10.2, 4.6, 'KEG') };
+
+  S.bar_sink = { name: 'Bar Sink 15" (cocina exterior)', short: 'Bar Sink',
+    cat: 'outdoor', layer: 'furniture', w: 17, h: 19,
+    svg: R(-8, -9, 16, 18, 1) + R(-5.5, -4, 11, 11, 1) + C(0, -6.5, 1.1) };
+
+  S.hood_outdoor = { name: 'Vent Hood 36" (sobre el grill)', short: 'Hood',
+    cat: 'outdoor', layer: 'furniture', bg: 'none', w: 38, h: 26,
+    svg: '<rect x="-18" y="-12" width="36" height="24" stroke-dasharray="4 3" fill="none"/>' +
+      '<line x1="-18" y1="-12" x2="18" y2="12" stroke-width="0.5" stroke-dasharray="4 3"/>' +
+      '<line x1="18" y1="-12" x2="-18" y2="12" stroke-width="0.5" stroke-dasharray="4 3"/>' +
+      '<rect x="-11" y="-4.5" width="22" height="9" fill="#fbfaf7" stroke="none"/>' +
+      T(0, 2, 5.5, 'HOOD') };
+
+  S.outdoor_tv = { name: 'Outdoor TV 55" (lanai)', short: 'TV',
+    cat: 'outdoor', layer: 'furniture', bg: 'none', w: 50, h: 8,
+    svg: R(-24, -3, 48, 6) + T(0, -5, 5, 'TV') };
+
   window.SYMBOL_CATS = {
     electrical: '⚡ Electrical',
     riser: '🔌 Riser / One-line',
     elev: '🗄 Elevation / Cabinets',
     plumbing: '🚿 Plumbing / Appliances',
     furniture: '🛋 Furniture',
+    outdoor: '🔥 Outdoor Kitchen',
     site: '🌴 Site'
   };
 })();
