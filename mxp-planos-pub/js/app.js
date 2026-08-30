@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.Q';
+  var APP_VERSION = 'v27.R';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -698,7 +698,11 @@
     return ps;
   }
   // ajusta el punto p a las guías; 'desde' es el punto de partida del trazo
-  function guiaAjusta(p, desde, ev) {
+  // eje: direccion [ux,uy] contra la que se mide el "recto" del SHIFT. Si no
+  // viene, el recto es contra los ejes del papel (horizontal / vertical). En un
+  // poligono viene la direccion del LADO ANTERIOR, y entonces SHIFT da esquinas
+  // de 90 exactos aunque toda la figura este inclinada.
+  function guiaAjusta(p, desde, ev, eje) {
     guiasVivas = '';
     if (ev && ev.altKey) return p;                 // Alt = a mano alzada, sin guías
     var soloRecto = !!(ev && ev.shiftKey);
@@ -713,7 +717,14 @@
     // sugerencia); sin Shift solo cuando el pulso ya viene casi recto.
     if (desde) {
       var dx = x - desde[0], dy = y - desde[1];
-      if (soloRecto) {
+      if (soloRecto && eje) {
+        // proyeccion sobre el eje o sobre su perpendicular: la que menos mueva
+        var a1 = dx * eje[0] + dy * eje[1], b1 = -dx * eje[1] + dy * eje[0];
+        if (Math.abs(b1) >= Math.abs(a1)) { x = desde[0] - eje[1] * b1; y = desde[1] + eje[0] * b1; }
+        else { x = desde[0] + eje[0] * a1; y = desde[1] + eje[1] * a1; }
+        x = +x.toFixed(2); y = +y.toFixed(2);
+        gs.push({ x1: desde[0], y1: desde[1], x2: x, y2: y, c: '#e6a100' });
+      } else if (soloRecto) {
         if (Math.abs(dx) >= Math.abs(dy)) y = desde[1]; else x = desde[0];
         gs.push({ x1: desde[0], y1: desde[1], x2: x, y2: y, c: '#e6a100' });
       } else if (Math.abs(dy) < TOL && Math.abs(dx) > TOL) {
@@ -927,8 +938,58 @@
     return [ox + (p[0] - start[0]) * FINO, oy + (p[1] - start[1]) * FINO];
   }
   // con Shift: bloquea a horizontal o vertical exacto desde el punto inicial
+  // pixeles de pantalla -> pulgadas de mundo (misma tolerancia a cualquier zoom)
+  function PX(px) {
+    var TF = document.body.classList.contains('touch') ? 2.4 : 1;
+    return (px * TF) / (view.z || 1);
+  }
   function orthoLock(a, b) {
     return Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]) ? [b[0], a[1]] : [a[0], b[1]];
+  }
+  // SHIFT dentro de un poligono (Edgar, 08/30: "que el poligono me haga lados
+  // perfectamente en 90 grados, no que queden vertical u horizontal, porque a
+  // lo mejor el poligono queda en un plano inclinado"). El candado NO es
+  // contra los ejes del papel: es contra EL LADO ANTERIOR. Asi un poligono
+  // torcido 23 grados sigue teniendo todas sus esquinas en escuadra.
+  function ejeLadoPrevio(pts) {
+    if (!pts || pts.length < 2) return null;
+    var A = pts[pts.length - 1], P = pts[pts.length - 2];
+    var dx = A[0] - P[0], dy = A[1] - P[1], L = Math.hypot(dx, dy);
+    return L < 1e-6 ? null : [dx / L, dy / L];
+  }
+  function orthoRel(pts, b) {
+    var n = pts.length;
+    var A = pts[n - 1];
+    if (n < 2) return orthoLock(A, b);         // el primer lado no tiene contra que medirse
+    var P = pts[n - 2];
+    var dx = A[0] - P[0], dy = A[1] - P[1], L = Math.hypot(dx, dy);
+    if (L < 1e-6) return orthoLock(A, b);
+    var ux = dx / L, uy = dy / L;
+    var vx = b[0] - A[0], vy = b[1] - A[1];
+    var a1 = vx * ux + vy * uy;                // cuanto avanza en la direccion del lado
+    var b1 = -vx * uy + vy * ux;               // cuanto se va de lado (perpendicular)
+    if (Math.abs(b1) >= Math.abs(a1)) return [+(A[0] - uy * b1).toFixed(2), +(A[1] + ux * b1).toFixed(2)];
+    return [+(A[0] + ux * a1).toFixed(2), +(A[1] + uy * a1).toFixed(2)];
+  }
+  // DONDE TENDRIA QUE CAER UNA PUNTA para que su esquina mida 90 exactos.
+  // Es la circunferencia de Tales: todo punto que ve el segmento A-B bajo un
+  // angulo recto esta sobre el circulo que tiene A-B de diametro. Devuelve el
+  // punto de ese circulo mas cercano al cursor, que es la correccion minima.
+  function punto90(A, B, cur) {
+    if (!A || !B) return null;
+    var cx = (A[0] + B[0]) / 2, cy = (A[1] + B[1]) / 2;
+    var R = Math.hypot(B[0] - A[0], B[1] - A[1]) / 2;
+    if (R < 0.5) return null;
+    var vx = cur[0] - cx, vy = cur[1] - cy, L = Math.hypot(vx, vy);
+    if (L < 1e-6) return null;
+    return [+(cx + vx / L * R).toFixed(2), +(cy + vy / L * R).toFixed(2)];
+  }
+  function angEn(A, V, B) {
+    var ax = A[0] - V[0], ay = A[1] - V[1], bx = B[0] - V[0], by = B[1] - V[1];
+    var la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    if (la < 1e-6 || lb < 1e-6) return 0;
+    var c = Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb)));
+    return Math.acos(c) * 180 / Math.PI;
   }
   // colores predeterminados para formas y líneas (funcionan en cualquier visor)
   var COLOR_PRESETS = [
@@ -2243,6 +2304,12 @@
           s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + dhr + '"/>';
         } else if (sel.kind === 'area') {
           s += '<path class="sel" d="' + areaPath(e) + '"/>';
+          // una asa por PUNTA: se arrastran igual que los extremos de una pared
+          // (Edgar, 08/30: "al cerrar el poligono que yo pueda editar cada punta")
+          var ahr = (document.body.classList.contains('touch') ? 9 : 5) / view.z + 2;
+          e.pts.forEach(function (q, qi) {
+            s += '<circle class="handle" data-v="' + qi + '" cx="' + q[0] + '" cy="' + q[1] + '" r="' + ahr + '"/>';
+          });
         } else if (sel.kind === 'wire') {
           s += '<path class="sel" d="' + wirePath(e).d + '"/>';
         } else if (sel.kind === 'leader') {
@@ -2633,7 +2700,7 @@
       var so = applyOsnap(p);
       if (so.sn) p = so.p;   // el snap gana sobre el ortho
       else if (drawing && drawing.mode === 'twopoint') p = autoStraight(p, ev);
-      else if (wantOrtho(ev) && drawing && drawing.mode === 'areachain') p = orthoLock(drawing.pts[drawing.pts.length - 1], p);
+      else if (wantOrtho(ev) && drawing && drawing.mode === 'areachain') p = orthoRel(drawing.pts, p);
     } else if (drawing && drawing.mode === 'twopoint') {
       p = autoStraight(p, ev);
     }
@@ -2672,7 +2739,7 @@
       var so = applyOsnap(p);
       if (so.sn) { p = so.p; snapMark = osnapMarker(so.sn); }
       else if (drawing && drawing.mode === 'twopoint') p = autoStraight(p, ev);
-      else if (drawing && drawing.mode === 'areachain' && wantOrtho(ev)) p = orthoLock(drawing.pts[drawing.pts.length - 1], p);
+      else if (drawing && drawing.mode === 'areachain' && wantOrtho(ev)) p = orthoRel(drawing.pts, p);
     } else if (drawing && drawing.mode === 'twopoint') {
       p = autoStraight(p, ev);
     }
@@ -2710,7 +2777,7 @@
       G.prev.innerHTML = guiasVivas ? '<g class="preview">' + guiasVivas + '</g>' : '';
     } else if ((tool === 'area' || tool === 'pline') && drawing && drawing.mode === 'areachain') {
       var ult = drawing.pts[drawing.pts.length - 1];
-      var np = guiaAjusta(snapWallPt(p), ult, ev);
+      var np = guiaAjusta(snapWallPt(p), ult, ev, ejeLadoPrevio(drawing.pts));
       drawing.cursor = np;                                  // el clic usa el punto YA guiado
       var d = 'M' + drawing.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' L' + np[0] + ',' + np[1];
       var largoPrev = Math.hypot(np[0] - ult[0], np[1] - ult[1]);
@@ -2815,6 +2882,20 @@
         var JA = ptAlong(hw, hg2, op.pos - op.w / 2), JB = ptAlong(hw, hg2, op.pos + op.w / 2);
         if (Math.hypot(p[0] - JA[0], p[1] - JA[1]) < jr2) { drag = { mode: 'openJamb', open: op, wall: hw, end: -1, snap: snapshot(), moved: false }; return; }
         if (Math.hypot(p[0] - JB[0], p[1] - JB[1]) < jr2) { drag = { mode: 'openJamb', open: op, wall: hw, end: 1, snap: snapshot(), moved: false }; return; }
+      }
+    }
+    // asas de PUNTA de un poligono / polilinea seleccionada
+    if (sel && sel.kind === 'area') {
+      var asel = findSel();
+      if (asel && asel.pts) {
+        var avr = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
+        for (var vi = 0; vi < asel.pts.length; vi++) {
+          if (Math.hypot(p[0] - asel.pts[vi][0], p[1] - asel.pts[vi][1]) < avr) {
+            drag = { mode: 'areaVtx', e: asel, i: vi, snap: snapshot(), moved: false,
+                     ox: asel.pts[vi][0], oy: asel.pts[vi][1], start: p };
+            return;
+          }
+        }
       }
     }
     // asas de esquina de un objeto a tamaño real: estirar jalando
@@ -3008,6 +3089,51 @@
       drag.moved = true;
       renderWalls(); renderSel(); return;
     }
+    if (drag.mode === 'areaVtx') {
+      var ea = drag.e, ia = drag.i, na = ea.pts.length;
+      // Alt = paso fino, igual que al estirar una pared
+      var pv = finoOn(ev) ? finoPt(ev, drag.start, drag.ox, drag.oy, p) : p;
+      // las dos puntas vecinas (en una polilinea abierta los extremos solo
+      // tienen una, y entonces no hay esquina que poner en escuadra)
+      var Aq = (ia > 0) ? ea.pts[ia - 1] : (ea.open ? null : ea.pts[na - 1]);
+      var Bq = (ia < na - 1) ? ea.pts[ia + 1] : (ea.open ? null : ea.pts[0]);
+      var P90 = punto90(Aq, Bq, pv);
+      var marca = '';
+      if (P90) {
+        var cerca = Math.hypot(pv[0] - P90[0], pv[1] - P90[1]) < PX(10);
+        // SHIFT = llevame ahi exacto. Si no, el iman solo agarra si estan
+        // encendidos: la marca es referencia, no obligacion (Edgar, 08/30:
+        // "quiero que sea solo para que me senales, no que me obligues")
+        if ((ev && ev.shiftKey) || (cerca && imanesOn)) pv = P90;
+        var rr90 = PX(8), pegado = Math.hypot(pv[0] - P90[0], pv[1] - P90[1]) < 0.4;
+        marca = '<circle cx="' + P90[0] + '" cy="' + P90[1] + '" r="' + rr90 + '" fill="' +
+          (pegado ? 'rgba(22,163,74,.30)' : 'rgba(255,255,255,.75)') + '" stroke="#16a34a" stroke-width="' +
+          PX(pegado ? 2.4 : 1.9) + '"/>';
+        if (pegado) {
+          // escuadrita en la punta: la senal de que la esquina ya mide 90 exactos
+          var la = Math.hypot(Aq[0] - P90[0], Aq[1] - P90[1]) || 1, lb = Math.hypot(Bq[0] - P90[0], Bq[1] - P90[1]) || 1;
+          var e1x = (Aq[0] - P90[0]) / la, e1y = (Aq[1] - P90[1]) / la;
+          var e2x = (Bq[0] - P90[0]) / lb, e2y = (Bq[1] - P90[1]) / lb;
+          var ll = PX(11);
+          marca += '<path d="M' + (P90[0] + e1x * ll) + ',' + (P90[1] + e1y * ll) +
+            ' L' + (P90[0] + (e1x + e2x) * ll) + ',' + (P90[1] + (e1y + e2y) * ll) +
+            ' L' + (P90[0] + e2x * ll) + ',' + (P90[1] + e2y * ll) +
+            '" fill="none" stroke="#16a34a" stroke-width="' + PX(1.4) + '"/>';
+        } else {
+          marca += '<line x1="' + pv[0] + '" y1="' + pv[1] + '" x2="' + P90[0] + '" y2="' + P90[1] +
+            '" stroke="#16a34a" stroke-width="' + PX(1) + '" stroke-dasharray="' + PX(3) + ' ' + PX(3) + '"/>';
+        }
+      }
+      ea.pts[ia] = [+pv[0].toFixed(2), +pv[1].toFixed(2)];
+      G.prev.innerHTML = marca;
+      drag.moved = true;
+      if (Aq && Bq) {
+        var an90 = angEn(Aq, ea.pts[ia], Bq);
+        setHint('Punta ' + (ia + 1) + '/' + na + ' · esquina ' + an90.toFixed(1) + '°' +
+          (Math.abs(an90 - 90) < 0.15 ? ' ✓ escuadra' : ' — el círculo verde es donde queda a 90° (SHIFT lo lleva exacto)'));
+      }
+      renderAreas(); renderSel(); return;
+    }
     if (drag.mode === 'symResize') {
       var e4 = drag.e, d4 = SYMBOLS[e4.key], k4 = symK(d4);
       var r4 = (e4.rot || 0) * Math.PI / 180, c4 = Math.cos(r4), s4 = Math.sin(r4);
@@ -3116,7 +3242,8 @@
       pushUndo(drag.snap);
       refreshCounts();
     }
-    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize') && drag.moved) {
+    if (drag.mode === 'areaVtx') G.prev.innerHTML = '';
+    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
     }
