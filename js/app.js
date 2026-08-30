@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.C';
+  var APP_VERSION = 'v26.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -118,6 +118,7 @@
     block: { name: '8" Block', t: 8 },
     block12: { name: '12" Block', t: 12 },
     blockdry: { name: '8" Block + Drywall', t: 8, dry: true },
+    furr15: { name: 'Furring 1½" (listón + gyp)', t: 1.5 },
     drywall25: { name: 'Drywall 2½" (furred)', t: 2.5 },
     drywall35: { name: 'Drywall 3½"', t: 3.5 },
     drywall: { name: 'Drywall 4½" (2x4 + gyp)', t: 4.5 },
