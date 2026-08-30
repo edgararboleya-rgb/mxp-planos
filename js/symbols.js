@@ -269,8 +269,24 @@
   S.kitchen_sink = { name: 'Double Kitchen Sink', cat: 'plumbing', layer: 'furniture', w: 34, h: 23,
     svg: R(-16.5, -11, 33, 22) + R(-14, -8, 12.5, 16, 1.5) + R(1.5, -8, 12.5, 16, 1.5) + C(0, -9.2, 1) };
 
-  S.tub = { name: 'Bathtub 60"', cat: 'plumbing', layer: 'furniture', w: 62, h: 32,
+  S.tub = { name: 'Bathtub 60" (encajonada)', cat: 'plumbing', layer: 'furniture', w: 62, h: 32,
     svg: R(-30, -15, 60, 30, 3) + R(-26.5, -11.5, 53, 23, 9) + C(-21, 0, 1.6) };
+
+  // TINA EXENTA OVALADA (Edgar, 08/30: "la de esos banos master que tiene una
+  // sola en forma ovalada"). Va suelta, no encajonada: por eso se dibuja el
+  // ovalo entero con su faldon, sin el rectangulo de la pared. Medidas de
+  // catalogo: 66x36 la grande y 60x32 la mediana.
+  S.tub_oval = { name: 'Tina exenta ovalada 66"', short: 'Tina ovalada 66"',
+    cat: 'plumbing', layer: 'furniture', w: 68, h: 38,
+    svg: '<ellipse cx="0" cy="0" rx="33" ry="18"/>' +
+         '<ellipse cx="0" cy="0" rx="29" ry="14.5"/>' +
+         C(-24.5, 0, 1.6) + C(24, 0, 1.2) };
+
+  S.tub_oval60 = { name: 'Tina exenta ovalada 60"', short: 'Tina ovalada 60"',
+    cat: 'plumbing', layer: 'furniture', w: 62, h: 34,
+    svg: '<ellipse cx="0" cy="0" rx="30" ry="16"/>' +
+         '<ellipse cx="0" cy="0" rx="26" ry="12.5"/>' +
+         C(-22, 0, 1.6) + C(21.5, 0, 1.2) };
 
   S.shower = { name: 'Shower 36×36', cat: 'plumbing', layer: 'furniture', w: 38, h: 38,
     svg: R(-18, -18, 36, 36) + L(-18, -18, -4, -4, 0.6) + L(18, -18, 4, -4, 0.6) + L(-18, 18, -4, 4, 0.6) + L(18, 18, 4, 4, 0.6) + C(0, 0, 2) };
