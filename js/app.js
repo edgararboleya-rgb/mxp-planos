@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.G';
+  var APP_VERSION = 'v26.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2303,7 +2303,14 @@
   function openingDown(p, type) {
     var near = nearestWall(p);
     if (!near) { setHint('Acércate a una pared para colocar la ' + OPEN_NAMES[type].toLowerCase()); return; }
-    var g = wallGeom(near.wall), w = (curDoorW && type === curDoorType) ? curDoorW : OPEN_DEFAULT[type], ajust = false;
+    // el ancho SIEMPRE sale de lo que se ve en la barra: si el selector marca
+    // una medida, esa manda; 'auto' usa la de fábrica del tipo. Antes el
+    // tamaño elegido en el menú se quedaba pegado invisible y todas las
+    // puertas salían iguales sin que nada lo dijera (Edgar, 08/30).
+    var selW = 0;
+    try { selW = parseInt(($('#doorSize') || {}).value, 10) || 0; } catch (e0) {}
+    var esSwing = type === 'door';
+    var g = wallGeom(near.wall), w = (esSwing && selW) ? selW : OPEN_DEFAULT[type], ajust = false;
     // pared corta (las de ángulo del escaneo lo son casi siempre): en vez de
     // negarse, la abertura se achica a lo que cabe — luego se afina el Ancho
     if (g.len < w + 4) {
@@ -5282,6 +5289,13 @@
       (movidas ? ' · se arrastraron ' + movidas + ' extremo(s) pegado(s) para no abrir la esquina' : '') + ' · Ctrl+Z lo deshace';
     setHint('📏 Pared corregida a ' + fmtFtIn(v) + ' — la medida de la obra manda sobre el escáner');
   }
+  var dsz = $('#doorSize');
+  if (dsz) dsz.addEventListener('change', function () {
+    curDoorType = 'door';
+    curDoorW = parseInt(this.value, 10) || 0;
+    setTool('door');
+    setHint('Puerta ' + (curDoorW ? 'de ' + fmtFtIn(curDoorW) : "de 3'-0\" (auto)") + ' — haz clic sobre una pared para colocarla');
+  });
   $('#btnAI').addEventListener('click', abrirAsistente);
   var bPlanoIA = $('#btnPlanoIA');
   if (bPlanoIA) bPlanoIA.addEventListener('click', planoDesdeImagen);
@@ -8640,6 +8654,14 @@
         } else if (kind === 'door') {
           curDoorType = k;
           curDoorW = parseInt(it.dataset.w, 10) || 0;
+          var ds = $('#doorSize');
+          if (ds) {
+            // el menú y el selector visible son lo MISMO: lo que elijas aquí
+            // se ve arriba, y lo que dice arriba es lo que se coloca
+            if (k === 'door') ds.value = String(curDoorW || 0);
+            else ds.value = '0';
+            ds.disabled = (k !== 'door');
+          }
           setTool('door');
           setHint(OPEN_NAMES[k] + (curDoorW ? ' de ' + fmtFtIn(curDoorW) : '') + ' — haz clic sobre una pared para colocarla');
         } else if (kind === 'window') {
