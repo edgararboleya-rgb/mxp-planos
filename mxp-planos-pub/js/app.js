@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.V';
+  var APP_VERSION = 'v27.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9434,12 +9434,21 @@
       legend += '<span class="it">' + symPreviewSvg(d, 26, 20) + esc(d.short || d.name) + '</span>';
     });
 
+    // QUE SALE EN LA HOJA (Edgar, 08/30: "que sea como un plano de ingeniero,
+    // que salga solo el plano como una hoja"). La leyenda y la caratula
+    // quedan de opcion, no de obligacion: la presentacion buena se hara
+    // aparte. 'limpia' = ni marco; 'marco' = la hoja con su recuadro.
+    var hojaSel = $('#pjSheet');
+    var hoja = hojaSel ? hojaSel.value : 'limpia';
+    state.printSheet = hoja;
+
     var frame = document.createElement('div');
-    frame.className = 'sheetFrame';
-    frame.innerHTML =
-      '  <div class="drawArea"></div>' +
-      (legend ? '<div class="legend"><b style="font-size:8px">SYMBOL LEGEND:</b>' + legend + '</div>' : '') +
-      titleBlockHtml(state.project.sheetNo || 'E-1', state.project.sheetTitle || 'PLANO', scaleText);
+    frame.className = 'sheetFrame' + (hoja === 'limpia' ? ' sinMarco' : '');
+    frame.innerHTML = '  <div class="drawArea"></div>' +
+      (hoja === 'full'
+        ? ((legend ? '<div class="legend"><b style="font-size:8px">SYMBOL LEGEND:</b>' + legend + '</div>' : '') +
+           titleBlockHtml(state.project.sheetNo || 'E-1', state.project.sheetTitle || 'PLANO', scaleText))
+        : '');
     frame.querySelector('.drawArea').appendChild(clone);
     container.appendChild(frame);
   }

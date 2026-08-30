@@ -50,7 +50,12 @@ body {
 }
 .brand span { color: #E8F3FA; font-weight: 300; margin-left: 2px; font-size: 14.5px; }
 
-.tgroup { display: flex; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,.14); padding-left: 10px; }
+.tgroup { display: flex; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,.14); padding-left: 10px; flex: none; }
+/* Los selectores de tipo de pared y tamaño de puerta se quedaban FUERA de la
+   pantalla en portátil (medido: x=1496 con ventana de 1290) — invisibles, y
+   con ellos el arreglo del tamaño de puerta. Ahora van al frente y pegados. */
+#grpAjustes { position: sticky; left: 0; z-index: 3; background: var(--mp-deep); border-left: none; padding-left: 0; }
+#grpAjustes select { max-width: 168px; }
 .tgroup.right { margin-left: auto; }
 
 #toolbar button, #toolbar label.tbtn {
@@ -265,13 +270,18 @@ body {
 
 /* ===== Print ===== */
 @media print {
-  #app { display: none !important; }
+  /* nada de la app entra en la hoja. Antes solo se escondia #app, y la
+     burbuja del chat (que cuelga del body) se IMPRIMIA encima del plano */
+  body > * { display: none !important; }
   #printSheet { display: block !important; position: static; }
   @page { size: landscape; margin: 8mm; }
 }
 #printSheet { background: #fff; color: #14161a; font-family: Arial, sans-serif; }
 #printSheet .sheetFrame { border: 2px solid #14161a; padding: 4px; height: 186mm; display: flex; flex-direction: column; page-break-after: always; }
 #printSheet .sheetFrame:last-child { page-break-after: auto; }
+/* hoja limpia: solo el plano, sin recuadro ni caratula (Edgar 08/30) */
+#printSheet .sheetFrame.sinMarco { border: 0; padding: 0; }
+#printSheet .sheetFrame.sinMarco .drawArea { border: 0; }
 #printSheet .drawArea { flex: 1; border: 1px solid #14161a; position: relative; overflow: hidden; }
 #printSheet .drawArea svg { width: 100%; height: 100%; }
 #printSheet .titleBlock { display: flex; border: 1px solid #14161a; border-top: none; font-size: 10px; }
@@ -373,3 +383,84 @@ body.touch #statusbar { height: 32px; font-size: 13px; }
 body.touch .sw { width: 28px; height: 28px; }
 body.touch .handle { r: 9; }
 body.touch #main { position: relative; }
+
+/* ═══ AUDITORÍA 08/28 · toques con el dedo en el iPad ═══
+   Medido en un iPad Pro 11: btnEst y btnCsv salían de 18 px de alto, y el
+   selector de tipo de pared y la paleta de 29. Con el dedo eso se falla.
+   En pantalla táctil todo lo que se toca sube a 36 px. */
+body.touch button,
+body.touch select,
+body.touch #catTabs button,
+body.touch .cat,
+body.touch .tmItem { min-height: 36px; }
+body.touch #catTabs button { padding: 8px 12px; font-size: 12.5px; }
+body.touch .sub button { padding: 9px 10px !important; font-size: 12px !important; }
+body.touch #btnEst, body.touch #btnCsv { padding: 8px 12px !important; font-size: 12px !important; }
+body.touch #btnPal, body.touch #stAdd { min-width: 40px; }
+
+/* ══════════ 💬 CHAT FLOTANTE ══════════
+   Pedido de Edgar: poder preguntar sin salir del plano. Va FUERA del lienzo,
+   así que arrastrar paredes por debajo sigue funcionando igual. */
+#chatBurbuja {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 1px solid #0b5fb0; background: #0b84ff; color: #fff;
+  font-size: 23px; line-height: 1; cursor: pointer;
+  box-shadow: 0 3px 12px rgba(0,0,0,.28);
+}
+#chatBurbuja:hover { background: #0a76e6; }
+#chatBurbuja.oculto, #chatFlot.oculto { display: none; }
+
+#chatFlot {
+  position: fixed; right: 18px; bottom: 18px; z-index: 61;
+  width: 348px; max-width: calc(100vw - 16px);
+  height: 440px; max-height: calc(100vh - 24px);
+  display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #c9c9c3; border-radius: 10px;
+  box-shadow: 0 6px 26px rgba(0,0,0,.22); overflow: hidden;
+  resize: both;
+}
+#chatCab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px; background: #f4f4ef; border-bottom: 1px solid #e2e2dc;
+  cursor: move; touch-action: none; user-select: none;
+}
+#chatTit { font-weight: 700; font-size: 12.5px; flex: 1; }
+#chatCoste { font-size: 10.5px; color: #888; }
+#chatCab button {
+  border: 1px solid #d5d5cf; background: #fff; border-radius: 5px;
+  width: 26px; height: 26px; cursor: pointer; font-size: 13px; line-height: 1; padding: 0;
+}
+#chatCab button:hover { background: #eee; }
+
+#chatCuerpo { flex: 1; overflow-y: auto; padding: 9px; font-size: 12.5px; line-height: 1.5; }
+.chatVacio { color: #888; font-size: 12px; padding: 6px 2px; }
+.chatYo {
+  background: #eaf3ff; border: 1px solid #cfe2fb; border-radius: 9px 9px 2px 9px;
+  padding: 6px 9px; margin: 6px 0 6px 26px; white-space: pre-wrap;
+}
+.chatEl { padding: 2px 1px; margin: 6px 0; }
+.chatPensando { color: #888; font-style: italic; }
+.chatErr { color: #b3541e; background: #fff5ec; border: 1px solid #f2d9c2;
+  border-radius: 7px; padding: 6px 9px; margin: 6px 0; font-size: 12px; }
+.chatEl table { max-width: 100%; }
+
+#chatPie { display: flex; gap: 6px; padding: 7px; border-top: 1px solid #e2e2dc; background: #fafaf7; }
+#chatTxt {
+  flex: 1; resize: none; font: inherit; font-size: 12.5px;
+  border: 1px solid #d5d5cf; border-radius: 6px; padding: 5px 7px;
+}
+#chatEnv {
+  border: 1px solid #0b5fb0; background: #0b84ff; color: #fff;
+  border-radius: 6px; width: 38px; cursor: pointer; font-size: 15px;
+}
+#chatEnv:hover { background: #0a76e6; }
+
+/* con el dedo: más grande y sin que la burbuja tape los botones de abajo */
+body.touch #chatBurbuja { width: 58px; height: 58px; font-size: 25px; bottom: 22px; }
+body.touch #chatCab button { width: 34px; height: 34px; }
+body.touch #chatEnv { width: 46px; }
+body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
+@media (max-width: 520px) {
+  #chatFlot { width: calc(100vw - 16px); height: 62vh; }
+}
