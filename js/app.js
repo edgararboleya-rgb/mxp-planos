@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.H';
+  var APP_VERSION = 'v26.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -117,7 +117,8 @@
   var WALL_TYPES = {
     block: { name: '8" Block', t: 8 },
     block12: { name: '12" Block', t: 12 },
-    blockdry: { name: '8" Block + Drywall', t: 8, dry: true },
+    blockdry: { name: '8" Block + Furring (forrado)', t: 8, dry: true },
+    block12dry: { name: '12" Block + Furring (forrado)', t: 12, dry: true },
     furr15: { name: 'Furring 1½" (listón + gyp)', t: 1.5 },
     drywall25: { name: 'Drywall 2½" (furred)', t: 2.5 },
     drywall35: { name: 'Drywall 3½"', t: 3.5 },
@@ -767,8 +768,10 @@
         for (m = 0; m < k; m++) {
           var a = ends[m];
           var qCCW = Q[m], qCW = Q[(m - 1 + k) % k];
+          // mit: esta unión es una ESQUINA a inglete (no un tee) — la línea de
+          // furring la necesita para doblar la esquina en vez de pasarse
           setJoin(a.e.w, a.e.atStart,
-            a.e.atStart ? { p: qCCW, m: qCW, cap: false } : { p: qCW, m: qCCW, cap: false });
+            a.e.atStart ? { p: qCCW, m: qCW, cap: false, mit: true } : { p: qCW, m: qCCW, cap: false, mit: true });
         }
       });
     });
@@ -852,7 +855,7 @@
     state.walls.forEach(function (w) {
       var info = wallSegs(w), g = info.g, t = w.t / 2;
       var J = jc.joins[w.id], cut = jc.cuts[w.id];
-      var esBloque = (w.type === 'block' || w.type === 'block12' || w.type === 'blockdry');
+      var esBloque = String(w.type).indexOf('block') === 0;
       var fillCls = esBloque ? 'wall-fill-block' : 'wall-fill-drywall';
       var ecls = esBloque ? 'wall-edge' : 'wall-edge dry';   // el plano profesional: mamposteria gruesa, division liviana
       info.segs.forEach(function (sg) {
@@ -884,11 +887,26 @@
           }
         });
       }
-      // línea fina de drywall al frente del bloque (furring)
+      // línea fina de drywall al frente del bloque (furring).
+      // ENTRELAZA EN LAS ESQUINAS igual que el bloque (Edgar, 08/30: "no
+      // entrelazan el furry, solo la parte de bloque"): antes se dibujaba de
+      // punta a punta y en cada esquina las dos líneas se cruzaban sacando
+      // bigotes. El punto de inglete del cuerpo (Q), prolongado desde el
+      // extremo por offD/t, es EXACTAMENTE donde se encuentran las dos
+      // líneas de furring — misma bisectriz, otro radio.
       if (WALL_TYPES[w.type] && WALL_TYPES[w.type].dry) {
-        var sideD = w.drySide || 1, offD = t + 1.5;
+        var sideD = w.drySide || 1, offD = t + 1.5, kF = offD / t;
         info.segs.forEach(function (sg) {
+          var atSf = sg[0] < 0.01, atEf = sg[1] > g.len - 0.01;
           var P1 = offPt(w, g, sg[0], sideD, offD), P2 = offPt(w, g, sg[1], sideD, offD);
+          if (atSf && J.s.mit) {
+            var Qs = sideD > 0 ? J.s.p : J.s.m;
+            P1 = [w.x1 + (Qs[0] - w.x1) * kF, w.y1 + (Qs[1] - w.y1) * kF];
+          }
+          if (atEf && J.e.mit) {
+            var Qe = sideD > 0 ? J.e.p : J.e.m;
+            P2 = [w.x2 + (Qe[0] - w.x2) * kF, w.y2 + (Qe[1] - w.y2) * kF];
+          }
           out += '<line class="furr-line" x1="' + P1[0] + '" y1="' + P1[1] + '" x2="' + P2[0] + '" y2="' + P2[1] + '"/>';
         });
       }
