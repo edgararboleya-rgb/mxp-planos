@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.Y';
+  var APP_VERSION = 'v27.Z';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2225,13 +2225,14 @@
    * negrita y el tamano"). Una nota de plano casi nunca es una frase: es
    * "MASTER / BEDROOM" en dos renglones, o "(2) #12 THHN / 1/2\" EMT". */
   var TEXT_FONTS = {
-    arch:  { name: 'Arquitectónica (Arial)', ff: 'Arial, Helvetica, sans-serif' },
+    arch:  { name: 'Arquitectónica (Arial)', corto: 'Arial', ff: 'Arial, Helvetica, sans-serif' },
     // OJO: comillas simples dentro. El style va entre comillas dobles, y una
     // doble aqui cortaba el atributo — por eso la fuente elegida no se veia
-    serif: { name: 'Serif (Times)', ff: "'Times New Roman', Times, serif" },
-    mono:  { name: 'Mono (planos viejos)', ff: "'Courier New', Courier, monospace" },
-    cond:  { name: 'Estrecha (cabe más)', ff: "'Arial Narrow', 'Liberation Sans Narrow', Arial, sans-serif" }
+    serif: { name: 'Serif (Times)', corto: 'Times', ff: "'Times New Roman', Times, serif" },
+    mono:  { name: 'Mono (planos viejos)', corto: 'Mono', ff: "'Courier New', Courier, monospace" },
+    cond:  { name: 'Estrecha (cabe más)', corto: 'Narrow', ff: "'Arial Narrow', 'Liberation Sans Narrow', Arial, sans-serif" }
   };
+  var TEXT_ANCHOR = { left: 'start', center: 'middle', right: 'end' };
   function textLineas(t) { return String(t.text == null ? '' : t.text).split(/\r?\n/); }
   // va como STYLE, no como atributo: la hoja de estilos fija fill y
   // font-family para .lbl, y el CSS le gana siempre a un atributo suelto —
@@ -2259,6 +2260,13 @@
     return mx * sz * (t.bold ? 0.62 : 0.58);
   }
   function textAlto(t, sz) { return sz + (textLineas(t).length - 1) * sz * 1.25; }
+  // borde izquierdo del bloque: con el texto centrado o a la derecha, la X
+  // del objeto ya no es el arranque — sin esto el clic y el marco quedaban
+  // corridos justo cuando mas se usan (rotulos de cuarto, centrados)
+  function textIzq(t, sz) {
+    var w = textAncho(t, sz), a = t.align || 'left';
+    return a === 'center' ? t.x - w / 2 : (a === 'right' ? t.x - w : t.x);
+  }
 
   /* ---------------- render: anotaciones ---------------- */
   function dimMarkup(x1, y1, x2, y2, off, cls, label) {
@@ -2341,8 +2349,9 @@
         s += '<text x="' + t.x + '" y="' + (t.y + sz * 0.34) + '" font-size="' + sz + '" text-anchor="middle" font-weight="bold"' +
           textAttrs(t) + '>' + esc(String(t.text).replace(/\r?\n/g, ' ')) + '</text></g>';
       } else {
-        s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz + '"' +
-          textAttrs(t) + opAttr(t) + '>' + textTspans(t, sz, t.x) + '</text>';
+        var anc = TEXT_ANCHOR[t.align || 'left'] || 'start';
+        s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz +
+          '" text-anchor="' + anc + '"' + textAttrs(t) + opAttr(t) + '>' + textTspans(t, sz, t.x) + '</text>';
       }
     });
     G.annot.innerHTML = s;
@@ -2529,7 +2538,7 @@
           }
         } else if (sel.kind === 'text') {
           var szS = e.size || 9;
-          s += '<rect class="sel" x="' + (e.x - 3) + '" y="' + (e.y - szS) + '" width="' + (textAncho(e, szS) + 6) +
+          s += '<rect class="sel" x="' + (textIzq(e, szS) - 3) + '" y="' + (e.y - szS) + '" width="' + (textAncho(e, szS) + 6) +
             '" height="' + (textAlto(e, szS) + 6) + '"/>';
         } else if (sel.kind === 'dim') {
           s += '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
@@ -2666,8 +2675,8 @@
           var dt = Math.hypot(p[0] - e.x, p[1] - e.y) - br;
           if (dt <= PX(3)) pon('text', e.id, Math.max(0, dt), 6);
         } else {
-          var tw = textAncho(e, sz);
-          var qx1 = Math.max(0, Math.max(e.x - p[0], p[0] - (e.x + tw)));
+          var tw = textAncho(e, sz), tx0 = textIzq(e, sz);
+          var qx1 = Math.max(0, Math.max(tx0 - p[0], p[0] - (tx0 + tw)));
           var qy1 = Math.max(0, Math.max((e.y - sz) - p[1], p[1] - (e.y + textAlto(e, sz) - sz)));
           var dt2 = Math.hypot(qx1, qy1);
           if (dt2 <= PX(3)) pon('text', e.id, dt2, 6);
@@ -4619,26 +4628,33 @@
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'text') {
-      // AREA de texto, no caja de una linea: aqui el Enter hace renglon nuevo
-      html += '<div class="row" style="align-items:flex-start"><label>Texto</label>' +
-        '<textarea id="prText" rows="3" style="flex:1;resize:vertical;font-family:inherit;font-size:12px;' +
-        'padding:5px;border:1px solid #c9c9c3;border-radius:5px" ' +
-        'title="Enter hace un renglón nuevo — el texto puede ir en varias líneas">' + esc(e.text) + '</textarea></div>';
-      html += '<div class="row"><label>Fuente</label><select id="prTextFont">' +
-        Object.keys(TEXT_FONTS).map(function (fk) {
-          return '<option value="' + fk + '"' + ((e.font || 'arch') === fk ? ' selected' : '') + '>' + esc(TEXT_FONTS[fk].name) + '</option>';
-        }).join('') + '</select></div>';
-      html += '<div class="row"><label>Tamaño</label>' +
-        '<button id="prTxtMenos" style="width:30px" title="Más chica">A−</button>' +
-        '<input id="prTextSize" type="number" min="3" step="0.5" style="flex:1" value="' + (e.size || 9) + '">' +
-        '<button id="prTxtMas" style="width:30px" title="Más grande">A+</button></div>';
-      html += '<div class="row"><label>Estilo</label>' +
-        '<button id="prTxtBold" style="flex:1;font-weight:800' + (e.bold ? ';background:#0b84ff;color:#fff' : '') + '">B</button>' +
-        '<button id="prTxtItal" style="flex:1;font-style:italic' + (e.italic ? ';background:#0b84ff;color:#fff' : '') + '">I</button></div>';
-      html += '<div class="row"><label>Color</label><div class="swRow" id="prTxtColorRow">' +
+      // AREA de texto, no caja de una linea: aqui el Enter hace renglon nuevo.
+      // Y la barra de formato va PEGADA debajo y compacta (Edgar, 08/30: "es
+      // muy grande, me gustaria mas pequena, lo mas pegado al texto posible")
+      html += '<textarea id="prText" rows="3" style="width:100%;box-sizing:border-box;resize:vertical;' +
+        'font-family:inherit;font-size:12px;padding:5px;border:1px solid #c9c9c3;border-radius:5px" ' +
+        'title="Enter hace un renglón nuevo — el texto puede ir en varias líneas">' + esc(e.text) + '</textarea>';
+      var alAct = e.align || 'left';
+      html += '<div class="txtBar">' +
+        '<select id="prTextFont" title="Fuente">' +
+          Object.keys(TEXT_FONTS).map(function (fk) {
+            return '<option value="' + fk + '"' + ((e.font || 'arch') === fk ? ' selected' : '') + '>' + esc(TEXT_FONTS[fk].corto) + '</option>';
+          }).join('') + '</select>' +
+        '<button id="prTxtMenos" title="Más chica">A−</button>' +
+        '<input id="prTextSize" class="n" type="number" min="3" step="0.5" value="' + (e.size || 9) + '" title="Tamaño">' +
+        '<button id="prTxtMas" title="Más grande">A+</button>' +
+        '<span class="sep"></span>' +
+        '<button id="prTxtBold" class="' + (e.bold ? 'on' : '') + '" style="font-weight:800" title="Negrita">B</button>' +
+        '<button id="prTxtItal" class="' + (e.italic ? 'on' : '') + '" style="font-style:italic" title="Cursiva">I</button>' +
+        '<span class="sep"></span>' +
+        '<button class="alBtn ' + (alAct === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">⯇</button>' +
+        '<button class="alBtn ' + (alAct === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
+        '<button class="alBtn ' + (alAct === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
+        '<span class="sep"></span>' +
         COLOR_PRESETS.map(function (c8) {
           return '<span class="sw' + ((e.color || '#14161a') === c8[0] ? ' cur' : '') + '" data-c="' + c8[0] + '" title="' + c8[1] + '" style="background:' + c8[0] + '"></span>';
-        }).join('') + '</div></div>';
+        }).join('') +
+        '</div>';
       html += '<div class="row"><label>Estilo</label><select id="prTextStyle">' +
         '<option value="plain"' + (!e.style || e.style === 'plain' ? ' selected' : '') + '>Plain text</option>' +
         '<option value="circle"' + (e.style === 'circle' ? ' selected' : '') + '>Bubble ① (conductor #)</option>' +
@@ -4843,10 +4859,16 @@
     var bIt = $('#prTxtItal'); if (bIt) bIt.addEventListener('click', function () {
       var et = findSel(); if (!et) return; pushUndo(); et.italic = et.italic ? 0 : 1; refresh(); showProps();
     });
-    $$('#prTxtColorRow .sw').forEach(function (sw2) {
+    $$('.txtBar .sw').forEach(function (sw2) {
       sw2.addEventListener('click', function () {
         var et = findSel(); if (!et) return;
         pushUndo(); et.color = sw2.dataset.c; refresh(); showProps();
+      });
+    });
+    $$('.txtBar .alBtn').forEach(function (ab) {
+      ab.addEventListener('click', function () {
+        var et = findSel(); if (!et) return;
+        pushUndo(); et.align = ab.dataset.al; refresh(); showProps();
       });
     });
     on('prTextSize', 'change', function (n) { pushUndo(); e.size = parseFloat(n.value) || 9; refresh(); });
