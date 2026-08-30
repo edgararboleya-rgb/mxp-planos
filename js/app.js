@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.I';
+  var APP_VERSION = 'v27.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -648,6 +648,93 @@
       });
     });
     return mapa;
+  }
+
+  /* GUÍAS DE ALINEACIÓN AL DIBUJAR (Edgar, 08/30, dos peticiones que son la
+     misma familia):
+       1) "que el cursor me marque donde la línea queda perpendicular a 90°
+          sobre la otra, para evitar líneas en diagonal" → guía ÁMBAR.
+       2) "estoy haciendo la línea de los gabinetes, en el medio está el
+          refrigerador, y quiero que al otro lado me señale dónde debe
+          empezar para que se vea uniforme" → guía VERDE: el cursor se alinea
+          con las puntas de lo que ya está dibujado y con su prolongación.
+     Las guías se dibujan mientras arrastras y el punto se imanta a ellas.
+     Con SHIFT solo quedan las de 90° (perpendicular / recto), que es lo que
+     Edgar pidió para no salirse en diagonal. */
+  var guiasVivas = '';                     // el dibujo de las guías del momento
+  var puntoGuiado = null;                  // dónde caería el PRIMER clic, ya guiado
+  function puntasDeTodo() {
+    var ps = [];
+    state.walls.forEach(function (w) {
+      ps.push([w.x1, w.y1, w]); ps.push([w.x2, w.y2, w]);
+    });
+    state.areas.forEach(function (a) {
+      if (!a.pts) return;
+      ps.push([a.pts[0][0], a.pts[0][1], a]);
+      ps.push([a.pts[a.pts.length - 1][0], a.pts[a.pts.length - 1][1], a]);
+    });
+    state.symbols.forEach(function (sy) {
+      var d = SYMBOLS[sy.key]; if (!d) return;
+      var kk = symK(d), ex = d.w / 2 * (sy.scale || 1) * (sy.sx || 1) * kk;
+      var ey = d.h / 2 * (sy.scale || 1) * (sy.sy || 1) * kk;
+      // las cuatro caras del objeto: el borde del refrigerador es justo esto
+      ps.push([sy.x - ex, sy.y - ey, sy]); ps.push([sy.x + ex, sy.y - ey, sy]);
+      ps.push([sy.x - ex, sy.y + ey, sy]); ps.push([sy.x + ex, sy.y + ey, sy]);
+    });
+    return ps;
+  }
+  // ajusta el punto p a las guías; 'desde' es el punto de partida del trazo
+  function guiaAjusta(p, desde, ev) {
+    guiasVivas = '';
+    if (ev && ev.altKey) return p;                 // Alt = a mano alzada, sin guías
+    var soloRecto = !!(ev && ev.shiftKey);
+    var TOL = 8 / (view.z || 1);                   // píxeles de pantalla
+    var x = p[0], y = p[1], gs = [];
+
+    // (1) PERPENDICULAR / RECTO respecto al punto de partida — guía ámbar.
+    // Con SHIFT se fuerza SIEMPRE (es lo que pediste al apretarlo, no una
+    // sugerencia); sin Shift solo cuando el pulso ya viene casi recto.
+    if (desde) {
+      var dx = x - desde[0], dy = y - desde[1];
+      if (soloRecto) {
+        if (Math.abs(dx) >= Math.abs(dy)) y = desde[1]; else x = desde[0];
+        gs.push({ x1: desde[0], y1: desde[1], x2: x, y2: y, c: '#e6a100' });
+      } else if (Math.abs(dy) < TOL && Math.abs(dx) > TOL) {
+        y = desde[1];
+        gs.push({ x1: desde[0], y1: desde[1], x2: x, y2: y, c: '#e6a100' });
+      } else if (Math.abs(dx) < TOL && Math.abs(dy) > TOL) {
+        x = desde[0];
+        gs.push({ x1: desde[0], y1: desde[1], x2: x, y2: y, c: '#e6a100' });
+      }
+    }
+    // (2) ALINEACIÓN con las puntas y caras de lo ya dibujado — guía verde
+    if (!soloRecto) {
+      var pts = puntasDeTodo(), mejorX = null, mejorY = null;
+      pts.forEach(function (q) {
+        if (desde && Math.hypot(q[0] - desde[0], q[1] - desde[1]) < 0.6) return;
+        var ddx = Math.abs(q[0] - x), ddy = Math.abs(q[1] - y);
+        if (ddx < TOL && (!mejorX || ddx < mejorX.d)) mejorX = { d: ddx, q: q };
+        if (ddy < TOL && (!mejorY || ddy < mejorY.d)) mejorY = { d: ddy, q: q };
+      });
+      if (mejorX) {
+        x = mejorX.q[0];
+        gs.push({ x1: x, y1: mejorX.q[1], x2: x, y2: y, c: '#0a8f3c' });
+      }
+      if (mejorY) {
+        y = mejorY.q[1];
+        gs.push({ x1: mejorY.q[0], y1: y, x2: x, y2: y, c: '#0a8f3c' });
+      }
+    }
+    if (gs.length) {
+      guiasVivas = gs.map(function (g) {
+        return '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + g.x2 + '" y2="' + g.y2 +
+          '" stroke="' + g.c + '" stroke-width="' + (0.8 / (view.z || 1)) + '" stroke-dasharray="' +
+          (6 / (view.z || 1)) + ' ' + (4 / (view.z || 1)) + '"/>';
+      }).join('') +
+      '<circle cx="' + x + '" cy="' + y + '" r="' + (4 / (view.z || 1)) + '" fill="none" stroke="' +
+        (soloRecto ? '#e6a100' : '#0a8f3c') + '" stroke-width="' + (1.2 / (view.z || 1)) + '"/>';
+    }
+    return [x, y];
   }
 
   function snapWallPt(p) {
@@ -2455,10 +2542,23 @@
       var spts = shapePts(drawing.kind === 'cloud' ? 'rect' : drawing.kind, drawing.a, [Math.round(p[0]), Math.round(p[1])], ev && ev.shiftKey);
       var d2 = 'M' + spts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z';
       G.prev.innerHTML = '<g class="preview"><path d="' + d2 + '" fill="none" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
+    } else if ((tool === 'area' || tool === 'pline') && !drawing) {
+      // AÚN NO HAY LÍNEA: las guías ya trabajan, para que veas DÓNDE empezar.
+      // Es lo del refrigerador: el gabinete sigue al otro lado y la guía verde
+      // te dice exactamente a qué altura arrancar para que quede parejo.
+      var np0 = guiaAjusta(snapWallPt(p), null, ev);
+      puntoGuiado = np0;
+      G.prev.innerHTML = guiasVivas ? '<g class="preview">' + guiasVivas + '</g>' : '';
     } else if ((tool === 'area' || tool === 'pline') && drawing && drawing.mode === 'areachain') {
-      var np = snapWallPt(p);
+      var ult = drawing.pts[drawing.pts.length - 1];
+      var np = guiaAjusta(snapWallPt(p), ult, ev);
+      drawing.cursor = np;                                  // el clic usa el punto YA guiado
       var d = 'M' + drawing.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' L' + np[0] + ',' + np[1];
-      G.prev.innerHTML = '<g class="preview"><path d="' + d + '" fill="none" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
+      var largoPrev = Math.hypot(np[0] - ult[0], np[1] - ult[1]);
+      G.prev.innerHTML = '<g class="preview">' + guiasVivas +
+        '<path d="' + d + '" fill="none" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/>' +
+        '<text class="lbl" x="' + ((ult[0] + np[0]) / 2 + 8) + '" y="' + ((ult[1] + np[1]) / 2 - 8) +
+        '" font-size="9" font-weight="bold">' + fmtFtIn(largoPrev) + '</text></g>';
     } else if ((tool === 'door' || tool === 'window') ) {
       var near = nearestWall(p);
       if (near) {
@@ -2893,8 +2993,16 @@
 
   /* --- superficies / techos --- */
   function areaDown(p) {
-    var np = snapWallPt(p);
-    if (!drawing) { drawing = { mode: 'areachain', pts: [np] }; return; }
+    // el punto que se guarda es el YA GUIADO (el que se ve en la vista previa),
+    // no el crudo del cursor: si no, el clic caía un pelo fuera de la guía
+    var np = (drawing && drawing.cursor) ? drawing.cursor : snapWallPt(p);
+    if (!drawing) {
+      // el primer punto también respeta la guía que se estaba viendo
+      var p0 = puntoGuiado || snapWallPt(p);
+      puntoGuiado = null;
+      drawing = { mode: 'areachain', pts: [p0] };
+      return;
+    }
     drawing.pts.push(np);
   }
   /* --- rectángulo y elipse (se guardan como superficies: patrón, área y movibles) --- */
@@ -9511,6 +9619,7 @@
   window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
   window.__mxpAngle = refsAngle;
   window.__mxpRect = rectificarYcerrar;   // gancho de pruebas
+  window.__guiaDbg = function (p, desde, ev) { var r = guiaAjusta(p, desde, ev || {}); return { p: r, guias: guiasVivas.length }; };
   window.__hitDbg = hitTest;            // gancho de pruebas: que agarra un clic
   window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   window.__planoJsonDbg = planoDesdeJSON;   // gancho de pruebas del importador IA
