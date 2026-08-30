@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.U';
+  var APP_VERSION = 'v27.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5132,6 +5132,30 @@
   $('#btnBgScale').addEventListener('click', function () {
     if (!state.bg) { uiAlert('Primero importa un plano con el botón "Subir Fondo".'); return; }
     showToolMenu('bgscale', this);
+  });
+  // QUITAR EL FONDO (Edgar, 08/30: "como podemos eliminar las lineas de plano
+  // de abajo y dejar solo lo que dibujamos"). Apagar la capa lo esconde y ya
+  // no sale ni en el PNG ni en el PDF, pero la imagen SIGUE dentro del
+  // archivo: pesa, y cualquiera que lo abra puede volver a encenderla. Este
+  // boton la borra de verdad. El deshacer NO guarda la imagen (solo su
+  // posicion), asi que esto no tiene vuelta atras y el aviso lo dice.
+  $('#btnBgDel').addEventListener('click', function () {
+    if (!state.bg && !state.bg2) { uiAlert('No hay ningún plano de fondo cargado.'); return; }
+    var mb = 0;
+    try { if (state.bg && state.bg.url) mb += state.bg.url.length * 0.75 / 1048576; } catch (e) {}
+    try { if (state.bg2 && state.bg2.url) mb += state.bg2.url.length * 0.75 / 1048576; } catch (e) {}
+    uiConfirm('Quitar el plano de fondo y dejar solo lo que dibujaste' +
+      (mb > 0.05 ? ' (el archivo baja unos ' + mb.toFixed(1) + ' MB)' : '') +
+      '. Esto NO se puede deshacer: si lo vas a necesitar, guarda una copia del proyecto primero.',
+      function (ok) {
+        if (!ok) return;              // uiConfirm llama SIEMPRE: sin esto, Cancelar tambien borraba
+        state.bg = null; state.bg2 = null;
+        var cb = document.querySelector('#layersBody input[data-layer="background"]');
+        if (cb) { cb.checked = true; layerVisible.background = true; G.bg.style.display = ''; }
+        updateBgLinesBtn();
+        refresh();
+        setHint('Plano de fondo quitado — en el plano queda solo lo que dibujaste');
+      });
   });
   $('#btnBgLines').addEventListener('click', function () {
     if (!state.bg) { uiAlert('Primero importa un plano o screenshot con el botón "Fondo".'); return; }
