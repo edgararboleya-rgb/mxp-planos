@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.F';
+  var APP_VERSION = 'v27.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2016,41 +2016,64 @@
   var layerVisible = { background: true, architecture: true, areas: true, furniture: true, electrical: true, annotation: true, grid: true };
 
   function hitTest(p) {
-    var i, e, def;
+    /* QUÉ AGARRA EL CLIC (Edgar, 08/30: "paso mucho trabajo para seleccionar
+       un objeto cuando hay varios; que solo tome ese, y si aumento que sea
+       más preciso").
+
+       Dos cosas estaban mal:
+       1) Los márgenes de captura tenían un trozo FIJO en pulgadas del plano
+          (los símbolos agarraban 2" alrededor, las aberturas ¡6"!), así que
+          por mucho que te acercaras seguían tragándose al vecino. Ahora TODO
+          el margen va en PÍXELES DE PANTALLA: de lejos es generoso y ayuda a
+          atinar, y al acercarte se encoge solo — el zoom manda.
+       2) Ganaba el PRIMERO de la lista, no el que estaba debajo del dedo.
+          Ahora se juntan todos los candidatos y gana el MÁS CERCANO; la capa
+          solo desempata cuando dos están a la misma distancia (ahí manda lo
+          eléctrico, que es lo que se dibuja encima). */
+    var i, e, def, cand = [];
     // en pantalla táctil el dedo no es un cursor: tolerancia doble para atinar
     var TF = document.body.classList.contains('touch') ? 2.4 : 1;
-    // símbolos (de arriba hacia abajo: eléctrico primero)
-    var ordered = state.symbols.slice().sort(function (a, b) {
-      var la = SYMBOLS[a.key].layer === 'electrical' ? 1 : 0;
-      var lb = SYMBOLS[b.key].layer === 'electrical' ? 1 : 0;
-      return lb - la;
-    });
-    for (i = 0; i < ordered.length; i++) {
-      e = ordered[i]; def = SYMBOLS[e.key];
-      if (!layerVisible[def.layer]) continue;
+    var Z = view.z || 1;
+    function PX(px) { return (px * TF) / Z; }        // píxeles de pantalla → pulgadas
+    function pon(kind, id, d, prio) { cand.push({ kind: kind, id: id, d: d, prio: prio }); }
+
+    // símbolos
+    for (i = 0; i < state.symbols.length; i++) {
+      e = state.symbols[i]; def = SYMBOLS[e.key];
+      if (!def || !layerVisible[def.layer]) continue;
       var rot = -(e.rot || 0) * Math.PI / 180, kk = symK(def);
       var scx = (e.scale || 1) * (e.sx || 1) * kk;
       var scy = (e.scale || 1) * (e.sy || 1) * kk;
-      var dx = p[0] - e.x, dy = p[1] - e.y;
-      var lx = (dx * Math.cos(rot) - dy * Math.sin(rot)) / scx;
-      var ly = (dx * Math.sin(rot) + dy * Math.cos(rot)) / scy;
-      var pad = 4 / view.z + 2;
-      if (Math.abs(lx) <= def.w / 2 + pad && Math.abs(ly) <= def.h / 2 + pad) return { kind: 'symbol', id: e.id };
+      var dxs = p[0] - e.x, dys = p[1] - e.y;
+      var lx = (dxs * Math.cos(rot) - dys * Math.sin(rot)) / scx;
+      var ly = (dxs * Math.sin(rot) + dys * Math.cos(rot)) / scy;
+      // distancia REAL al borde de su caja (0 si el punto cae dentro)
+      var fx = Math.max(0, Math.abs(lx) - def.w / 2) * scx;
+      var fy = Math.max(0, Math.abs(ly) - def.h / 2) * scy;
+      var ds = Math.hypot(fx, fy);
+      if (ds <= PX(4)) pon('symbol', e.id, ds, def.layer === 'electrical' ? 9 : 8);
     }
-    // aberturas
     if (layerVisible.architecture) {
+      // aberturas (van encima de su pared)
       for (i = 0; i < state.openings.length; i++) {
         e = state.openings[i];
-        var w = state.walls.find(function (x) { return x.id === e.wallId; });
+        var w = null;
+        for (var iw = 0; iw < state.walls.length; iw++) if (state.walls[iw].id === e.wallId) { w = state.walls[iw]; break; }
         if (!w) continue;
         var g = wallGeom(w), r = distToSeg(p[0], p[1], w.x1, w.y1, w.x2, w.y2);
         var d = r.t * g.len;
-        if (Math.abs(d - e.pos) <= e.w / 2 && r.d <= w.t / 2 + 6) return { kind: 'opening', id: e.id };
+        var fuera = Math.abs(d - e.pos) - e.w / 2;              // a lo largo del vano
+        var lejos = r.d - w.t / 2;                              // perpendicular a la cara
+        if (fuera <= PX(2) && lejos <= PX(6)) {
+          pon('opening', e.id, Math.max(0, Math.max(fuera, lejos)), 7);
+        }
       }
-      for (i = state.walls.length - 1; i >= 0; i--) {
+      // paredes
+      for (i = 0; i < state.walls.length; i++) {
         e = state.walls[i];
         var rr = distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y2);
-        if (rr.d <= e.t / 2 + 3 / view.z) return { kind: 'wall', id: e.id };
+        var dw = rr.d - e.t / 2;
+        if (dw <= PX(3)) pon('wall', e.id, Math.max(0, dw), 3);
       }
     }
     if (layerVisible.annotation) {
@@ -2058,54 +2081,68 @@
         e = state.texts[i];
         var sz = e.size || 9;
         if (e.style === 'circle' || e.style === 'hex') {
-          var br = Math.max(sz * 0.95, e.text.length * sz * 0.34 + 2.5) * 1.2 + 2;
-          if (Math.hypot(p[0] - e.x, p[1] - e.y) <= br) return { kind: 'text', id: e.id };
+          var br = Math.max(sz * 0.95, e.text.length * sz * 0.34 + 2.5) * 1.2;
+          var dt = Math.hypot(p[0] - e.x, p[1] - e.y) - br;
+          if (dt <= PX(3)) pon('text', e.id, Math.max(0, dt), 6);
         } else {
           var tw = e.text.length * sz * 0.58;
-          if (p[0] >= e.x - 3 && p[0] <= e.x + tw + 3 && p[1] >= e.y - sz - 2 && p[1] <= e.y + 4) return { kind: 'text', id: e.id };
+          var qx1 = Math.max(0, Math.max(e.x - p[0], p[0] - (e.x + tw)));
+          var qy1 = Math.max(0, Math.max((e.y - sz) - p[1], p[1] - e.y));
+          var dt2 = Math.hypot(qx1, qy1);
+          if (dt2 <= PX(3)) pon('text', e.id, dt2, 6);
         }
       }
       for (i = 0; i < state.dims.length; i++) {
         e = state.dims[i];
-        var g2 = { }, dx2 = e.x2 - e.x1, dy2 = e.y2 - e.y1, ln = Math.hypot(dx2, dy2) || 1;
+        var dx2 = e.x2 - e.x1, dy2 = e.y2 - e.y1, ln = Math.hypot(dx2, dy2) || 1;
         var nx = -dy2 / ln, ny = dx2 / ln, off = e.off == null ? 14 : e.off;
         var rd = distToSeg(p[0], p[1], e.x1 + nx * off, e.y1 + ny * off, e.x2 + nx * off, e.y2 + ny * off);
         var rd2 = distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y2);   // también los puntos medidos
-        if (Math.min(rd.d, rd2.d) < (5 * TF) / view.z + 3 * TF) return { kind: 'dim', id: e.id };
+        var dd2 = Math.min(rd.d, rd2.d);
+        if (dd2 <= PX(5)) pon('dim', e.id, dd2, 5);
+      }
+      for (i = 0; i < state.leaders.length; i++) {
+        e = state.leaders[i];
+        var lsz = e.size || 7, ltw = e.text.length * lsz * 0.58;
+        var lx0 = e.x >= e.tx ? e.x : e.x - ltw;
+        var gx1 = Math.max(0, Math.max(lx0 - p[0], p[0] - (lx0 + ltw)));
+        var gy1 = Math.max(0, Math.max((e.y - lsz) - p[1], p[1] - e.y));
+        var dl = Math.hypot(gx1, gy1);
+        var dl2 = distToSeg(p[0], p[1], e.x, e.y, e.tx, e.ty).d;
+        var dlm = Math.min(dl, dl2);
+        if (dlm <= PX(3)) pon('leader', e.id, dlm, 5);
       }
     }
-    // cables (muestrea la curva) y notas con flecha
     if (layerVisible.electrical) {
-      for (i = state.wires.length - 1; i >= 0; i--) {
+      for (i = 0; i < state.wires.length; i++) {
         e = state.wires[i];
         var wp = wirePath(e), best = 1e9;
         for (var k = 0; k <= 20; k++) {
           var tt = k / 20, mt = 1 - tt;
           var qx = mt * mt * e.x1 + 2 * mt * tt * wp.cx + tt * tt * e.x2;
           var qy = mt * mt * e.y1 + 2 * mt * tt * wp.cy + tt * tt * e.y2;
-          var dd = Math.hypot(p[0] - qx, p[1] - qy);
-          if (dd < best) best = dd;
+          var ddw = Math.hypot(p[0] - qx, p[1] - qy);
+          if (ddw < best) best = ddw;
         }
-        if (best < (4 * TF) / view.z + 2.5 * TF) return { kind: 'wire', id: e.id };
+        if (best <= PX(4)) pon('wire', e.id, best, 5);
       }
     }
-    if (layerVisible.annotation) {
-      for (i = 0; i < state.leaders.length; i++) {
-        e = state.leaders[i];
-        var lsz = e.size || 7, ltw = e.text.length * lsz * 0.58;
-        var lx0 = e.x >= e.tx ? e.x : e.x - ltw;
-        if (p[0] >= lx0 - 3 && p[0] <= lx0 + ltw + 3 && p[1] >= e.y - lsz - 2 && p[1] <= e.y + 4) return { kind: 'leader', id: e.id };
-        if (distToSeg(p[0], p[1], e.x, e.y, e.tx, e.ty).d < 3 / view.z + 2) return { kind: 'leader', id: e.id };
-      }
-    }
-    // superficies: prioridad más baja (suelen ser grandes y estar debajo de todo)
+    // superficies: prioridad más baja (suelen ser grandes y estar debajo)
     if (layerVisible.areas) {
-      for (i = state.areas.length - 1; i >= 0; i--) {
+      for (i = 0; i < state.areas.length; i++) {
         e = state.areas[i];
-        if (pointInPoly(p, e.pts)) return { kind: 'area', id: e.id };
+        if (pointInPoly(p, e.pts)) pon('area', e.id, 0, 1);
       }
     }
-    return null;
+    if (!cand.length) return null;
+    // gana el más cercano; a igual distancia, el de más arriba en el dibujo.
+    // El "casi igual" es medio píxel de pantalla, no una medida del plano.
+    var eps = PX(0.5);
+    cand.sort(function (a, b) {
+      if (Math.abs(a.d - b.d) > eps) return a.d - b.d;
+      return b.prio - a.prio;
+    });
+    return { kind: cand[0].kind, id: cand[0].id };
   }
 
   function nearestWall(p, maxDist) {
@@ -9412,6 +9449,7 @@
   window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
   window.__mxpAngle = refsAngle;
   window.__mxpRect = rectificarYcerrar;   // gancho de pruebas
+  window.__hitDbg = hitTest;            // gancho de pruebas: que agarra un clic
   window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   window.__planoJsonDbg = planoDesdeJSON;   // gancho de pruebas del importador IA
   // logo oficial de Max Power en la barra (viene de js/logo.js)
