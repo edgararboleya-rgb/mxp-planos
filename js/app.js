@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.F';
+  var APP_VERSION = 'v26.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -8583,7 +8583,7 @@
       });
     } else if (kind === 'door') {
       html += '<div class="tmHead">Puerta sencilla (swing)</div>';
-      [[24, "2'0\""], [28, "2'4\""], [30, "2'6\""], [32, "2'8\""], [36, "3'0\""]].forEach(function (t2) {
+      [[18, "1'6\" pantry"], [24, "2'0\""], [28, "2'4\""], [30, "2'6\""], [32, "2'8\""], [36, "3'0\""]].forEach(function (t2) {
         var sel2 = curDoorType === 'door' && curDoorW === t2[0];
         html += '<div class="tmItem' + (sel2 ? ' cur' : '') + '" data-k="door" data-w="' + t2[0] + '"><span>Door ' + t2[1] + ' (' + t2[0] + '\")</span></div>';
       });
