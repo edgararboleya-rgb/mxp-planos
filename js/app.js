@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.B';
+  var APP_VERSION = 'v26.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -427,7 +427,10 @@
       var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
       if (Math.abs(ux * hy - uy * hx) > 0.07) continue;          // no son paralelas (±4°)
       var r = distToSeg(mx, my, h.x1, h.y1, h.x2, h.y2);
-      if (r.d > h.t / 2 + w.t / 2 + 1) continue;                  // las bandas ni se tocan
+      // solo si esta ENCIMADA de verdad (el eje del drywall dentro de la
+      // banda del bloque + un pelo). El forro dibujado A RAS del bloque es
+      // legitimo (asi ensena Edgar el furring) y se queda como pared propia.
+      if (r.d > h.t / 2 + w.t / 2 - 1) continue;
       var t1 = (w.x1 - h.x1) * hx + (w.y1 - h.y1) * hy;
       var t2 = (w.x2 - h.x1) * hx + (w.y2 - h.y1) * hy;
       var lo = Math.max(0, Math.min(t1, t2)), hi = Math.min(hL, Math.max(t1, t2));
@@ -454,7 +457,12 @@
         var q = state.walls[i];
         if (Math.hypot(P[0] - q.x1, P[1] - q.y1) < 0.6 || Math.hypot(P[0] - q.x2, P[1] - q.y2) < 0.6) return;
       }
-      var mejor = null;
+      // dos candidatos: el cruce con una pared de MI familia manda sobre el
+      // cruce con otra (el drywall que forra un bloque cierra su esquina con
+      // el OTRO drywall, no contra el bloque de al lado — foto de Edgar 08/29)
+      var famW = String(w.type).indexOf('block') === 0 ? 'block'
+               : (w.type === 'screen' ? 'screen' : 'drywall');
+      var mejorMismo = null, mejorOtro = null;
       state.walls.forEach(function (h) {
         var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
         if (hL < 2) return;
@@ -465,16 +473,35 @@
         var dx = h.x1 - O[0], dy = h.y1 - O[1];
         var sA = (dx * hy - dy * hx) / cr;
         var tH = (dx * uy - dy * ux) / cr;
-        if (tH < -1 || tH > hL + 1) return;                  // el cruce cae fuera de la vecina
+        // el cruce vale dentro de la vecina Y hasta 8" mas alla de sus puntas
+        // (asi se cierran las esquinas donde las dos paredes se quedan cortas)
+        if (tH < -8 || tH > hL + 8) return;
         var delta = L - sA;                                   // >0 = pasada, <0 = corta
         if (delta > TRIM || delta < -EXT || sA < 6) return;   // sA<6: cruzaria en la otra punta
-        if (!mejor || Math.abs(delta) < Math.abs(mejor.delta)) {
-          mejor = { delta: delta, x: O[0] + ux * sA, y: O[1] + uy * sA };
+        var famH = String(h.type).indexOf('block') === 0 ? 'block'
+                 : (h.type === 'screen' ? 'screen' : 'drywall');
+        var cand = { delta: delta, x: O[0] + ux * sA, y: O[1] + uy * sA,
+                     h: h, tH: tH, hL: hL, mismo: famH === famW };
+        if (famH === famW) {
+          if (!mejorMismo || Math.abs(delta) < Math.abs(mejorMismo.delta)) mejorMismo = cand;
+        } else {
+          if (!mejorOtro || Math.abs(delta) < Math.abs(mejorOtro.delta)) mejorOtro = cand;
         }
       });
+      var mejor = mejorMismo || mejorOtro;
       if (!mejor) return;
       var nx = Math.round(mejor.x * 64) / 64, ny = Math.round(mejor.y * 64) / 64;
       if (fin === 's') { w.x1 = nx; w.y1 = ny; } else { w.x2 = nx; w.y2 = ny; }
+      // cerrar la esquina COMPLETA: si el cruce cae un palmo mas alla de la
+      // punta de la vecina (misma familia), su punta tambien viene al cruce.
+      // Eso es cerrar una esquina — jamas se corta una pared por el medio.
+      if (mejor.mismo) {
+        if (mejor.tH > mejor.hL - 0.01 && mejor.tH <= mejor.hL + 8) {
+          mejor.h.x2 = nx; mejor.h.y2 = ny;
+        } else if (mejor.tH < 0.01 && mejor.tH >= -8) {
+          mejor.h.x1 = nx; mejor.h.y1 = ny;
+        }
+      }
     });
   }
 
