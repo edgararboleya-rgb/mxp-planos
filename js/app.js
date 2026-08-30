@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.G';
+  var APP_VERSION = 'v27.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2127,11 +2127,30 @@
         if (best <= PX(4)) pon('wire', e.id, best, 5);
       }
     }
-    // superficies: prioridad más baja (suelen ser grandes y estar debajo)
+    // LÍNEAS Y SUPERFICIES. Una polilínea ABIERTA no tiene interior, así que
+    // preguntarle "¿el punto cae dentro?" nunca la agarraba — por eso las
+    // líneas se resistían al clic aunque las paredes y los símbolos no
+    // (Edgar, 08/30). Ahora se mide la distancia AL TRAZO, como con un cable
+    // o una cota. Una superficie cerrada se puede agarrar de las dos formas:
+    // por su línea (preciso, compite de tú a tú) o por su relleno (prioridad
+    // baja, que suelen ser grandes y estar debajo de todo).
     if (layerVisible.areas) {
       for (i = 0; i < state.areas.length; i++) {
         e = state.areas[i];
-        if (pointInPoly(p, e.pts)) pon('area', e.id, 0, 1);
+        if (!e.pts || e.pts.length < 2) continue;
+        var dBor = 1e9, q2;
+        for (q2 = 0; q2 + 1 < e.pts.length; q2++) {
+          var dq = distToSeg(p[0], p[1], e.pts[q2][0], e.pts[q2][1], e.pts[q2 + 1][0], e.pts[q2 + 1][1]).d;
+          if (dq < dBor) dBor = dq;
+        }
+        if (!e.open && e.pts.length > 2) {          // el tramo que cierra el polígono
+          var np2 = e.pts.length - 1;
+          var dqc = distToSeg(p[0], p[1], e.pts[np2][0], e.pts[np2][1], e.pts[0][0], e.pts[0][1]).d;
+          if (dqc < dBor) dBor = dqc;
+        }
+        var lwA = (e.lw || ((LINE_STYLES[e.lineStyle] || {}).lw) || 0.9) / 2;
+        if (dBor - lwA <= PX(4)) pon('area', e.id, Math.max(0, dBor - lwA), 5);
+        else if (!e.open && pointInPoly(p, e.pts)) pon('area', e.id, 0, 1);
       }
     }
     if (!cand.length) return null;
