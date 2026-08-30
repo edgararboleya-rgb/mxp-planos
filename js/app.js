@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.M';
+  var APP_VERSION = 'v26.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2381,8 +2381,16 @@
     // puertas salían iguales sin que nada lo dijera (Edgar, 08/30).
     var selW = 0;
     try { selW = parseInt(($('#doorSize') || {}).value, 10) || 0; } catch (e0) {}
-    var esSwing = type === 'door';
-    var g = wallGeom(near.wall), w = (esSwing && selW) ? selW : OPEN_DEFAULT[type], ajust = false;
+    // el ancho elegido vale para la puerta sencilla Y para el garage (16'/9'/
+    // 6' golf cart): antes solo miraba 'door', asi que los garages chicos
+    // colocaban siempre el porton de 16 pies (auditoria 08/30)
+    var g = wallGeom(near.wall), ajust = false;
+    // de donde sale el ancho, por orden: el selector visible manda en la
+    // puerta sencilla; el menu de la flechita manda en los demas tipos (ahi
+    // viven los garages de 16', 9' y 6' golf cart); si no, el de fabrica
+    var w = OPEN_DEFAULT[type];
+    if (type === 'door' && selW) w = selW;
+    else if (type === curDoorType && curDoorW) w = curDoorW;
     // pared corta (las de ángulo del escaneo lo son casi siempre): en vez de
     // negarse, la abertura se achica a lo que cabe — luego se afina el Ancho
     if (g.len < w + 4) {
@@ -8730,9 +8738,9 @@
           if (ds) {
             // el menú y el selector visible son lo MISMO: lo que elijas aquí
             // se ve arriba, y lo que dice arriba es lo que se coloca
-            if (k === 'door') ds.value = String(curDoorW || 0);
-            else ds.value = '0';
-            ds.disabled = (k !== 'door');
+            // nunca se deshabilita: si quedaba bloqueado tras elegir un garage,
+            // no habia forma de volver a la puerta sencilla desde la barra
+            ds.value = (k === 'door') ? String(curDoorW || 0) : '0';
           }
           setTool('door');
           setHint(OPEN_NAMES[k] + (curDoorW ? ' de ' + fmtFtIn(curDoorW) : '') + ' — haz clic sobre una pared para colocarla');
