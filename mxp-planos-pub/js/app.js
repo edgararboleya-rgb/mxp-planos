@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.B';
+  var APP_VERSION = 'v28.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9563,6 +9563,44 @@
   $('#btnRedo').addEventListener('click', redo);
 
   /* ---------------- exportar PNG ---------------- */
+  /* IDS PROPIOS PARA EL CLON QUE SE IMPRIME (Edgar, 08/30: "cuando guardo el
+   * PDF, las paredes de bloque, la chimenea y el counter no me ponen el fondo
+   * de las áreas"). El clon traía los MISMOS ids que el plano vivo — el
+   * rayado del bloque, el granito, el agua de la piscina. Con dos ids iguales
+   * en la página, `url(#pat_x)` apunta siempre al PRIMERO, que es el del
+   * plano de pantalla; y al imprimir la app entera va en display:none, así
+   * que ese relleno ya no existe y las áreas salían HUECAS. Aquí el clon se
+   * queda con ids únicos y con sus referencias apuntando a los suyos, así
+   * que se basta solo: sirve igual para el PDF, la impresión y el PNG. */
+  var nClon = 0;
+  function unificaIds(clone) {
+    var pfx = 'x' + (++nClon) + '_';
+    var mapa = {}, i;
+    var conId = clone.querySelectorAll('[id]');
+    for (i = 0; i < conId.length; i++) { mapa[conId[i].id] = pfx + conId[i].id; conId[i].id = mapa[conId[i].id]; }
+    if (clone.id) { mapa[clone.id] = pfx + clone.id; clone.id = mapa[clone.id]; }   // el <svg> mismo también
+    var re = /url\(\s*#([^)\s"']+)\s*\)/g;
+    function reescribe(v) {
+      return v.replace(re, function (todo, k) { return mapa[k] ? 'url(#' + mapa[k] + ')' : todo; });
+    }
+    var todos = clone.querySelectorAll('*');
+    var ATT = ['fill', 'stroke', 'filter', 'mask', 'clip-path', 'style'];
+    for (i = 0; i < todos.length; i++) {
+      var n = todos[i];
+      for (var a = 0; a < ATT.length; a++) {
+        var v = n.getAttribute(ATT[a]);
+        if (v && v.indexOf('url(#') >= 0) n.setAttribute(ATT[a], reescribe(v));
+      }
+    }
+    // la hoja de estilos viaja DENTRO del svg y también nombra rellenos
+    // (.wall-fill-block usa url(#hatchBlock)): si no se reescribe, el clon
+    // queda apuntando a un id que ya no existe dentro de él y el PNG —que se
+    // arma como documento aparte, sin el CSS de la página— sale sin rayado
+    var sts = clone.querySelectorAll('style');
+    for (i = 0; i < sts.length; i++) {
+      if (sts[i].textContent.indexOf('url(#') >= 0) sts[i].textContent = reescribe(sts[i].textContent);
+    }
+  }
   function cleanSvgClone(b) {
     var clone = svg.cloneNode(true);
     clone.removeAttribute('style');
@@ -9582,6 +9620,7 @@
     bgRect.setAttribute('width', b.w); bgRect.setAttribute('height', b.h);
     bgRect.setAttribute('fill', '#ffffff');
     clone.insertBefore(bgRect, world);
+    unificaIds(clone);
     return clone;
   }
 
