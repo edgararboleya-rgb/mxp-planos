@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.H';
+  var APP_VERSION = 'v27.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1199,6 +1199,17 @@
            cunaMiter(cl(J.mu), Qm, uO, J.mu && J.mu.u, d);
   }
 
+  // OPACIDAD POR OBJETO (Edgar, 08/30: "que podamos editar el objeto y
+  // hacerlo mas transparente o menos, como el control del fondo pero por
+  // cosa"). Sirve para dejar atenuado lo que es de referencia — el mobiliario
+  // del cliente, un circuito viejo, una fase futura — sin borrarlo.
+  // e.op va de 0 a 100; sin campo = 100 (opaco de toda la vida).
+  function opAttr(e) {
+    var o = (e && e.op != null) ? Number(e.op) : 100;
+    if (!isFinite(o) || o >= 100) return '';
+    return ' opacity="' + Math.max(0.03, o / 100) + '"';
+  }
+
   function renderWalls() {
     var jc = computeJoins();
     var out = '';
@@ -1231,6 +1242,7 @@
     });
     ordenDib.forEach(function (od) {
       var w = od.w;
+      var out0 = out;                     // marca para poder envolver esta pared
       var info = wallSegs(w), g = info.g, t = w.t / 2;
       var J = jc.joins[w.id], cut = jc.cuts[w.id];
       var esBloque = String(w.type).indexOf('block') === 0;
@@ -1374,6 +1386,10 @@
         });
       }
       info.ops.forEach(function (o) { out += renderOpening(w, g, o); });
+      // opacidad de ESTA pared (con sus aberturas): se envuelve lo que acaba
+      // de dibujarse, sin tocar el resto del plano
+      var opW = opAttr(w);
+      if (opW) { out = out0 + '<g' + opW + '>' + out.slice(out0.length) + '</g>'; }
     });
     // los patrones de rayado que hicieron falta, uno por dirección de pared
     var defs = '';
@@ -1561,7 +1577,7 @@
       var est = LINE_STYLES[a.lineStyle] || LINE_STYLES.solid;
       var dash = est.dash ? ' stroke-dasharray="' + est.dash + '"' : '';
       var col = a.color || '#14161a', lw = a.lw || est.lw || 0.9;
-      out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + '/>';
+      out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
         var cx = 0, cy = 0;
@@ -1692,11 +1708,14 @@
 
   function renderSymbols() {
     var elec = '', furn = '';
-    state.wires.forEach(function (w) { elec += wireMarkup(w); });
+    state.wires.forEach(function (w) {
+      var oW = opAttr(w);
+      elec += oW ? '<g' + oW + '>' + wireMarkup(w) + '</g>' : wireMarkup(w);
+    });
     state.symbols.forEach(function (s) {
       var def = SYMBOLS[s.key]; if (!def) return;
       var sw = def.lw ? ' style="stroke-width:' + def.lw + '"' : '';
-      var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + '>' + def.svg + '</g>';
+      var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + opAttr(s) + '>' + def.svg + '</g>';
       if (def.layer === 'electrical') elec += frag; else furn += frag;
     });
     G.elec.innerHTML = elec;
@@ -1757,13 +1776,20 @@
 
   function renderAnnot() {
     var s = '';
-    state.dims.forEach(function (d) { s += dimMarkup(d.x1, d.y1, d.x2, d.y2, d.off, d.meas ? 'dim meas' : 'dim'); });
-    state.leaders.forEach(function (l) { s += leaderMarkup(l); });
+    state.dims.forEach(function (d) {
+      var mk = dimMarkup(d.x1, d.y1, d.x2, d.y2, d.off, d.meas ? 'dim meas' : 'dim');
+      var oD = opAttr(d);
+      s += oD ? '<g' + oD + '>' + mk + '</g>' : mk;
+    });
+    state.leaders.forEach(function (l) {
+      var mk2 = leaderMarkup(l), oL = opAttr(l);
+      s += oL ? '<g' + oL + '>' + mk2 + '</g>' : mk2;
+    });
     state.texts.forEach(function (t) {
       var sz = t.size || 9;
       if (t.style === 'circle' || t.style === 'hex') {
         var r = Math.max(sz * 0.95, t.text.length * sz * 0.34 + 2.5);
-        s += '<g class="sym" data-id="' + t.id + '">';
+        s += '<g class="sym" data-id="' + t.id + '"' + opAttr(t) + '>';
         if (t.style === 'circle') {
           s += '<circle cx="' + t.x + '" cy="' + t.y + '" r="' + r + '" fill="none"/>';
         } else {
@@ -1776,7 +1802,7 @@
         }
         s += '<text x="' + t.x + '" y="' + (t.y + sz * 0.34) + '" font-size="' + sz + '" text-anchor="middle" font-weight="bold">' + esc(t.text) + '</text></g>';
       } else {
-        s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz + '">' + esc(t.text) + '</text>';
+        s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz + '"' + opAttr(t) + '>' + esc(t.text) + '</text>';
       }
     });
     G.annot.innerHTML = s;
@@ -3958,6 +3984,14 @@
       }
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     }
+    if (sel && e) {
+      // OPACIDAD: vale para todo lo que se puede seleccionar
+      var opAct = (e.op == null ? 100 : e.op);
+      html += '<div class="row"><label>Opacidad</label>' +
+        '<input id="prOpac" type="range" min="10" max="100" step="5" value="' + opAct + '" style="flex:1" ' +
+        'title="Deja el objeto atenuado sin borrarlo — para lo que es de referencia">' +
+        '<span id="prOpacN" class="muted small" style="width:38px;text-align:right">' + opAct + '%</span></div>';
+    }
     if (sel && /^(wall|dim|wire|area|leader)$/.test(sel.kind)) {
       html += '<div style="display:flex;gap:6px;margin-top:6px">' +
         '<button id="prRotSelL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
@@ -3972,6 +4006,15 @@
       var n = $('#' + id);
       if (n) n.addEventListener(evt, function () { fn(n); });
     }
+    on('prOpac', 'input', function (n) {
+      var v = parseInt(n.value, 10);
+      if (!isFinite(v)) return;
+      var et = findSel(); if (!et) return;
+      et.op = (v >= 100 ? null : v);       // 100 = sin campo, como siempre
+      var lbl = $('#prOpacN'); if (lbl) lbl.textContent = v + '%';
+      refresh(); renderSel();
+    });
+    on('prOpac', 'change', function () { pushUndo(); });
     on('prDelete', 'click', deleteSelected);
     on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
     on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
