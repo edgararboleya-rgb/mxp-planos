@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.X';
+  var APP_VERSION = 'v27.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -87,11 +87,18 @@
     askCb = cb || function () { };
     document.getElementById('askTitle').textContent = title;
     var inp = document.getElementById('askInput');
-    inp.style.display = opts.input ? '' : 'none';
-    inp.value = opts.def || '';
+    var ar = document.getElementById('askArea');
+    // 'area' = texto de VARIAS LINEAS: ahi el Enter hace renglon, no acepta
+    inp.style.display = (opts.input && !opts.area) ? '' : 'none';
+    if (ar) ar.style.display = (opts.input && opts.area) ? '' : 'none';
+    inp.value = opts.area ? '' : (opts.def || '');
+    if (ar) ar.value = opts.area ? (opts.def || '') : '';
     document.getElementById('askCancel').style.display = opts.alert ? 'none' : '';
     document.getElementById('askModal').hidden = false;
-    if (opts.input) setTimeout(function () { inp.focus(); inp.select(); }, 50);
+    if (opts.input) setTimeout(function () {
+      var n = (opts.area && ar) ? ar : inp;
+      n.focus(); n.select();
+    }, 50);
   }
   function askClose(result) {
     document.getElementById('askModal').hidden = true;
@@ -103,6 +110,12 @@
       cb(ok ? document.getElementById('askInput').value : null);
     });
   }
+  // texto de varias lineas: el Enter hace renglon nuevo dentro del cuadro
+  function uiPromptArea(title, def, cb) {
+    uiDialog(title, { input: true, area: true, def: def }, function (ok) {
+      cb(ok ? document.getElementById('askArea').value : null);
+    });
+  }
   function uiConfirm(title, cb) { uiDialog(title, {}, cb); }
   function uiAlert(title) { uiDialog(title, { alert: true }, null); }
   document.getElementById('askOk').addEventListener('click', function () { askClose(true); });
@@ -112,6 +125,16 @@
     if (ev.key === 'Escape') { ev.preventDefault(); askClose(false); }
     ev.stopPropagation();
   });
+  (function () {
+    var ar = document.getElementById('askArea');
+    if (!ar) return;
+    ar.addEventListener('keydown', function (ev) {
+      // Enter = renglón nuevo. Ctrl/Cmd+Enter = aceptar (como en cualquier chat)
+      if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); askClose(true); }
+      if (ev.key === 'Escape') { ev.preventDefault(); askClose(false); }
+      ev.stopPropagation();
+    });
+  })();
 
   /* ---------------- estado ---------------- */
   var WALL_TYPES = {
@@ -2196,6 +2219,47 @@
     G.furn.innerHTML = furn;
   }
 
+  /* TEXTO CON FORMATO Y VARIAS LINEAS (Edgar, 08/30: "poder darle enter sin
+   * que salga del cuadro de texto... un pedazo arriba y otro abajo, sin tener
+   * que ser como una oracion", y "cambiar la fuente, el color, cursiva,
+   * negrita y el tamano"). Una nota de plano casi nunca es una frase: es
+   * "MASTER / BEDROOM" en dos renglones, o "(2) #12 THHN / 1/2\" EMT". */
+  var TEXT_FONTS = {
+    arch:  { name: 'Arquitectónica (Arial)', ff: 'Arial, Helvetica, sans-serif' },
+    // OJO: comillas simples dentro. El style va entre comillas dobles, y una
+    // doble aqui cortaba el atributo — por eso la fuente elegida no se veia
+    serif: { name: 'Serif (Times)', ff: "'Times New Roman', Times, serif" },
+    mono:  { name: 'Mono (planos viejos)', ff: "'Courier New', Courier, monospace" },
+    cond:  { name: 'Estrecha (cabe más)', ff: "'Arial Narrow', 'Liberation Sans Narrow', Arial, sans-serif" }
+  };
+  function textLineas(t) { return String(t.text == null ? '' : t.text).split(/\r?\n/); }
+  // va como STYLE, no como atributo: la hoja de estilos fija fill y
+  // font-family para .lbl, y el CSS le gana siempre a un atributo suelto —
+  // por eso el color y la fuente no se veian aunque estuvieran puestos
+  function textAttrs(t) {
+    var f = TEXT_FONTS[t.font] || null, st = '';
+    if (f) st += 'font-family:' + f.ff + ';';
+    if (t.bold) st += 'font-weight:700;';
+    if (t.italic) st += 'font-style:italic;';
+    if (t.color) st += 'fill:' + t.color + ';';
+    return st ? ' style="' + st + '"' : '';
+  }
+  // los renglones de un <text>: el primero en la Y del objeto, los demas debajo
+  function textTspans(t, sz, anchorX) {
+    var ls = textLineas(t), lh = sz * 1.25, out = '';
+    for (var i = 0; i < ls.length; i++) {
+      out += '<tspan x="' + anchorX + '"' + (i ? ' dy="' + lh.toFixed(2) + '"' : '') + '>' +
+        (ls[i] === '' ? ' ' : esc(ls[i])) + '</tspan>';
+    }
+    return out;
+  }
+  function textAncho(t, sz) {
+    var ls = textLineas(t), mx = 0;
+    ls.forEach(function (l) { if (l.length > mx) mx = l.length; });
+    return mx * sz * (t.bold ? 0.62 : 0.58);
+  }
+  function textAlto(t, sz) { return sz + (textLineas(t).length - 1) * sz * 1.25; }
+
   /* ---------------- render: anotaciones ---------------- */
   function dimMarkup(x1, y1, x2, y2, off, cls, label) {
     var dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1e-6;
@@ -2262,7 +2326,7 @@
     state.texts.forEach(function (t) {
       var sz = t.size || 9;
       if (t.style === 'circle' || t.style === 'hex') {
-        var r = Math.max(sz * 0.95, t.text.length * sz * 0.34 + 2.5);
+        var r = Math.max(sz * 0.95, String(t.text).replace(/\r?\n/g, ' ').length * sz * 0.34 + 2.5);
         s += '<g class="sym" data-id="' + t.id + '"' + opAttr(t) + '>';
         if (t.style === 'circle') {
           s += '<circle cx="' + t.x + '" cy="' + t.y + '" r="' + r + '" fill="none"/>';
@@ -2274,9 +2338,11 @@
           }
           s += '<polygon points="' + hp.join(' ') + '" fill="none"/>';
         }
-        s += '<text x="' + t.x + '" y="' + (t.y + sz * 0.34) + '" font-size="' + sz + '" text-anchor="middle" font-weight="bold">' + esc(t.text) + '</text></g>';
+        s += '<text x="' + t.x + '" y="' + (t.y + sz * 0.34) + '" font-size="' + sz + '" text-anchor="middle" font-weight="bold"' +
+          textAttrs(t) + '>' + esc(String(t.text).replace(/\r?\n/g, ' ')) + '</text></g>';
       } else {
-        s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz + '"' + opAttr(t) + '>' + esc(t.text) + '</text>';
+        s += '<text class="lbl" data-id="' + t.id + '" x="' + t.x + '" y="' + t.y + '" font-size="' + sz + '"' +
+          textAttrs(t) + opAttr(t) + '>' + textTspans(t, sz, t.x) + '</text>';
       }
     });
     G.annot.innerHTML = s;
@@ -2462,8 +2528,9 @@
             s += '<circle class="handle" cx="' + JB[0] + '" cy="' + JB[1] + '" r="' + jr + '"/>';
           }
         } else if (sel.kind === 'text') {
-          var tw = (e.text.length * (e.size || 9)) * 0.58 + 6;
-          s += '<rect class="sel" x="' + (e.x - 3) + '" y="' + (e.y - (e.size || 9)) + '" width="' + tw + '" height="' + ((e.size || 9) + 6) + '"/>';
+          var szS = e.size || 9;
+          s += '<rect class="sel" x="' + (e.x - 3) + '" y="' + (e.y - szS) + '" width="' + (textAncho(e, szS) + 6) +
+            '" height="' + (textAlto(e, szS) + 6) + '"/>';
         } else if (sel.kind === 'dim') {
           s += '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
           var dhr = (document.body.classList.contains('touch') ? 9 : 5) / view.z + 2;
@@ -2595,13 +2662,13 @@
         e = state.texts[i];
         var sz = e.size || 9;
         if (e.style === 'circle' || e.style === 'hex') {
-          var br = Math.max(sz * 0.95, e.text.length * sz * 0.34 + 2.5) * 1.2;
+          var br = Math.max(sz * 0.95, String(e.text).replace(/\r?\n/g, ' ').length * sz * 0.34 + 2.5) * 1.2;
           var dt = Math.hypot(p[0] - e.x, p[1] - e.y) - br;
           if (dt <= PX(3)) pon('text', e.id, Math.max(0, dt), 6);
         } else {
-          var tw = e.text.length * sz * 0.58;
+          var tw = textAncho(e, sz);
           var qx1 = Math.max(0, Math.max(e.x - p[0], p[0] - (e.x + tw)));
-          var qy1 = Math.max(0, Math.max((e.y - sz) - p[1], p[1] - e.y));
+          var qy1 = Math.max(0, Math.max((e.y - sz) - p[1], p[1] - (e.y + textAlto(e, sz) - sz)));
           var dt2 = Math.hypot(qx1, qy1);
           if (dt2 <= PX(3)) pon('text', e.id, dt2, 6);
         }
@@ -2764,7 +2831,7 @@
           if (th && th.kind === 'text') {
             drag = null;
             var tt = state.texts.find(function (x) { return x.id === th.id; });
-            uiPrompt('Editar texto:', tt.text, function (nt) {
+            uiPromptArea('Editar texto (Enter = renglón nuevo):', tt.text, function (nt) {
               if (nt !== null && nt !== '') { pushUndo(); tt.text = nt; refresh(); }
             });
             return;
@@ -2847,7 +2914,7 @@
     var h = hitTest(p);
     if (h && h.kind === 'text') {
       var t = state.texts.find(function (x) { return x.id === h.id; });
-      uiPrompt('Editar texto:', t.text, function (nt) {
+      uiPromptArea('Editar texto (Enter = renglón nuevo):', t.text, function (nt) {
         if (nt !== null && nt !== '') { pushUndo(); t.text = nt; refresh(); }
       });
     } else if (h && h.kind === 'dim') {
@@ -3687,7 +3754,7 @@
 
   /* --- texto --- */
   function textDown(p) {
-    uiPrompt('Texto:', '', function (t) {
+    uiPromptArea('Texto (Enter = renglón nuevo):', '', function (t) {
       if (!t) return;
       pushUndo();
       var e = { id: uid(), x: p[0], y: p[1], text: t, size: 9 };
@@ -4552,8 +4619,26 @@
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'text') {
-      html += '<div class="row"><label>Texto</label><input id="prText" value="' + esc(e.text) + '"></div>';
-      html += '<div class="row"><label>Tamaño</label><input id="prTextSize" type="number" min="4" value="' + (e.size || 9) + '"></div>';
+      // AREA de texto, no caja de una linea: aqui el Enter hace renglon nuevo
+      html += '<div class="row" style="align-items:flex-start"><label>Texto</label>' +
+        '<textarea id="prText" rows="3" style="flex:1;resize:vertical;font-family:inherit;font-size:12px;' +
+        'padding:5px;border:1px solid #c9c9c3;border-radius:5px" ' +
+        'title="Enter hace un renglón nuevo — el texto puede ir en varias líneas">' + esc(e.text) + '</textarea></div>';
+      html += '<div class="row"><label>Fuente</label><select id="prTextFont">' +
+        Object.keys(TEXT_FONTS).map(function (fk) {
+          return '<option value="' + fk + '"' + ((e.font || 'arch') === fk ? ' selected' : '') + '>' + esc(TEXT_FONTS[fk].name) + '</option>';
+        }).join('') + '</select></div>';
+      html += '<div class="row"><label>Tamaño</label>' +
+        '<button id="prTxtMenos" style="width:30px" title="Más chica">A−</button>' +
+        '<input id="prTextSize" type="number" min="3" step="0.5" style="flex:1" value="' + (e.size || 9) + '">' +
+        '<button id="prTxtMas" style="width:30px" title="Más grande">A+</button></div>';
+      html += '<div class="row"><label>Estilo</label>' +
+        '<button id="prTxtBold" style="flex:1;font-weight:800' + (e.bold ? ';background:#0b84ff;color:#fff' : '') + '">B</button>' +
+        '<button id="prTxtItal" style="flex:1;font-style:italic' + (e.italic ? ';background:#0b84ff;color:#fff' : '') + '">I</button></div>';
+      html += '<div class="row"><label>Color</label><div class="swRow" id="prTxtColorRow">' +
+        COLOR_PRESETS.map(function (c8) {
+          return '<span class="sw' + ((e.color || '#14161a') === c8[0] ? ' cur' : '') + '" data-c="' + c8[0] + '" title="' + c8[1] + '" style="background:' + c8[0] + '"></span>';
+        }).join('') + '</div></div>';
       html += '<div class="row"><label>Estilo</label><select id="prTextStyle">' +
         '<option value="plain"' + (!e.style || e.style === 'plain' ? ' selected' : '') + '>Plain text</option>' +
         '<option value="circle"' + (e.style === 'circle' ? ' selected' : '') + '>Bubble ① (conductor #)</option>' +
@@ -4743,7 +4828,27 @@
       var c = JSON.parse(JSON.stringify(e)); c.id = uid(); c.x += 24; c.y += 24;
       state.symbols.push(c); sel = { kind: 'symbol', id: c.id }; refresh();
     });
+    on('prText', 'input', function (n) { e.text = n.value; refresh(); });
     on('prText', 'change', function (n) { pushUndo(); e.text = n.value; refresh(); });
+    on('prTextFont', 'change', function (n) { pushUndo(); e.font = n.value; refresh(); });
+    function txtSize(v) {
+      var et = findSel(); if (!et) return;
+      pushUndo(); et.size = Math.max(3, Math.round(v * 2) / 2); refresh(); showProps();
+    }
+    var bMe = $('#prTxtMenos'); if (bMe) bMe.addEventListener('click', function () { txtSize((e.size || 9) - 1); });
+    var bMa = $('#prTxtMas'); if (bMa) bMa.addEventListener('click', function () { txtSize((e.size || 9) + 1); });
+    var bBo = $('#prTxtBold'); if (bBo) bBo.addEventListener('click', function () {
+      var et = findSel(); if (!et) return; pushUndo(); et.bold = et.bold ? 0 : 1; refresh(); showProps();
+    });
+    var bIt = $('#prTxtItal'); if (bIt) bIt.addEventListener('click', function () {
+      var et = findSel(); if (!et) return; pushUndo(); et.italic = et.italic ? 0 : 1; refresh(); showProps();
+    });
+    $$('#prTxtColorRow .sw').forEach(function (sw2) {
+      sw2.addEventListener('click', function () {
+        var et = findSel(); if (!et) return;
+        pushUndo(); et.color = sw2.dataset.c; refresh(); showProps();
+      });
+    });
     on('prTextSize', 'change', function (n) { pushUndo(); e.size = parseFloat(n.value) || 9; refresh(); });
     on('prTextStyle', 'change', function (n) { pushUndo(); e.style = n.value; refresh(); });
     on('prFlipDim', 'click', function () { pushUndo(); e.off = -(e.off == null ? 14 : e.off); refresh(); });
