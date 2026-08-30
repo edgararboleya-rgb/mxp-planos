@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.W';
+  var APP_VERSION = 'v27.X';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1748,14 +1748,19 @@
         s += '<line class="door-arc" x1="' + Pa[0] + '" y1="' + Pa[1] + '" x2="' + Pb2[0] + '" y2="' + Pb2[1] + '"/>';
       }
     } else if (o.type === 'pocket') {
-      // hoja medio abierta sobre la línea central + bolsillo discontinuo dentro de la pared
+      // hoja medio abierta sobre la línea central + bolsillo discontinuo dentro
+      // de la pared. EL LADO SE PUEDE CAMBIAR (Edgar, 08/30: "que los pocket
+      // door puedan cambiarse el sentido, que no sean siempre en el mismo
+      // lugar"): en obra el bolsillo va donde haya pared, y de qué lado corre
+      // es lo primero que mira el que la instala.
       var Mp = ptAlong(w, g, o.pos);
-      s += '<line class="door-leaf" x1="' + A[0] + '" y1="' + A[1] + '" x2="' + Mp[0] + '" y2="' + Mp[1] + '" stroke-width="2"/>';
-      var back = Math.max(0, d0 - o.w / 2);
+      var Jp = o.hinge ? B : A;                       // la jamba por donde entra la hoja
+      var back = o.hinge ? Math.min(g.len, d1 + o.w / 2) : Math.max(0, d0 - o.w / 2);
+      s += '<line class="door-leaf" x1="' + Jp[0] + '" y1="' + Jp[1] + '" x2="' + Mp[0] + '" y2="' + Mp[1] + '" stroke-width="2"/>';
       var Pb = ptAlong(w, g, back);
       [t * 0.4, -t * 0.4].forEach(function (off) {
         s += '<line class="door-arc" x1="' + (Pb[0] + g.nx * off) + '" y1="' + (Pb[1] + g.ny * off) +
-          '" x2="' + (A[0] + g.nx * off) + '" y2="' + (A[1] + g.ny * off) + '"/>';
+          '" x2="' + (Jp[0] + g.nx * off) + '" y2="' + (Jp[1] + g.ny * off) + '"/>';
       });
     } else { // door
       var hingeEnd = o.hinge ? d1 : d0;
@@ -4525,6 +4530,8 @@
       if (e.type === 'door' || e.type === 'double' || e.type === 'bifold') {
         html += '<div class="row"><button id="prFlipSwing">↕ Abatimiento</button>' +
           (e.type === 'door' ? '<button id="prFlipHinge">↔ Bisagra</button>' : '') + '</div>';
+      } else if (e.type === 'pocket') {
+        html += '<div class="row"><button id="prFlipHinge" title="A qué lado corre la hoja y dónde queda el bolsillo dentro de la pared">↔ Lado del bolsillo</button></div>';
       }
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'symbol') {
