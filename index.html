@@ -19,26 +19,7 @@
 
     <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos">🧰<label>Símbolos</label></button>
 
-    <div class="tgroup" id="toolButtons">
-      <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
-      <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
-      <button class="tool" data-tool="wall" title="Dibujar pared (W)">▬<label>Wall</label><span class="dd" data-menu="wall" title="Elegir tipo de pared">▾</span></button>
-      <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
-      <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
-      <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
-      <button class="tool" data-tool="rect" title="Rectángulo (2 clics, SHIFT = cuadrado)">▭<label>Rect</label></button>
-      <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
-      <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label></button>
-      <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label></button>
-      <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
-      <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
-      <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
-      <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
-      <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
-      <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
-    </div>
-
-    <div class="tgroup">
+    <div class="tgroup" id="grpAjustes">
       <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟ 90°</button>
       <select id="wallType" title="Tipo de pared al dibujar (drywall por defecto: en una casa solo el contorno es de bloque)">
         <option value="drywall" selected>Drywall 4½"</option>
@@ -64,6 +45,25 @@
         <option value="36">Puerta 3'0"</option>
       </select>
     </div>
+    <div class="tgroup" id="toolButtons">
+      <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
+      <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
+      <button class="tool" data-tool="wall" title="Dibujar pared (W)">▬<label>Wall</label><span class="dd" data-menu="wall" title="Elegir tipo de pared">▾</span></button>
+      <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
+      <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
+      <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
+      <button class="tool" data-tool="rect" title="Rectángulo (2 clics, SHIFT = cuadrado)">▭<label>Rect</label></button>
+      <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
+      <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label></button>
+      <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label></button>
+      <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
+      <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
+      <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
+      <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
+      <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
+      <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
+    </div>
+
 
     <div class="tgroup">
       <button id="btnUndo" title="Deshacer (Ctrl+Z)">↩</button>
