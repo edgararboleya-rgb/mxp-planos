@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.C';
+  var APP_VERSION = 'v27.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2557,6 +2557,23 @@
       while (deg > 180) deg -= 360;
       while (deg < -180) deg += 360;
       // a donde queda el angulo dominante de la pieza si giro esto
+      // 🐢 GIRO FINO con Alt (Edgar, 08/30: "que lo pueda girar suave, como
+      // cuando alargamos una linea con Alt"): el angulo avanza a un 15% de lo
+      // que corre la mano, se apaga el iman de los 90 grados y se cuantiza a
+      // 1/4 de grado. Sin Alt, el giro de siempre — de grado en grado y
+      // cuadrandose solo cerca de recto.
+      var fino = finoOn(ev);
+      if (fino) {
+        deg = Math.round(deg * FINO * 4) / 4;
+        var ahF = (drag.a0 + deg) * Math.PI / 180;
+        drag.hx = drag.cx + Math.cos(ahF) * drag.R;
+        drag.hy = drag.cy + Math.sin(ahF) * drag.R;
+        restoreItems(drag.items);
+        rotateRefs(drag.refs, deg, drag.cx, drag.cy);
+        renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
+        setHint('🐢 ' + deg.toFixed(2) + '° — giro fino (Alt): suelta Alt para el giro normal con imán a recto');
+        return;
+      }
       var res = drag.base + deg;
       res = ((res % 90) + 135) % 90 - 45;          // -45..45
       var recto = Math.abs(res) < 4;
