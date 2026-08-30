@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.L';
+  var APP_VERSION = 'v26.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -452,8 +452,9 @@
     return false;
   }
 
-  function recortaPuntas(w) {
+  function recortaPuntas(w, soloContra) {
     var TRIM = 8, EXT = 4;   // pulgadas: pasado hasta 8" se recorta, corto hasta 4" se alarga
+    var tocada = false;
     ['s', 'e'].forEach(function (fin) {
       var P = fin === 's' ? [w.x1, w.y1] : [w.x2, w.y2];
       var O = fin === 's' ? [w.x2, w.y2] : [w.x1, w.y1];
@@ -463,6 +464,7 @@
       // si la punta ya cayo en un extremo de otra pared (osnap), no se toca
       for (var i = 0; i < state.walls.length; i++) {
         var q = state.walls[i];
+        if (q === w) continue;   // no cuenta encontrarse a si misma (pared ya en la hoja)
         if (Math.hypot(P[0] - q.x1, P[1] - q.y1) < 0.6 || Math.hypot(P[0] - q.x2, P[1] - q.y2) < 0.6) return;
       }
       // dos candidatos: el cruce con una pared de MI familia manda sobre el
@@ -472,6 +474,7 @@
                : (w.type === 'screen' ? 'screen' : 'drywall');
       var mejorMismo = null, mejorOtro = null;
       state.walls.forEach(function (h) {
+        if (h === w || (soloContra && h !== soloContra)) return;
         var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
         if (hL < 2) return;
         var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
@@ -513,6 +516,7 @@
         // asomada por encima del bloque se recoge sola
         var ras = null;
         state.walls.forEach(function (h) {
+          if (h === w || (soloContra && h !== soloContra)) return;
           var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
           if (hL < 12) return;
           var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
@@ -529,11 +533,13 @@
           var rx = Math.round((P[0] - ux * ras.sobra * ras.dirW) * 64) / 64;
           var ry = Math.round((P[1] - uy * ras.sobra * ras.dirW) * 64) / 64;
           if (fin === 's') { w.x1 = rx; w.y1 = ry; } else { w.x2 = rx; w.y2 = ry; }
+          tocada = true;
         }
         return;
       }
       var nx = Math.round(mejor.x * 64) / 64, ny = Math.round(mejor.y * 64) / 64;
       if (fin === 's') { w.x1 = nx; w.y1 = ny; } else { w.x2 = nx; w.y2 = ny; }
+      tocada = true;
       // cerrar la esquina COMPLETA: si el cruce cae un palmo mas alla de la
       // punta de la vecina (misma familia), su punta tambien viene al cruce.
       // Eso es cerrar una esquina — jamas se corta una pared por el medio.
@@ -545,6 +551,29 @@
         }
       }
     });
+    return tocada;
+  }
+
+  // EL ORDEN DE DIBUJO NO DEBE IMPORTAR (Edgar, 08/30: "si hago primero la
+  // de drywall y despues la de bloque, no se integra; al reves si"). El
+  // fillet solo ajustaba la pared NUEVA, asi que una division ya dibujada se
+  // quedaba enterrada o corta cuando el muro llegaba despues. Ahora, al
+  // cerrar una pared, las puntas SUELTAS de las vecinas tambien se ajustan
+  // contra ella — como hace un CAD.
+  function ajustaVecinas(nueva) {
+    var nL = Math.hypot(nueva.x2 - nueva.x1, nueva.y2 - nueva.y1);
+    if (nL < 12) return 0;
+    var cerca = nueva.t / 2 + 10, n = 0;
+    state.walls.slice().forEach(function (e) {
+      if (e === nueva) return;
+      var toca = false;
+      ['1', '2'].forEach(function (k) {
+        var r = distToSeg(e['x' + k], e['y' + k], nueva.x1, nueva.y1, nueva.x2, nueva.y2);
+        if (r.d < cerca) toca = true;
+      });
+      if (toca && recortaPuntas(e, nueva)) n++;
+    });
+    return n;
   }
 
   function snapWallPt(p) {
@@ -2270,6 +2299,7 @@
       }
       recortaPuntas(wNueva);
       state.walls.push(wNueva);
+      ajustaVecinas(wNueva);
       drawing.last = b;
       renderWalls(); refreshCounts();
     }
