@@ -654,12 +654,103 @@
     cat: 'outdoor', layer: 'furniture', bg: 'none', w: 50, h: 8,
     svg: R(-24, -3, 48, 6) + T(0, -5, 5, 'TV') };
 
+
+  /* ===================================================================
+   * LUTRON (Edgar, 08/30). En las casas de Florida que llevan control de
+   * iluminación esto es lo que se especifica, y en el plano tiene que
+   * distinguirse del switch normal: un KEYPAD manda escenas por radio, un
+   * PICO no lleva cable ninguno —va pegado a la pared o en su pedestal— y
+   * el REPETIDOR es el que necesita su tomacorriente. Si el inspector ve
+   * una "S" donde va un Pico, cuenta un circuito que no existe.
+   * =================================================================== */
+  function lutKeypad(n, etiqueta) {
+    var out = R(-6, -11, 12, 22, 1.6);
+    // los botones se REPARTEN el frente: con 5 y 6 se pegaban al borde
+    var hueco = 0.9;
+    var alto = Math.min(2.8, (17 - (n - 1) * hueco) / n);
+    var total = n * alto + (n - 1) * hueco;
+    for (var i = 0; i < n; i++) {
+      out += R(-4, +(-total / 2 + i * (alto + hueco)).toFixed(2), 8, +alto.toFixed(2), 0.6);
+    }
+    return out + T(0, 18, 6, etiqueta, { bold: true });
+  }
+  // ondas de radio: lo que NO va cableado se marca así en el plano
+  function ondas(cx, cy, r0) {
+    var out = '';
+    for (var i = 0; i < 3; i++) {
+      var r = r0 + i * 2.2;
+      out += '<path d="M' + (cx - r * 0.7).toFixed(2) + ',' + (cy - r * 0.7).toFixed(2) +
+        ' A' + r.toFixed(2) + ',' + r.toFixed(2) + ' 0 0 1 ' + (cx + r * 0.7).toFixed(2) + ',' + (cy - r * 0.7).toFixed(2) +
+        '" fill="none" stroke-width="0.7"/>';
+    }
+    return out;
+  }
+
+  S.lut_kp2 = { name: 'Lutron Keypad 2 botones', short: 'Lutron KP2',
+    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(2, 'KP2') };
+  S.lut_kp4 = { name: 'Lutron Keypad 4 botones', short: 'Lutron KP4',
+    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(4, 'KP4') };
+  S.lut_kp5 = { name: 'Lutron Keypad 5 botones', short: 'Lutron KP5',
+    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(5, 'KP5') };
+  S.lut_kp6 = { name: 'Lutron Keypad 6 botones', short: 'Lutron KP6',
+    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(6, 'KP6') };
+
+  // PICO: los 5 botones de verdad — on / subir / favorito / bajar / off
+  S.lut_pico = { name: 'Lutron Pico Remote (pared)', short: 'Pico',
+    cat: 'lutron', layer: 'electrical', w: 15, h: 30,
+    svg: R(-5, -11, 10, 22, 2) +
+      R(-3.2, -9, 6.4, 2.4, 0.6) +                                  // ON
+      '<path d="M-1.8,-3.6 L0,-6 L1.8,-3.6" fill="none" stroke-width="0.8"/>' +   // subir
+      C(0, 0, 1.9) +                                                // favorito
+      '<path d="M-1.8,3.6 L0,6 L1.8,3.6" fill="none" stroke-width="0.8"/>' +      // bajar
+      R(-3.2, 6.6, 6.4, 2.4, 0.6) +                                 // OFF
+      T(0, 18, 6, 'PICO', { bold: true }) };
+
+  S.lut_pico_ped = { name: 'Lutron Pico + pedestal (mesa)', short: 'Pico ped.',
+    cat: 'lutron', layer: 'electrical', w: 20, h: 30,
+    svg: R(-5, -11, 10, 18, 2) + C(0, -4, 1.9) +
+      '<path d="M-8,7.5 L8,7.5 L6,11 L-6,11 Z" fill="none"/>' +
+      T(0, 18, 5.5, 'PICO/PED', { bold: true }) };
+
+  S.lut_dim = { name: 'Lutron Dimmer (Sunnata / Maestro)', short: 'Lutron Dim',
+    cat: 'lutron', layer: 'electrical', w: 22, h: 16,
+    svg: T(-4, 5, 14, 'S', { italic: true, bold: true }) + T(3.5, 8, 6.5, 'LUT', { anchor: 'start' }) };
+
+  S.lut_fan = { name: 'Lutron Fan Speed Control', short: 'Lutron Fan',
+    cat: 'lutron', layer: 'electrical', w: 20, h: 16,
+    svg: T(-3, 5, 14, 'S', { italic: true, bold: true }) + T(4.5, 8, 6.5, 'FS', { anchor: 'start' }) };
+
+  S.lut_rep = { name: 'Lutron Main Repeater / Hub (necesita receptáculo)', short: 'Lutron RPT',
+    cat: 'lutron', layer: 'electrical', w: 24, h: 26,
+    svg: R(-9, -7, 18, 12, 1.5) + T(0, 1.5, 6, 'RA2', { bold: true }) + ondas(0, -9, 3) +
+      T(0, 13, 5.5, 'REPEATER', { bold: true }) };
+
+  S.lut_occ = { name: 'Lutron Radio Powr Savr (ocupación, inalámbrico)', short: 'Lutron OCC',
+    cat: 'lutron', layer: 'electrical', w: 22, h: 22,
+    svg: R(-6, -8, 12, 9, 1.2) + T(0, -1.4, 5.5, 'OS', { bold: true }) +
+      '<path d="M-6,1 L-10,8 M6,1 L10,8 M0,1 L0,9" fill="none" stroke-width="0.7" stroke-dasharray="2 1.6"/>' +
+      ondas(0, -11, 2.6) };
+
+  S.lut_shade = { name: 'Lutron Shade (motorizada)', short: 'Lutron Shade',
+    cat: 'lutron', layer: 'electrical', w: 40, h: 16,
+    svg: R(-18, -6, 36, 5, 1) +
+      '<path d="M-18,-1 L-18,5 M18,-1 L18,5" fill="none" stroke-width="0.7"/>' +
+      '<path d="M-18,5 Q0,8 18,5" fill="none" stroke-width="0.8"/>' +
+      T(0, 12.5, 5.5, 'SHADE', { bold: true }) };
+
+  S.lut_panel = { name: 'Lutron Power Panel / QS (casa grande)', short: 'Lutron Panel',
+    cat: 'lutron', layer: 'electrical', w: 26, h: 30,
+    svg: R(-10, -13, 20, 26) + L(-10, -5, 10, -5) +
+      T(0, -7.4, 4.6, 'LUTRON', { bold: true }) +
+      L(-6, 1, 6, 1, 0.6) + L(-6, 5, 6, 5, 0.6) + L(-6, 9, 6, 9, 0.6) };
+
   window.SYMBOL_CATS = {
     electrical: '⚡ Electrical',
     riser: '🔌 Riser / One-line',
     elev: '🗄 Elevation / Cabinets',
     plumbing: '🚿 Plumbing / Appliances',
     furniture: '🛋 Furniture',
+    lutron: '🎛 Lutron / Control',
     outdoor: '🔥 Outdoor Kitchen',
     site: '🌴 Site'
   };
