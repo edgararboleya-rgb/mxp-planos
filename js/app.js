@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.N';
+  var APP_VERSION = 'v27.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -692,7 +692,7 @@
     // menos de 1¾" y la guía no llegaba a aparecer — Edgar no la veía nunca).
     // Sigue yendo en píxeles, así que al acercarte exige más puntería.
     var TOL = 16 / (view.z || 1);
-    var x = p[0], y = p[1], gs = [], refs = [];
+    var x = p[0], y = p[1], gs = [], refs = [], destinos = [];
 
     // (1) PERPENDICULAR / RECTO respecto al punto de partida — guía ámbar.
     // Con SHIFT se fuerza SIEMPRE (es lo que pediste al apretarlo, no una
@@ -719,15 +719,19 @@
         if (ddx < TOL && (!mejorX || ddx < mejorX.d)) mejorX = { d: ddx, q: q };
         if (ddy < TOL && (!mejorY || ddy < mejorY.d)) mejorY = { d: ddy, q: q };
       });
+      // SOLO REFERENCIA (Edgar, 08/30: "quiero que me señales, no que me
+      // obligues; a veces toma mal la referencia y la línea me queda mal").
+      // La guía verde se DIBUJA para que veas dónde quedaría alineado, pero
+      // el punto se queda donde tú lo pusiste. Manda tu mano, no el imán.
       if (mejorX) {
-        x = mejorX.q[0];
-        gs.push({ x1: x, y1: mejorX.q[1], x2: x, y2: y, c: '#0a8f3c' });
+        gs.push({ x1: mejorX.q[0], y1: mejorX.q[1], x2: mejorX.q[0], y2: y, c: '#0a8f3c' });
         refs.push(mejorX.q);                       // de dónde viene la referencia
+        destinos.push([mejorX.q[0], y]);           // dónde caería si la sigues
       }
       if (mejorY) {
-        y = mejorY.q[1];
-        gs.push({ x1: mejorY.q[0], y1: y, x2: x, y2: y, c: '#0a8f3c' });
+        gs.push({ x1: mejorY.q[0], y1: mejorY.q[1], x2: x, y2: mejorY.q[1], c: '#0a8f3c' });
         refs.push(mejorY.q);
+        destinos.push([x, mejorY.q[1]]);
       }
       // (3) PROLONGACIÓN: la línea de gabinete que sigue al otro lado del
       // refrigerador. Si el cursor cae cerca de la RECTA que prolonga un
@@ -751,11 +755,11 @@
           }
         });
         if (mejorP) {
-          x = mejorP.A[0] + mejorP.ux * mejorP.along;
-          y = mejorP.A[1] + mejorP.uy * mejorP.along;
-          var puntaP = [mejorP.A[0] + mejorP.ux * (mejorP.along > 0 ? 1e9 : -1e9), 0];
-          gs.push({ x1: mejorP.A[0], y1: mejorP.A[1], x2: x, y2: y, c: '#0a8f3c' });
+          var px2 = mejorP.A[0] + mejorP.ux * mejorP.along;
+          var py2 = mejorP.A[1] + mejorP.uy * mejorP.along;
+          gs.push({ x1: mejorP.A[0], y1: mejorP.A[1], x2: px2, y2: py2, c: '#0a8f3c' });
           refs.push([mejorP.A[0], mejorP.A[1]]);
+          destinos.push([px2, py2]);
         }
       }
     }
@@ -773,8 +777,14 @@
           '" height="' + (rr2 * 2) + '" fill="none" stroke="#0a8f3c" stroke-width="' +
           (1.4 / (view.z || 1)) + '"/>';
       }).join('') +
-      '<circle cx="' + x + '" cy="' + y + '" r="' + (4 / (view.z || 1)) + '" fill="none" stroke="' +
-        (soloRecto ? '#e6a100' : '#0a8f3c') + '" stroke-width="' + (1.2 / (view.z || 1)) + '"/>';
+      // el círculo marca DÓNDE QUEDARÍA alineado — es la sugerencia, y tú
+      // decides si vas ahí o no (con Shift sí manda, que eso es una orden)
+      (soloRecto
+        ? '<circle cx="' + x + '" cy="' + y + '" r="' + (4 / (view.z || 1)) + '" fill="none" stroke="#e6a100" stroke-width="' + (1.2 / (view.z || 1)) + '"/>'
+        : destinos.map(function (q) {
+            return '<circle cx="' + q[0] + '" cy="' + q[1] + '" r="' + (4 / (view.z || 1)) +
+              '" fill="none" stroke="#0a8f3c" stroke-width="' + (1.2 / (view.z || 1)) + '"/>';
+          }).join(''));
     }
     return [x, y];
   }
@@ -785,8 +795,12 @@
       var w = state.walls[i];
       if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < 9 / view.z + 2) return [w.x1, w.y1];
       if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < 9 / view.z + 2) return [w.x2, w.y2];
+      // el PUNTO MEDIO de una pared es útil, pero agarraba con la misma fuerza
+      // que una esquina y arrastraba el punto donde el usuario no lo quería
+      // ("me obliga a ponerlo en el medio de la línea de una pared"). Ahora
+      // pide casi tocarlo: la esquina sigue mandando, el medio solo si vas a él.
       var mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
-      if (Math.hypot(p[0] - mx, p[1] - my) < 9 / view.z + 2) return [mx, my];
+      if (Math.hypot(p[0] - mx, p[1] - my) < 4 / view.z) return [mx, my];
     }
     // 2) el EJE de una pared existente: al sobreescribir/calcar encima, el
     //    cursor agarra la línea de CENTRO y la pared nueva se inserta sobre
@@ -9670,6 +9684,7 @@
   window.__mxpAngle = refsAngle;
   window.__mxpRect = rectificarYcerrar;   // gancho de pruebas
   window.__guiaDbg = function (p, desde, ev) { var r = guiaAjusta(p, desde, ev || {}); return { p: r, guias: guiasVivas.length }; };
+  window.__snapDbg = snapWallPt;
   window.__hitDbg = hitTest;            // gancho de pruebas: que agarra un clic
   window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   window.__planoJsonDbg = planoDesdeJSON;   // gancho de pruebas del importador IA
