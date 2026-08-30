@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v26.K';
+  var APP_VERSION = 'v26.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -852,11 +852,27 @@
   function renderWalls() {
     var jc = computeJoins();
     var out = '';
+    // RAYADO DE MAMPOSTERÍA QUE SIGUE A LA PARED (Edgar, 08/30: "el dibujo
+    // siempre va en la misma diagonal y cuando la pared va en esa misma
+    // dirección no se ve bien"). El patrón estaba clavado a 45° del mundo, así
+    // que en una pared a 45° — la bahía del primary — las líneas corrían
+    // PARALELAS a la pared y el bloque se veía vacío. Ahora cada dirección de
+    // pared tiene su patrón, girado para que el rayado quede siempre a 45°
+    // RESPECTO A LA PARED, que es como se dibuja la mampostería en un plano.
+    var hatchUsados = {};
+    function hatchDe(w2) {
+      var a = Math.atan2(w2.y2 - w2.y1, w2.x2 - w2.x1) * 180 / Math.PI;
+      a = ((a % 180) + 180) % 180;                 // una pared y su opuesta son igual
+      var k = Math.round(a / 5) * 5; if (k >= 180) k -= 180;
+      hatchUsados[k] = 1;
+      return 'hb' + k;
+    }
     state.walls.forEach(function (w) {
       var info = wallSegs(w), g = info.g, t = w.t / 2;
       var J = jc.joins[w.id], cut = jc.cuts[w.id];
       var esBloque = String(w.type).indexOf('block') === 0;
       var fillCls = esBloque ? 'wall-fill-block' : 'wall-fill-drywall';
+      var fillSty = esBloque ? ' style="fill:url(#' + hatchDe(w) + ')"' : '';
       var ecls = esBloque ? 'wall-edge' : 'wall-edge dry';   // el plano profesional: mamposteria gruesa, division liviana
       info.segs.forEach(function (sg) {
         var atS = sg[0] < 0.01, atE = sg[1] > g.len - 0.01;
@@ -864,7 +880,7 @@
         var aM = atS ? J.s.m : offPt(w, g, sg[0], -1, t);
         var bP = atE ? J.e.p : offPt(w, g, sg[1], 1, t);
         var bM = atE ? J.e.m : offPt(w, g, sg[1], -1, t);
-        out += '<path class="' + fillCls + '" d="M' + aP + ' L' + bP + ' L' + bM + ' L' + aM + ' Z"/>';
+        out += '<path class="' + fillCls + '"' + fillSty + ' d="M' + aP + ' L' + bP + ' L' + bM + ' L' + aM + ' Z"/>';
         out += edgeLines(w, g, t, sg, 1, aP, bP, cut.plus, ecls);
         out += edgeLines(w, g, t, sg, -1, aM, bM, cut.minus, ecls);
         if (atS ? J.s.cap : true) out += '<line class="' + ecls + '" x1="' + aP[0] + '" y1="' + aP[1] + '" x2="' + aM[0] + '" y2="' + aM[1] + '"/>';
@@ -912,7 +928,15 @@
       }
       info.ops.forEach(function (o) { out += renderOpening(w, g, o); });
     });
-    G.walls.innerHTML = out;
+    // los patrones de rayado que hicieron falta, uno por dirección de pared
+    var defs = '';
+    Object.keys(hatchUsados).forEach(function (k) {
+      defs += '<pattern id="hb' + k + '" width="6" height="6" patternUnits="userSpaceOnUse"' +
+        ' patternTransform="rotate(' + (Number(k) + 45) + ')">' +
+        '<rect width="6" height="6" fill="#efede6"/>' +
+        '<line x1="0" y1="0" x2="0" y2="6" stroke="#8f8b7e" stroke-width="0.8"/></pattern>';
+    });
+    G.walls.innerHTML = (defs ? '<defs>' + defs + '</defs>' : '') + out;
   }
 
   function renderOpening(w, g, o) {
