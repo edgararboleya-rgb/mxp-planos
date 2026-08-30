@@ -229,6 +229,12 @@
   S.sink_pedestal = { name: 'Pedestal Sink', cat: 'plumbing', layer: 'furniture', w: 22, h: 20,
     svg: '<ellipse cx="0" cy="0" rx="10" ry="8.5"/>' + '<ellipse cx="0" cy="0.5" rx="6.5" ry="5"/>' + C(0, -5.5, 1) };
 
+  // fregadero de UNA cubeta (Edgar, 08/30): el de cocina chica, bar o laundry
+  S.kitchen_sink1 = { name: 'Single Kitchen Sink', short: 'Sink sencillo',
+    cat: 'plumbing', layer: 'furniture', w: 25, h: 22,
+    svg: R(-12, -10.5, 24, 21, 1.5) + R(-9.5, -7.5, 19, 15, 1.5) +
+      C(0, 0.5, 1.4) + C(0, -9, 1.6) };
+
   S.kitchen_sink = { name: 'Double Kitchen Sink', cat: 'plumbing', layer: 'furniture', w: 34, h: 23,
     svg: R(-16.5, -11, 33, 22) + R(-14, -8, 12.5, 16, 1.5) + R(1.5, -8, 12.5, 16, 1.5) + C(0, -9.2, 1) };
 
@@ -252,6 +258,18 @@
 
   S.dryer = { name: 'Dryer', cat: 'plumbing', layer: 'furniture', w: 29, h: 29,
     svg: R(-13.5, -13.5, 27, 27) + C(0, 0, 8.5) + T(0, 3, 8, 'D') };
+
+  // TORRE lavadora/secadora apilada (Edgar, 08/30): en planta ocupa lo mismo
+  // que una sola (27" de ancho), pero son DOS aparatos — en el plano se marca
+  // con las esquinas dobladas y el rótulo W/D para que el inspector sepa que
+  // ahí van las dos cargas. Es lo que va en los laundry chicos como el de
+  // Caroline (7'5" x 14'3").
+  S.washer_dryer_torre = { name: 'Washer/Dryer Torre (apilada)', short: 'W/D Torre',
+    cat: 'plumbing', layer: 'furniture', w: 29, h: 31,
+    svg: R(-13.5, -15, 27, 30) +
+      L(-13.5, -7, 13.5, -7) +          // la franja de arriba = el aparato apilado
+      T(0, -9.5, 6.5, 'W/D') +
+      C(0, 4, 8.5) };
 
   S.water_heater = { name: 'Water Heater', cat: 'plumbing', layer: 'furniture', w: 25, h: 25,
     svg: C(0, 0, 11) + T(0, 2.8, 7, 'WH') };

@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.J';
+  var APP_VERSION = 'v27.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3192,7 +3192,11 @@
     var favs = loadFavs();
     var keys = activeCat === 'fav'
       ? favs.filter(function (k) { return SYMBOLS[k]; })
-      : Object.keys(SYMBOLS).filter(function (k) { return SYMBOLS[k].cat === activeCat; });
+      // AL BUSCAR se mira TODA la biblioteca, no solo la pestaña abierta:
+      // escribir "torre" estando en Electrical no encontraba nada, y el
+      // usuario no tiene por qué saber en qué pestaña vive cada símbolo
+      : (q ? Object.keys(SYMBOLS)
+           : Object.keys(SYMBOLS).filter(function (k) { return SYMBOLS[k].cat === activeCat; }));
     var html = '';
     keys.forEach(function (k) {
       var d = SYMBOLS[k];
