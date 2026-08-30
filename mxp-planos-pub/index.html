@@ -19,6 +19,33 @@
 
     <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos">🧰<label>Símbolos</label></button>
 
+    <div class="tgroup" id="grpAjustes">
+      <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟ 90°</button>
+      <button id="btnImanes" class="active" title="IMANES: cuando están encendidos, el punto se pega a las esquinas y ejes de lo ya dibujado. Apágalos si quieres poner la línea EXACTAMENTE donde tú tocas — las guías verdes se siguen viendo como referencia.">🧲 Imanes</button>
+      <select id="wallType" title="Tipo de pared al dibujar (drywall por defecto: en una casa solo el contorno es de bloque)">
+        <option value="drywall" selected>Drywall 4½"</option>
+        <option value="furr15">Furring 1½" (forro)</option>
+        <option value="drywall25">Drywall 2½"</option>
+        <option value="drywall35">Drywall 3½"</option>
+        <option value="drywall6">Drywall 6"</option>
+        <option value="block">8" Block</option>
+        <option value="block12">12" Block</option>
+        <option value="blockdry">8" Block + Furring (forrado)</option>
+        <option value="block12dry">12" Block + Furring (forrado)</option>
+        <option value="pony30">Half Wall 30" (media pared)</option>
+        <option value="pony42">Half Wall 42" (barra)</option>
+        <option value="screen">Screen / Malla 2" (lanai)</option>
+      </select>
+      <select id="doorSize" title="Tamaño de la puerta/ventana al colocar. Se ve siempre: lo que dice aquí es lo que se coloca.">
+        <option value="0">Puerta: auto</option>
+        <option value="18">Puerta 1'6" (pantry)</option>
+        <option value="24">Puerta 2'0"</option>
+        <option value="28">Puerta 2'4"</option>
+        <option value="30">Puerta 2'6"</option>
+        <option value="32">Puerta 2'8"</option>
+        <option value="36">Puerta 3'0"</option>
+      </select>
+    </div>
     <div class="tgroup" id="toolButtons">
       <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
       <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
@@ -26,9 +53,9 @@
       <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
       <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
       <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
-      <button class="tool" data-tool="rect" title="Rectángulo (2 clics, SHIFT = cuadrado)">▭<label>Rect</label></button>
+      <button class="tool" data-tool="rect" title="Rectángulo / polígono (2 clics, SHIFT = regular)">▭<label>Rect</label><span class="dd" data-menu="rect" title="Elegir forma: rectángulo, triángulo, pentágono, hexágono...">▾</span></button>
       <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
-      <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label></button>
+      <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label><span class="dd" data-menu="pline" title="Elegir tipo de línea">▾</span></button>
       <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label></button>
       <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
       <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
@@ -38,18 +65,6 @@
       <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
     </div>
 
-    <div class="tgroup">
-      <button id="btnOrtho" title="ORTHO 90°: mantiene las líneas rectas sin apretar Shift (F8)">∟ 90°</button>
-      <select id="wallType" title="Tipo de pared al dibujar">
-        <option value="block">8" Block</option>
-        <option value="block12">12" Block</option>
-        <option value="blockdry">8" Block + Drywall</option>
-        <option value="drywall25">Drywall 2½"</option>
-        <option value="drywall35">Drywall 3½"</option>
-        <option value="drywall">Drywall 4½"</option>
-        <option value="drywall6">Drywall 6"</option>
-      </select>
-    </div>
 
     <div class="tgroup">
       <button id="btnUndo" title="Deshacer (Ctrl+Z)">↩</button>
@@ -67,15 +82,14 @@
       <button id="btnProps" class="touch-only" title="Abrir / cerrar propiedades y capas">⚙<label>Panel</label></button>
       <button id="btnLot" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎 Lot</button>
       <button id="btnPanel" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋 Panel Schedule</button>
-      <label for="fileBg" id="btnBg" class="tbtn" title="SUBIR plano, PDF o foto de fondo (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">🖼 Subir Fondo</label>
-      <button id="btnOpen" title="Abrir un proyecto guardado">📂 Abrir</button>
+      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">📂 Abrir</button>
       <button id="btnSave" title="Guardar el proyecto como archivo">💾 Guardar</button>
       <button id="btnPng" title="Exportar imagen PNG">PNG</button>
       <button id="btnPrint" title="Imprimir / Guardar PDF">🖨 PDF</button>
     </div>
     <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" hidden>
     <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>
-    <input type="file" id="fileOpen" accept=".json,application/json" hidden>
+    <input type="file" id="fileOpen" accept=".json,application/json,application/pdf,.pdf,image/*" hidden>
   </header>
 
   <div id="toolMenu" hidden></div>
@@ -104,7 +118,13 @@
           .mxp { background:#f5f4ef; }
           .mxp .sym, .mxp .arch { stroke:#14161a; fill:none; stroke-width:1; stroke-linecap:round; stroke-linejoin:round; }
           .mxp .sym text, .mxp text.lbl { fill:#14161a; stroke:none; font-family:Arial, Helvetica, sans-serif; }
-          .mxp .wall-edge { stroke:#14161a; stroke-width:1.6; fill:none; }
+          /* GROSOR DE LÍNEA (Edgar 08/30: "las veo muy grandes"). Medido: el
+             borde iba a 1.6" de grosor centrado en la cara, así que un bloque
+             de 8" se veía de 9.6" — un 20% más gordo de lo real. A 0.9" el
+             bloque se ve 8.9" y sigue leyéndose fuerte al imprimir; las
+             divisiones a 0.6". La MEDIDA no cambia: 8" siguen siendo 8". */
+          .mxp .wall-edge { stroke:#14161a; stroke-width:0.9; fill:none; }
+          .mxp .wall-edge.dry { stroke-width:0.6; }
           .mxp .wall-fill-drywall { fill:#e8e6df; stroke:none; }
           .mxp .wall-fill-block { fill:url(#hatchBlock); stroke:none; }
           .mxp .jamb { stroke:#14161a; stroke-width:1.2; }
@@ -118,6 +138,8 @@
           .mxp .door-leaf { stroke:#14161a; stroke-width:1.4; fill:none; }
           .mxp .door-arc { stroke:#14161a; stroke-width:0.7; fill:none; stroke-dasharray:3 2.4; }
           .mxp .win-line { stroke:#14161a; stroke-width:0.9; fill:none; }
+          .mxp .sgd-panel { stroke:#14161a; stroke-width:0.8; fill:#ffffff; }
+          .mxp .screen-tick { stroke:#14161a; stroke-width:0.8; fill:none; }
           .mxp .dim { stroke:#8a2f2f; stroke-width:0.6; fill:none; }
           .mxp .dim text { fill:#8a2f2f; stroke:none; font-family:Arial, sans-serif; }
           .mxp .meas { stroke:#1c5fa8; stroke-width:0.8; fill:none; }
@@ -177,6 +199,10 @@
             <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
             <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
           </div>
+          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Revisa el plano y te dice qué está mal y cómo arreglarlo">🤖 Asistente: revisar el plano</button></div>
+          <div class="sub"><button id="btnPlanoIA" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="El cerebro lee la imagen del plano (el fondo, o una foto que escojas) y arma los cuartos como piezas editables">🪄 IA: plano desde imagen</button></div>
+          <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí">📋 Recibo del último escaneo importado</button></div>
+          <div class="sub"><button id="btnGuiaDel" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Borrar el contorno de guia calcado del survey (las piezas se quedan donde estan)">🧭</button><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
           <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
           <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
           <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
@@ -230,6 +256,7 @@
   <footer id="statusbar">
     <span id="hint">Selecciona una herramienta para comenzar</span>
     <span id="coords"></span>
+    <span id="verTag" style="opacity:.55;margin-left:10px;font-size:10px"></span>
   </footer>
 </div>
 
@@ -272,6 +299,17 @@
 </div>
 
 <!-- ======= BUSCADOR DE PROPIEDAD / LOTE ======= -->
+<!-- ======= ASISTENTE MXP (revisión del plano) ======= -->
+<div id="aiModal" class="modal" hidden style="z-index:75">
+  <div class="modalBox" style="width:min(760px,96vw)">
+    <div class="modalHead">
+      <b>🤖 ASISTENTE MXP — revisión del plano</b>
+      <div class="mbtns"><button id="aiClose">✕ Cerrar</button></div>
+    </div>
+    <div id="aiBody" class="pbody"></div>
+  </div>
+</div>
+
 <div id="lotModal" class="modal" hidden>
   <div class="modalBox" style="width:min(580px,94vw)">
     <div class="modalHead">

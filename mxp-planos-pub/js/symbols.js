@@ -216,17 +216,77 @@
   S.toilet = { name: 'Toilet', cat: 'plumbing', layer: 'furniture', w: 22, h: 30,
     svg: R(-10, -14.5, 20, 7.5, 1.5) + '<ellipse cx="0" cy="2.5" rx="8" ry="9.5"/>' };
 
-  S.lavatory = { name: 'Vanity Sink', cat: 'plumbing', layer: 'furniture', w: 26, h: 22,
+  // VANITIES POR MEDIDA (Edgar, 08/30: "hazme mas vanity de 60, 36, 30 y 24;
+  // tenemos solo uno y no se de que medida es"). Todos con 21" de fondo, que
+  // es el estandar; el ancho es el que da nombre al mueble en la tienda.
+  // Se dibujan iguales entre si para que la familia se lea de un vistazo.
+  function vanity(an, dobleP) {
+    var f = 21, hf = f / 2, ha = an / 2;
+    var s2 = R(-ha, -hf, an, f);
+    if (dobleP) {
+      var q4 = an / 4;
+      s2 += '<ellipse cx="' + (-q4) + '" cy="0.5" rx="7.5" ry="5.5"/>' + C(-q4, -7, 1);
+      s2 += '<ellipse cx="' + q4 + '" cy="0.5" rx="7.5" ry="5.5"/>' + C(q4, -7, 1);
+    } else {
+      var rx = Math.min(7.5, ha - 3);
+      s2 += '<ellipse cx="0" cy="0.5" rx="' + rx + '" ry="5.5"/>' + C(0, -7, 1);
+    }
+    return s2;
+  }
+  S.vanity24 = { name: 'Vanity 24" (1 lavamanos)', short: 'Vanity 24"',
+    cat: 'plumbing', layer: 'furniture', w: 24, h: 21, svg: vanity(24) };
+  S.vanity30 = { name: 'Vanity 30" (1 lavamanos)', short: 'Vanity 30"',
+    cat: 'plumbing', layer: 'furniture', w: 30, h: 21, svg: vanity(30) };
+  S.vanity36 = { name: 'Vanity 36" (1 lavamanos)', short: 'Vanity 36"',
+    cat: 'plumbing', layer: 'furniture', w: 36, h: 21, svg: vanity(36) };
+  S.vanity48 = { name: 'Vanity 48" (1 lavamanos)', short: 'Vanity 48"',
+    cat: 'plumbing', layer: 'furniture', w: 48, h: 21, svg: vanity(48) };
+  S.vanity60 = { name: 'Vanity 60" doble (2 lavamanos)', short: 'Vanity 60" doble',
+    cat: 'plumbing', layer: 'furniture', w: 60, h: 21, svg: vanity(60, true) };
+  S.vanity72 = { name: 'Vanity 72" doble (2 lavamanos)', short: 'Vanity 72" doble',
+    cat: 'plumbing', layer: 'furniture', w: 72, h: 21, svg: vanity(72, true) };
+
+  // el de siempre, ahora con su medida en el nombre para no adivinar
+  S.lavatory = { name: 'Vanity 26" (el de siempre)', cat: 'plumbing', layer: 'furniture', w: 26, h: 22,
     svg: R(-13, -10.5, 26, 21) + '<ellipse cx="0" cy="0.5" rx="7.5" ry="5.5"/>' + C(0, -7, 1) };
+
+  // vanity DOBLE (dos lavamanos, 60x22 tipico) — estirable a la medida
+  // real con Ancho/Fondo, como todos los de tamano real
+  S.lavatory2 = { name: 'Vanity 60" doble (el de siempre)', short: 'Vanity 60 viejo', cat: 'plumbing', layer: 'furniture', w: 60, h: 22,
+    svg: R(-30, -10.5, 60, 21) +
+      '<ellipse cx="-15" cy="0.5" rx="7.5" ry="5.5"/>' + C(-15, -7, 1) +
+      '<ellipse cx="15" cy="0.5" rx="7.5" ry="5.5"/>' + C(15, -7, 1) };
 
   S.sink_pedestal = { name: 'Pedestal Sink', cat: 'plumbing', layer: 'furniture', w: 22, h: 20,
     svg: '<ellipse cx="0" cy="0" rx="10" ry="8.5"/>' + '<ellipse cx="0" cy="0.5" rx="6.5" ry="5"/>' + C(0, -5.5, 1) };
 
+  // fregadero de UNA cubeta (Edgar, 08/30): el de cocina chica, bar o laundry
+  S.kitchen_sink1 = { name: 'Single Kitchen Sink', short: 'Sink sencillo',
+    cat: 'plumbing', layer: 'furniture', w: 25, h: 22,
+    svg: R(-12, -10.5, 24, 21, 1.5) + R(-9.5, -7.5, 19, 15, 1.5) +
+      C(0, 0.5, 1.4) + C(0, -9, 1.6) };
+
   S.kitchen_sink = { name: 'Double Kitchen Sink', cat: 'plumbing', layer: 'furniture', w: 34, h: 23,
     svg: R(-16.5, -11, 33, 22) + R(-14, -8, 12.5, 16, 1.5) + R(1.5, -8, 12.5, 16, 1.5) + C(0, -9.2, 1) };
 
-  S.tub = { name: 'Bathtub 60"', cat: 'plumbing', layer: 'furniture', w: 62, h: 32,
+  S.tub = { name: 'Bathtub 60" (encajonada)', cat: 'plumbing', layer: 'furniture', w: 62, h: 32,
     svg: R(-30, -15, 60, 30, 3) + R(-26.5, -11.5, 53, 23, 9) + C(-21, 0, 1.6) };
+
+  // TINA EXENTA OVALADA (Edgar, 08/30: "la de esos banos master que tiene una
+  // sola en forma ovalada"). Va suelta, no encajonada: por eso se dibuja el
+  // ovalo entero con su faldon, sin el rectangulo de la pared. Medidas de
+  // catalogo: 66x36 la grande y 60x32 la mediana.
+  S.tub_oval = { name: 'Tina exenta ovalada 66"', short: 'Tina ovalada 66"',
+    cat: 'plumbing', layer: 'furniture', w: 68, h: 38,
+    svg: '<ellipse cx="0" cy="0" rx="33" ry="18"/>' +
+         '<ellipse cx="0" cy="0" rx="29" ry="14.5"/>' +
+         C(-24.5, 0, 1.6) + C(24, 0, 1.2) };
+
+  S.tub_oval60 = { name: 'Tina exenta ovalada 60"', short: 'Tina ovalada 60"',
+    cat: 'plumbing', layer: 'furniture', w: 62, h: 34,
+    svg: '<ellipse cx="0" cy="0" rx="30" ry="16"/>' +
+         '<ellipse cx="0" cy="0" rx="26" ry="12.5"/>' +
+         C(-22, 0, 1.6) + C(21.5, 0, 1.2) };
 
   S.shower = { name: 'Shower 36×36', cat: 'plumbing', layer: 'furniture', w: 38, h: 38,
     svg: R(-18, -18, 36, 36) + L(-18, -18, -4, -4, 0.6) + L(18, -18, 4, -4, 0.6) + L(-18, 18, -4, 4, 0.6) + L(18, 18, 4, 4, 0.6) + C(0, 0, 2) };
@@ -245,6 +305,18 @@
 
   S.dryer = { name: 'Dryer', cat: 'plumbing', layer: 'furniture', w: 29, h: 29,
     svg: R(-13.5, -13.5, 27, 27) + C(0, 0, 8.5) + T(0, 3, 8, 'D') };
+
+  // TORRE lavadora/secadora apilada (Edgar, 08/30): en planta ocupa lo mismo
+  // que una sola (27" de ancho), pero son DOS aparatos — en el plano se marca
+  // con las esquinas dobladas y el rótulo W/D para que el inspector sepa que
+  // ahí van las dos cargas. Es lo que va en los laundry chicos como el de
+  // Caroline (7'5" x 14'3").
+  S.washer_dryer_torre = { name: 'Washer/Dryer Torre (apilada)', short: 'W/D Torre',
+    cat: 'plumbing', layer: 'furniture', w: 29, h: 31,
+    svg: R(-13.5, -15, 27, 30) +
+      L(-13.5, -7, 13.5, -7) +          // la franja de arriba = el aparato apilado
+      T(0, -9.5, 6.5, 'W/D') +
+      C(0, 4, 8.5) };
 
   S.water_heater = { name: 'Water Heater', cat: 'plumbing', layer: 'furniture', w: 25, h: 25,
     svg: C(0, 0, 11) + T(0, 2.8, 7, 'WH') };
@@ -432,6 +504,36 @@
 
   S.pool = { name: 'Pool 12×24', cat: 'site', layer: 'furniture', w: 290, h: 148,
     svg: R(-144, -72, 288, 144, 10) + R(-136, -64, 272, 128, 8) };
+
+
+  /* —— del plano profesional de la cliente (08/29) —— */
+
+  // chimenea: cajón con jambas rayadas + hogar al frente (family room)
+  S.fireplace = { name: 'Fireplace 48"', cat: 'furniture', layer: 'furniture', w: 48, h: 28,
+    svg: R(-24, -14, 48, 20) + R(-14, -12, 28, 16) +
+      '<path d="M-24,-14 L-14,-4 M-20,-14 L-14,-8 M14,-4 L24,-14 M14,-8 L20,-14"/>' +
+      '<path d="M-18,6 H18 M-18,10 H18 M-18,6 V10 M18,6 V10"/>' };
+
+  // poste de aluminio/madera del porch o lanai
+  S.post8 = { name: 'Column / Post 8×8', cat: 'site', layer: 'furniture', w: 8, h: 8,
+    svg: R(-4, -4, 8, 8) + L(-4, -4, 4, 4) + L(-4, 4, 4, -4) };
+
+  // spa octogonal pegado a la piscina (como el del plano)
+  S.spa = { name: 'Spa / Hot Tub 7 ft', cat: 'site', layer: 'furniture', w: 84, h: 84,
+    svg: (function () {
+      function oct(r) {
+        var d = '', i, a;
+        for (i = 0; i < 8; i++) { a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+          d += (i ? ' L' : 'M') + (r * Math.cos(a)).toFixed(1) + ',' + (r * Math.sin(a)).toFixed(1); }
+        return '<path d="' + d + ' Z"/>';
+      }
+      return oct(42) + oct(34) + C(0, 0, 3);
+    })() };
+
+  // estante con barra de closet (línea del estante + barra discontinua)
+  S.shelfrod = { name: 'Closet Shelf & Rod 48"', cat: 'furniture', layer: 'furniture', w: 48, h: 12,
+    svg: R(-24, -6, 48, 12) +
+      '<line x1="-24" y1="2" x2="24" y2="2" stroke-dasharray="4 3"/>' };
 
   // grosores de línea afinados por categoría (los alzados van más finos y refinados)
   Object.keys(S).forEach(function (k) {

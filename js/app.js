@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.P';
+  var APP_VERSION = 'v27.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -149,6 +149,10 @@
         '<circle cx="14" cy="14" r="0.4" fill="#8a8578" stroke="none"/><line x1="8" y1="7" x2="9.5" y2="8"' + PAT_STROKE + '/>' },
     water: { name: 'Water / Pool', w: 24, h: 12,
       content: '<path d="M0,4 Q3,1 6,4 T12,4 T18,4 T24,4"' + PAT_STROKE + '/><path d="M0,10 Q3,7 6,10 T12,10 T18,10 T24,10"' + PAT_STROKE + '/>' },
+    pool: { name: '🏊 Pool — agua + borde (coping)', w: 24, h: 12, coping: 12,
+      content: '<path d="M0,4 Q3,1 6,4 T12,4 T18,4 T24,4"' + PAT_STROKE + '/><path d="M0,10 Q3,7 6,10 T12,10 T18,10 T24,10"' + PAT_STROKE + '/>' },
+    spa_agua: { name: '♨ Spa / Jacuzzi — agua + borde', w: 16, h: 8, coping: 8,
+      content: '<path d="M0,3 Q2,1 4,3 T8,3 T12,3 T16,3"' + PAT_STROKE + '/><path d="M0,7 Q2,5 4,7 T8,7 T12,7 T16,7"' + PAT_STROKE + '/>' },
     pavers: { name: 'Pavers (running bond)', w: 32, h: 16,
       content: '<path d="M0,8 H32 M0,16 H32 M16,0 V8 M0,8 V16 M32,8 V16"' + PAT_STROKE + '/><path d="M8,8 V16 M24,8 V16"' + PAT_STROKE + '/>' },
     carpet: { name: 'Carpet', w: 12, h: 12,
@@ -949,6 +953,8 @@
     cloud:    { name: '☁ Nube de revisión', dash: '' }
   };
   var curLineStyle = 'solid';
+  // forma de la herramienta Rect: rectangulo o poligono regular (poly3, poly5...)
+  var curShapeKind = 'rect';
   var curDoorType = 'door', curWinType = 'window', curDoorW = 0;   // 0 = ancho por defecto del tipo
   var pendingAreaLabel = false;   // la próxima área/polilínea muestra su medida en el plano
 
@@ -1745,6 +1751,54 @@
     }
     return s;
   }
+  // BORDE DE PISCINA (coping): el mismo poligono desplazado hacia ADENTRO
+  // la distancia d. Se cruzan las aristas ya desplazadas, que es como se
+  // saca un offset de verdad — no vale con encoger hacia el centro porque
+  // en una piscina en L el borde quedaria despegado de un lado.
+  function offsetPolyIn(pts, d) {
+    var n = pts.length;
+    if (n < 3 || !(d > 0)) return null;
+    // sentido del poligono: si el area con signo es negativa, la normal se invierte
+    var a2 = 0;
+    for (var i0 = 0; i0 < n; i0++) {
+      var q1 = pts[i0], q2 = pts[(i0 + 1) % n];
+      a2 += q1[0] * q2[1] - q2[0] * q1[1];
+    }
+    var sg = a2 >= 0 ? 1 : -1;
+    var L = [];
+    for (var i = 0; i < n; i++) {
+      var A = pts[i], B = pts[(i + 1) % n];
+      var dx = B[0] - A[0], dy = B[1] - A[1], len = Math.hypot(dx, dy);
+      if (len < 1e-6) return null;
+      var nx = (dy / len) * sg * -1, ny = (-dx / len) * sg * -1;   // normal hacia adentro
+      L.push([A[0] + nx * d, A[1] + ny * d, B[0] + nx * d, B[1] + ny * d]);
+    }
+    var out = [];
+    for (var k = 0; k < n; k++) {
+      var e1 = L[(k - 1 + n) % n], e2 = L[k];
+      var r1x = e1[2] - e1[0], r1y = e1[3] - e1[1];
+      var r2x = e2[2] - e2[0], r2y = e2[3] - e2[1];
+      var den = r1x * r2y - r1y * r2x;
+      if (Math.abs(den) < 1e-9) { out.push([e2[0], e2[1]]); continue; }
+      var t = ((e2[0] - e1[0]) * r2y - (e2[1] - e1[1]) * r2x) / den;
+      out.push([+(e1[0] + r1x * t).toFixed(2), +(e1[1] + r1y * t).toFixed(2)]);
+    }
+    // si el borde es mas ancho que la piscina, el offset se da vuelta: no se dibuja
+    var a3 = 0;
+    for (var i2 = 0; i2 < n; i2++) {
+      var s1 = out[i2], s2 = out[(i2 + 1) % n];
+      a3 += s1[0] * s2[1] - s2[0] * s1[1];
+    }
+    if (a3 * a2 <= 0 || Math.abs(a3) < Math.abs(a2) * 0.04) return null;
+    return out;
+  }
+  function copingDe(a) {
+    if (a.open) return 0;
+    if (a.coping != null) return Number(a.coping) || 0;
+    var pt = AREA_PATTERNS[a.pattern];
+    return (pt && pt.coping) || 0;
+  }
+
   function renderAreas() {
     var out = '';
     state.areas.forEach(function (a) {
@@ -1755,6 +1809,20 @@
       var est = LINE_STYLES[a.lineStyle] || LINE_STYLES.solid;
       var dash = est.dash ? ' stroke-dasharray="' + est.dash + '"' : '';
       var col = a.color || '#14161a', lw = a.lw || est.lw || 0.9;
+      // el borde de la piscina va DEBAJO: el agua se dibuja dentro de el
+      var cop = copingDe(a);
+      if (cop > 0) {
+        var inner = offsetPolyIn(a.pts, cop);
+        if (inner) {
+          // la banda del coping queda en blanco (es el borde de concreto) y el
+          // agua solo llena el poligono de adentro
+          out += '<path d="' + d + '" fill="#ffffff" stroke="none"' + opAttr(a) + '/>';
+          out += '<path d="M' + inner.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z" fill="' + fill +
+            '" stroke="' + col + '" stroke-width="' + Math.max(0.6, lw * 0.8) + '" stroke-linejoin="round"' + opAttr(a) + '/>';
+          fill = 'none';
+          lw = Math.max(lw, 1.5);
+        }
+      }
       out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
@@ -2646,7 +2714,18 @@
       drawing.cursor = np;                                  // el clic usa el punto YA guiado
       var d = 'M' + drawing.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' L' + np[0] + ',' + np[1];
       var largoPrev = Math.hypot(np[0] - ult[0], np[1] - ult[1]);
-      G.prev.innerHTML = '<g class="preview">' + guiasVivas +
+      // el PRIMER punto se marca en cuanto hay 2 tramos: ahí se cierra
+      var cerrarMk = '';
+      if (drawing.pts.length >= 2) {
+        var pc = drawing.pts[0], rc2 = 6 / (view.z || 1);
+        var cerca2 = Math.hypot(np[0] - pc[0], np[1] - pc[1]) < 14 / (view.z || 1);
+        cerrarMk = '<circle cx="' + pc[0] + '" cy="' + pc[1] + '" r="' + rc2 +
+          '" fill="' + (cerca2 ? 'rgba(10,143,60,.25)' : 'none') + '" stroke="#0a8f3c" stroke-width="' +
+          ((cerca2 ? 2 : 1.1) / (view.z || 1)) + '"/>';
+        if (cerca2) cerrarMk += '<path d="M' + drawing.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') +
+          ' Z" fill="rgba(10,143,60,.10)" stroke="#0a8f3c" stroke-width="' + (1.2 / (view.z || 1)) + '"/>';
+      }
+      G.prev.innerHTML = '<g class="preview">' + guiasVivas + cerrarMk +
         '<path d="' + d + '" fill="none" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/>' +
         '<text class="lbl" x="' + ((ult[0] + np[0]) / 2 + 8) + '" y="' + ((ult[1] + np[1]) / 2 - 8) +
         '" font-size="9" font-weight="bold">' + fmtFtIn(largoPrev) + '</text></g>';
@@ -3088,6 +3167,17 @@
 
   /* --- superficies / techos --- */
   function areaDown(p) {
+    // CERRAR TOCANDO EL PRIMER PUNTO (Edgar, 08/30: "no me dejaba cerrar las
+    // líneas y se veía como despegado"). Es lo que hace cualquier CAD: el
+    // primer vértice tiene su propio imán, siempre, aunque los demás estén
+    // apagados — cerrar exacto no puede depender de la puntería.
+    if (drawing && drawing.pts && drawing.pts.length >= 2) {
+      var p0 = drawing.pts[0];
+      if (Math.hypot(p[0] - p0[0], p[1] - p0[1]) < 14 / (view.z || 1)) {
+        finishAreaChain(true);           // true = cerrado en el primer punto
+        return;
+      }
+    }
     // el punto que se guarda es el YA GUIADO (el que se ve en la vista previa),
     // no el crudo del cursor: si no, el clic caía un pelo fuera de la guía
     var np = (drawing && drawing.cursor) ? drawing.cursor : snapWallPt(p);
@@ -3109,6 +3199,21 @@
     if (kind === 'rect') {
       return [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]];
     }
+    // POLÍGONOS REGULARES (Edgar, 08/30: "ponme la opción de crear polígonos
+    // no solo rectángulos y círculos"). Se dibujan inscritos en la caja que
+    // arrastras, con la punta arriba, y con la esquina superior izquierda.
+    var mp = /^poly(\d+)$/.exec(kind);
+    if (mp) {
+      var n = parseInt(mp[1], 10);
+      var cxp = (a[0] + b[0]) / 2, cyp = (a[1] + b[1]) / 2;
+      var rxp = Math.abs(b[0] - a[0]) / 2 || 1, ryp = Math.abs(b[1] - a[1]) / 2 || 1;
+      var out = [];
+      for (var k3 = 0; k3 < n; k3++) {
+        var an3 = -Math.PI / 2 + (k3 / n) * Math.PI * 2;   // punta arriba
+        out.push([+(cxp + rxp * Math.cos(an3)).toFixed(2), +(cyp + ryp * Math.sin(an3)).toFixed(2)]);
+      }
+      return out;
+    }
     // elipse aproximada con 24 puntos
     var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
     var rx = Math.abs(b[0] - a[0]) / 2 || 1, ry = Math.abs(b[1] - a[1]) / 2 || 1;
@@ -3121,6 +3226,8 @@
   }
   function shapeDown(p, kind, ev) {
     var np = [Math.round(p[0]), Math.round(p[1])];
+    // la herramienta Rect dibuja la forma elegida en su menu (rect o poligono)
+    if (kind === 'rect') kind = curShapeKind || 'rect';
     if (!drawing) { drawing = { mode: 'shape2', kind: kind, a: np }; return; }
     var isCloud = drawing.kind === 'cloud';
     var pts = shapePts(isCloud ? 'rect' : drawing.kind, drawing.a, np, ev && ev.shiftKey);
@@ -3133,10 +3240,10 @@
     refresh();
   }
 
-  function finishAreaChain() {
+  function finishAreaChain(cerrado) {
     if (!drawing || drawing.mode !== 'areachain') return;
     var pts = drawing.pts;
-    var isLine = tool === 'pline';
+    var isLine = tool === 'pline' && !cerrado;   // cerrar en el 1er punto = polígono
     drawing = null; G.prev.innerHTML = '';
     // quita el último punto si quedó duplicado por el doble clic
     if (pts.length > 1) {
@@ -4170,6 +4277,10 @@
         });
         html += '</select></div>';
         html += '<div class="row"><label>Rotación</label><input id="prAreaRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
+        html += '<div class="row"><label>Borde (coping)</label><select id="prCoping">' +
+          [['0', 'Sin borde'], ['8', '8\"'], ['12', '12\" (normal)'], ['16', '16\"'], ['18', '18\"'], ['24', '24\" (deck)']].map(function (c9) {
+            return '<option value="' + c9[0] + '"' + (copingDe(e) === parseFloat(c9[0]) ? ' selected' : '') + '>' + c9[1] + '</option>';
+          }).join('') + '</select></div>';
       }
       html += '<div class="row"><label>Line</label><select id="prAreaLine">' +
         Object.keys(LINE_STYLES).map(function (k5) {
@@ -4298,6 +4409,7 @@
       pushUndo(); e.pattern = n.value; refresh();
     });
     on('prAreaRot', 'change', function (n) { pushUndo(); e.rot = parseFloat(n.value) || 0; refresh(); });
+    on('prCoping', 'change', function (n) { pushUndo(); e.coping = parseFloat(n.value) || 0; refresh(); showProps(); });
     on('prAreaLine', 'change', function (n) { pushUndo(); e.lineStyle = n.value; refresh(); });
     $$('#prColorRow .sw').forEach(function (sw) {
       sw.addEventListener('click', function () {
@@ -9530,6 +9642,13 @@
         var sel3 = curDoorType === 'garage' && curDoorW === t3[0];
         html += '<div class="tmItem' + (sel3 ? ' cur' : '') + '" data-k="garage" data-w="' + t3[0] + '"><span>Garage ' + t3[1] + '</span></div>';
       });
+    } else if (kind === 'rect') {
+      html += '<div class="tmHead">Forma</div>';
+      [['rect', '▭ Rectángulo / cuadrado'], ['poly3', '△ Triángulo'], ['poly5', '⬠ Pentágono'], ['poly6', '⬡ Hexágono'], ['poly8', '⯃ Octágono'], ['poly12', '◯ Dodecágono']].forEach(function (fk) {
+        html += '<div class="tmItem' + (fk[0] === curShapeKind ? ' cur' : '') + '" data-k="' + fk[0] + '"><span>' + esc(fk[1]) + '</span></div>';
+      });
+      html += '<div class="tmHead">Dibujo libre</div>';
+      html += '<div class="tmItem" data-k="__pline"><span>⌐ Polígono a mano — clic en cada esquina y cierra en el 1er punto</span></div>';
     } else if (kind === 'window') {
       html += '<div class="tmHead">Tipo de ventana</div>';
       ['window', 'slider'].forEach(function (k) {
@@ -9591,6 +9710,17 @@
           }
           setTool('door');
           setHint(OPEN_NAMES[k] + (curDoorW ? ' de ' + fmtFtIn(curDoorW) : '') + ' — haz clic sobre una pared para colocarla');
+        } else if (kind === 'rect') {
+          if (k === '__pline') {
+            setTool('pline');
+            setHint('Polígono a mano: clic en cada esquina y CIERRA haciendo clic en el primer punto (el círculo verde) — o Enter/doble clic para dejarlo abierto');
+          } else {
+            curShapeKind = k;
+            setTool('rect');
+            setHint(k === 'rect'
+              ? 'Rectángulo: 2 clics (SHIFT = cuadrado)'
+              : 'Polígono de ' + k.slice(4) + ' lados: 2 clics para la caja (SHIFT = regular exacto)');
+          }
         } else if (kind === 'window') {
           curWinType = k;
           setTool('window');

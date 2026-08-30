@@ -1,7 +1,7 @@
 /* MXP Planos — service worker
    Estrategia: RED PRIMERO (siempre busca la versión nueva); la copia en
    caché se usa solo sin internet. Así cada actualización llega sola. */
-var CACHE = 'mxp-v2';
+var CACHE = 'mxp-v3';
 var CORE = [
   './', 'index.html', 'css/app.css', 'js/config.js', 'js/logo.js',
   'js/symbols.js', 'js/app.js',
@@ -18,8 +18,17 @@ self.addEventListener('activate', function (e) {
 });
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET' || e.request.url.indexOf(self.location.origin) !== 0) return;
+  // no-cache: cada carga REVALIDA contra el servidor (ETag → 304 baratito).
+  // Sin esto, GitHub Pages deja el js viejo 10 minutos en el caché HTTP y
+  // la versión nueva "no llega" aunque ya esté publicada.
+  var req;
+  try {
+    req = e.request.mode === 'navigate'
+      ? new Request(e.request.url, { cache: 'no-cache' })
+      : new Request(e.request, { cache: 'no-cache' });
+  } catch (err) { req = e.request; }
   e.respondWith(
-    fetch(e.request).then(function (res) {
+    fetch(req).then(function (res) {
       try {
         if (res && res.ok) {
           var copy = res.clone();
@@ -28,7 +37,13 @@ self.addEventListener('fetch', function (e) {
       } catch (err) {}
       return res;
     }).catch(function () {
-      return caches.match(e.request).then(function (r) { return r || caches.match('index.html'); });
+      return caches.match(e.request).then(function (r) {
+        if (r) return r;
+        // solo la navegación (abrir la app) puede caer al index;
+        // un .js/.css jamás — servir HTML como JS rompe la app a medias
+        if (e.request.mode === 'navigate') return caches.match('index.html');
+        return new Response('', { status: 504, statusText: 'offline' });
+      });
     })
   );
 });
