@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v27.O';
+  var APP_VERSION = 'v27.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -377,7 +377,11 @@
   /* ---------------- snap ---------------- */
   // OSNAP: agarra extremos, puntos medios, centros de símbolos y vértices cercanos
   function osnapPt(p) {
-    var r = 9 / view.z + 3, best = null;
+    // el punto verde se VE desde lejos (es la referencia que pidió Edgar),
+    // pero llevarte el punto es otra cosa: eso solo pasa si vas casi encima.
+    // Antes agarraba en el mismo radio en que se veía y "no dejaba poner la
+    // línea donde uno quiere" (08/30).
+    var r = 12 / view.z, best = null;
     function cand(x, y, kind) {
       var d = Math.hypot(p[0] - x, p[1] - y);
       if (d < r && (!best || d < best.d)) best = { x: x, y: y, d: d, kind: kind };
@@ -407,7 +411,13 @@
     // el snap no aplica al segundo clic del callout (posición del texto libre)
     if (drawing && drawing.mode === 'twopoint' && drawing.kind === 'leader') return { p: p, sn: null };
     var sn = osnapPt(p);
-    return sn ? { p: [sn.x, sn.y], sn: sn } : { p: p, sn: null };
+    if (!sn) return { p: p, sn: null };
+    if (!imanesOn) return { p: p, sn: sn };        // se ve la marca, no tira
+    // SEÑALA SIEMPRE, LLEVA SOLO SI VAS A ÉL: la marca verde se dibuja en
+    // cuanto hay un punto notable cerca, pero el cursor solo se pega cuando
+    // estás prácticamente encima (4 px). Así la referencia ayuda sin mandar.
+    var pega = sn.d <= 4 / view.z;
+    return { p: pega ? [sn.x, sn.y] : p, sn: sn };
   }
 
   // FILLET al dibujar: la punta que se pasa del cruce se RECORTA y la que
@@ -790,6 +800,12 @@
   }
 
   function snapWallPt(p) {
+    // con los imanes apagados, el punto cae donde tocaste (solo se redondea a
+    // la precisión elegida en el panel: ¼" por defecto)
+    if (!imanesOn) {
+      var gs0 = 1 / (state.precision || 4);
+      return [Math.round(p[0] / gs0) * gs0, Math.round(p[1] / gs0) * gs0];
+    }
     // 1) extremos y puntos medios de paredes existentes (las esquinas mandan)
     for (var i = 0; i < state.walls.length; i++) {
       var w = state.walls[i];
@@ -806,8 +822,10 @@
     //    cursor agarra la línea de CENTRO y la pared nueva se inserta sobre
     //    ese mismo eje — exacto, que estamos hablando de medidas. La
     //    tolerancia encoge con el zoom: acércate y el imán afina.
+    // el eje y la cara de una pared imantan MUY de cerca: son ayuda para
+    // calcar encima, no para que la línea se te vaya sola (Edgar, 08/30)
     var eje = null;
-    var tolEje = 6 / view.z + 2;
+    var tolEje = 4 / view.z;
     state.walls.forEach(function (w2) {
       var Lw2 = Math.hypot(w2.x2 - w2.x1, w2.y2 - w2.y1);
       if (Lw2 < 0.01) return;
@@ -942,6 +960,23 @@
     setHint(orthoOn ? 'ORTHO 90° activado — dibujar Y arrastrar sale siempre recto (F8 o el botón para apagarlo)' : 'ORTHO 90° apagado — con Shift apretado sigue saliendo recto');
   }
   $('#btnOrtho').addEventListener('click', function () { setOrtho(!orthoOn); });
+
+  // 🧲 IMANES ON/OFF (Edgar, 08/30: "las líneas me siguen llevando a lo
+  // automático y no me dejan ponerla donde yo quiero; yo solo quiero que los
+  // puntos verdes sean de referencia"). Apagados, el punto cae EXACTAMENTE
+  // donde tocas (redondeado a la precisión del panel) y las guías verdes y
+  // las marcas de osnap se siguen viendo — pero no tiran de nada.
+  var imanesOn = true;
+  function setImanes(v) {
+    imanesOn = v;
+    var bt = $('#btnImanes');
+    if (bt) bt.classList.toggle('active', imanesOn);
+    setHint(imanesOn
+      ? '🧲 Imanes ENCENDIDOS — el punto se pega a esquinas y ejes de lo ya dibujado'
+      : '🧲 Imanes APAGADOS — la línea cae donde tú toques; las marcas verdes quedan solo de referencia');
+  }
+  var bImanes = $('#btnImanes');
+  if (bImanes) bImanes.addEventListener('click', function () { setImanes(!imanesOn); });
   function wantOrtho(ev) { return orthoOn || (ev && ev.shiftKey); }
   // medir/cotas/calibrar: si la línea va CASI recta, se endereza sola (como
   // Bluebeam) — con ORTHO o Shift el candado es total
