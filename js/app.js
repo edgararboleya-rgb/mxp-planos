@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.V';
+  var APP_VERSION = 'v28.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2044,6 +2044,51 @@
     return (pt && pt.coping) || 0;
   }
 
+  /* PUNTAS EN LA POLILINEA (Edgar, 31/08: "por qué las líneas que hago con el
+     polyline no puedo hacerles lo de las flechas"). Porque una polilínea NO
+     es una línea de cableado: por dentro es la misma pieza que un área, solo
+     que sin cerrar. Heredó el grosor, el color y el tipo de trazo del área,
+     pero las puntas se habían quedado en la herramienta Cable. Ahora usa las
+     MISMAS siete puntas y el mismo recorte, con el color de la polilínea. */
+  function plineTang(a) {
+    var n = a.pts.length;
+    if (n < 2) return null;
+    function u(A, B) {
+      var dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy) || 1;
+      return [dx / L, dy / L];
+    }
+    var us = u(a.pts[0], a.pts[1]);              // hacia dentro en el arranque
+    var ue = u(a.pts[n - 2], a.pts[n - 1]);      // hacia fuera en el final
+    return { s: [-us[0], -us[1]], e: ue };
+  }
+  function plineCaps(a) {
+    if (!a.open) return '';
+    if ((!a.capS || a.capS === 'none') && (!a.capE || a.capE === 'none')) return '';
+    var tg = plineTang(a);
+    if (!tg) return '';
+    var n = a.pts.length, lw = a.lw || 0.9, col = a.color || '#14161a';
+    return capMarkup(a.pts[0], tg.s, a.capS, lw, col) +
+      capMarkup(a.pts[n - 1], tg.e, a.capE, lw, col);
+  }
+  // el trazo termina donde arranca la cabeza — mismo motivo que en el cable
+  function plineRecortada(a) {
+    if (!a.open) return a;
+    var lw = a.lw || 0.9;
+    var dS = capTrim(a.capS, lw), dE = capTrim(a.capE, lw);
+    if (!dS && !dE) return a;
+    var tg = plineTang(a);
+    if (!tg) return a;
+    var n = a.pts.length;
+    var q = {}; for (var k in a) q[k] = a[k];
+    q.pts = a.pts.map(function (P) { return [P[0], P[1]]; });
+    var l0 = Math.hypot(a.pts[1][0] - a.pts[0][0], a.pts[1][1] - a.pts[0][1]);
+    var l1 = Math.hypot(a.pts[n - 1][0] - a.pts[n - 2][0], a.pts[n - 1][1] - a.pts[n - 2][1]);
+    dS = Math.min(dS, l0 / 3); dE = Math.min(dE, l1 / 3);
+    q.pts[0] = [a.pts[0][0] - tg.s[0] * dS, a.pts[0][1] - tg.s[1] * dS];
+    q.pts[n - 1] = [a.pts[n - 1][0] - tg.e[0] * dE, a.pts[n - 1][1] - tg.e[1] * dE];
+    return q;
+  }
+
   function renderAreas() {
     var out = '';
     state.areas.forEach(function (a) {
@@ -2052,7 +2097,7 @@
       if (a.open || a.pattern === 'none' || !pdef) fill = 'none';
       else if (pdef.solid) fill = pdef.solid;
       else fill = 'url(#' + ensurePattern(a.pattern, a.rot || 0) + ')';
-      var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open) : areaPath(a);
+      var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open) : areaPath(plineRecortada(a));
       // el preset trae su tipo de linea; si el usuario eligio otra, manda la suya
       var est = LINE_STYLES[a.lineStyle] || (pdef && pdef.dash && !a.open ? LINE_STYLES[pdef.dash] : null) || LINE_STYLES.solid;
       var dash = est.dash ? ' stroke-dasharray="' + est.dash + '"' : '';
@@ -2072,6 +2117,7 @@
         }
       }
       out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
+      if (a.open) out += plineCaps(a);
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
         var cx = 0, cy = 0;
@@ -2236,6 +2282,30 @@
     ['ortho', 'Thin L / ortho (solid)'],
     ['orthodashed', 'Dashed L / ortho']
   ];
+  /* Las MISMAS puntas para el cable y para la polilínea: si en un sitio hay
+     siete y en el otro ninguna, el que dibuja no entiende por qué. */
+  var CAPS_OPTS = [
+    ['none', '— ninguna'],
+    ['arrow', '➤ Flecha llena'],
+    ['arrowSlim', '➤ Flecha fina (feeder)'],
+    ['arrowOpen', '↗ Flecha abierta (en V)'],
+    ['dot', '● Punto lleno'],
+    ['circle', '○ Círculo hueco'],
+    ['diamond', '◆ Rombo'],
+    ['tick', '/ Raya']
+  ];
+  function filasPuntas(e, pref) {
+    var h = '';
+    [['S', 'Inicio'], ['E', 'Final']].forEach(function (m) {
+      var key = 'cap' + m[0];
+      h += '<div class="row"><label>' + m[1] + '</label><select id="' + pref + m[0] + '">' +
+        CAPS_OPTS.map(function (c) {
+          return '<option value="' + c[0] + '"' + ((e[key] || 'none') === c[0] ? ' selected' : '') + '>' + c[1] + '</option>';
+        }).join('') + '</select></div>';
+    });
+    return h;
+  }
+
   /* GROSOR DE LINEA (Edgar, 31/08: "que tambien las lineas pueda editarles
      el grosor"). En pulgadas de mundo, que es como mide todo lo demas. Las
      puntas se escalan solas con este numero. */
@@ -2283,14 +2353,15 @@
          ella. */
   var LW_BASE = 0.7;                    // el grosor por defecto de .wire
   function lwDe(w) { return w && w.lw ? w.lw : LW_BASE; }
-  function capMarkup(P, u, type, lw) {
+  function capMarkup(P, u, type, lw, col) {
     if (!type || type === 'none') return '';
     var k = (lw || LW_BASE) / LW_BASE;   // todo escala con el grosor
+    col = col || '#14161a';
     var nx = -u[1], ny = u[0];
     var f = function (v) { return (+v).toFixed(2); };
     function poly(pts) {
       return '<polygon points="' + pts.map(function (q) { return f(q[0]) + ',' + f(q[1]); }).join(' ') +
-        '" fill="#14161a" stroke="none"/>';
+        '" fill="' + col + '" stroke="none"/>';
     }
     function atras(d) { return [P[0] - u[0] * d * k, P[1] - u[1] * d * k]; }
     function lado(B, d) { return [B[0] + nx * d * k, B[1] + ny * d * k]; }
@@ -2306,17 +2377,17 @@
       var b3 = atras(3.4), a = lado(b3, 1.5), b = lado(b3, -1.5);
       var g = (0.55 * k).toFixed(2);
       return '<line x1="' + f(P[0]) + '" y1="' + f(P[1]) + '" x2="' + f(a[0]) + '" y2="' + f(a[1]) +
-        '" stroke="#14161a" stroke-width="' + g + '" stroke-linecap="round"/>' +
+        '" stroke="' + col + '" stroke-width="' + g + '" stroke-linecap="round"/>' +
         '<line x1="' + f(P[0]) + '" y1="' + f(P[1]) + '" x2="' + f(b[0]) + '" y2="' + f(b[1]) +
-        '" stroke="#14161a" stroke-width="' + g + '" stroke-linecap="round"/>';
+        '" stroke="' + col + '" stroke-width="' + g + '" stroke-linecap="round"/>';
     }
     if (type === 'dot') {
       return '<circle cx="' + f(P[0]) + '" cy="' + f(P[1]) + '" r="' + (1.1 * k).toFixed(2) +
-        '" fill="#14161a" stroke="none"/>';
+        '" fill="' + col + '" stroke="none"/>';
     }
     if (type === 'circle') {             // circulito HUECO (empalme, nodo)
       return '<circle cx="' + f(P[0]) + '" cy="' + f(P[1]) + '" r="' + (1.3 * k).toFixed(2) +
-        '" fill="#ffffff" stroke="#14161a" stroke-width="' + (0.5 * k).toFixed(2) + '"/>';
+        '" fill="#ffffff" stroke="' + col + '" stroke-width="' + (0.5 * k).toFixed(2) + '"/>';
     }
     if (type === 'diamond') {            // rombo
       var c = atras(1.5);
@@ -2327,7 +2398,7 @@
       var t = 2.0 * k;
       return '<line x1="' + f(P[0] + nx * t) + '" y1="' + f(P[1] + ny * t) +
         '" x2="' + f(P[0] - nx * t) + '" y2="' + f(P[1] - ny * t) +
-        '" stroke="#14161a" stroke-width="' + (0.7 * k).toFixed(2) + '"/>';
+        '" stroke="' + col + '" stroke-width="' + (0.7 * k).toFixed(2) + '"/>';
     }
     return '';
   }
@@ -4960,24 +5031,7 @@
         LW_OPTS.map(function (o) {
           return '<option value="' + o[0] + '"' + (lwDe(e) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
         }).join('') + '</select></div>';
-      var CAPS = [
-        ['none', '— ninguna'],
-        ['arrow', '➤ Flecha llena'],
-        ['arrowSlim', '➤ Flecha fina (feeder)'],
-        ['arrowOpen', '↗ Flecha abierta (en V)'],
-        ['dot', '● Punto lleno'],
-        ['circle', '○ Círculo hueco'],
-        ['diamond', '◆ Rombo'],
-        ['tick', '/ Raya']
-      ];
-      ['S:Inicio', 'E:Final'].forEach(function (m) {
-        var parts = m.split(':'), key = 'cap' + parts[0];
-        html += '<div class="row"><label>' + parts[1] + '</label><select id="prWireCap' + parts[0] + '">';
-        CAPS.forEach(function (c) {
-          html += '<option value="' + c[0] + '"' + ((e[key] || 'none') === c[0] ? ' selected' : '') + '>' + c[1] + '</option>';
-        });
-        html += '</select></div>';
-      });
+      html += filasPuntas(e, 'prWireCap');
       html += '<button id="prWireFlip">↕ Cambiar lado del arco</button>';
       html += '<button id="prWireToWall">▬ Convertir en pared</button>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
@@ -5017,6 +5071,9 @@
         [['0.5', 'Fina'], ['0.9', 'Normal'], ['1.5', 'Gruesa'], ['2.4', 'Extra gruesa']].map(function (o2) {
           return '<option value="' + o2[0] + '"' + ((e.lw || 0.9) === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
         }).join('') + '</select></div>';
+      // las puntas SOLO tienen sentido en la polilínea abierta: un polígono
+      // cerrado no tiene principio ni final
+      if (e.open) html += filasPuntas(e, 'prAreaCap');
       html += '<div class="row"><label>Esquinas</label><select id="prRc">' +
         [['0', '∟ Rectas'], ['2', 'Redondeadas r 2\"'], ['4', 'r 4\"'], ['6', 'r 6\"'], ['9', 'r 9\"'],
          ['12', 'r 12\" (1 ft)'], ['18', 'r 18\"'], ['24', 'r 24\" (2 ft)'], ['36', 'r 36\" (3 ft)']].map(function (rr9) {
@@ -5248,6 +5305,8 @@
     on('prWireBulge', 'change', function (n) { pushUndo(); e.bulge = Math.max(-0.6, Math.min(0.6, parseFloat(n.value) || 0.22)); refresh(); });
     on('prWireFlip', 'click', function () { pushUndo(); e.side = -(e.side || 1); refresh(); });
     on('prWireLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.7; lastWireLw = e.lw; refresh(); });
+    on('prAreaCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
+    on('prAreaCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
     on('prWireCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
     on('prWireCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
     on('prWireToWall', 'click', function () {
