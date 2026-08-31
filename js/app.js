@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.E';
+  var APP_VERSION = 'v28.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5921,7 +5921,9 @@
     h += '<div style="border-top:1px solid #e3e1da;margin-top:12px;padding-top:12px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<div style="font-weight:700;font-size:12.5px">💬 Pregúntale a Claude sobre este plano</div>' +
-      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">⚙ Ajustes</button></div>' +
+      '<div style="display:flex;gap:5px">' +
+      (cfg.url ? '<button id="aiPingBtn" title="Comprueba dirección, token y qué instrucciones corren. No cuesta nada." style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">🔌 Probar</button>' : '') +
+      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">⚙ Ajustes</button></div></div>' +
       (cfg.url
         ? '<div class="muted small" style="margin:4px 0 6px">Va con el plano entero y el diagnóstico de arriba. Cuesta unos 9 centavos por pregunta.</div>' +
           '<textarea id="aiPreg" rows="2" placeholder="ej: ¿cómo armo estas 13 piezas? · ¿este cuarto puede ser dormitorio? · ¿qué circuitos necesita esta cocina?" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-family:inherit;font-size:12.5px"></textarea>' +
@@ -5961,6 +5963,8 @@
     });
     var mb = $('#aiMedOk');
     if (mb) mb.addEventListener('click', corregirMedida);
+    var pb = $('#aiPingBtn');
+    if (pb) pb.addEventListener('click', function () { $('#aiModal').hidden = true; pingCerebro(); });
     var cb = $('#aiCfgBtn');
     if (cb) cb.addEventListener('click', configurarCerebro);
     var pb = $('#aiPregOk');
@@ -5980,6 +5984,30 @@
       };
     } catch (e) { return { url: '', tok: '' }; }
   }
+  /* PROBAR LA CONEXION, SIN PASAR POR LOS AJUSTES (Edgar, 30/08: "¿dónde está
+     lo de probar conexión?"). Estaba escondido: el ping solo se disparaba al
+     GUARDAR los ajustes, así que para comprobar el cerebro había que abrir dos
+     ventanas de configuración y darle OK a cosas que no querías tocar. Es el
+     ping de siempre — gratis, no llama a Claude. */
+  function pingCerebro() {
+    var c2 = cerebroCfg();
+    if (!c2.url) { setHint('🔌 Falta la dirección del cerebro — ponla en ⚙ Ajustes'); return; }
+    setHint('🔌 Probando el cerebro…');
+    fetch(c2.url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-mxp-token': c2.tok },
+      body: JSON.stringify({ ping: true })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.texto === 'pong') setHint('🔌 ✓ Cerebro conectado de verdad' +
+        (d.modelo ? ' (' + d.modelo + ')' : '') +
+        (d.cerebro ? ' · instrucciones: ' + d.cerebro : ''));
+      // "Falta la pregunta" ante un ping = worker anterior al ping: la
+      // dirección y el token son buenos, lo viejo es el worker
+      else if (/Falta la pregunta/.test(d.error || ''))
+        setHint('🔌 ⚠️ Dirección y token BIEN — el cerebro contestó. Lo que está viejo es el worker: en la laptop, cd max-power-app\\mxp-brain · git pull · wrangler deploy');
+      else setHint('🔌 ✗ ' + (d.error || 'Esa dirección contesta, pero no es el cerebro MXP'));
+    }).catch(function (e) { setHint('🔌 ✗ No se llega al cerebro: ' + e.message); });
+  }
   function configurarCerebro() {
     var c = cerebroCfg();
     uiPrompt('Dirección del cerebro (el worker de Cloudflare).\n\nEj: https://cerebro-mxp.tucuenta.workers.dev\n\nDéjalo vacío para desconectarlo.', c.url, function (u) {
@@ -5990,24 +6018,7 @@
         if (t !== null) { try { localStorage.setItem('mxpCerebroTok', t.trim()); } catch (e) {} }
         // ping GRATIS al guardar: así se sabe AHORA si la dirección y el
         // token son buenos, no cuando falle la primera pregunta de verdad
-        var c2 = cerebroCfg();
-        if (c2.url) {
-          setHint('🔌 Probando el cerebro…');
-          fetch(c2.url, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', 'x-mxp-token': c2.tok },
-            body: JSON.stringify({ ping: true })
-          }).then(function (r) { return r.json(); }).then(function (d) {
-            if (d.texto === 'pong') setHint('🔌 ✓ Cerebro conectado de verdad' +
-              (d.modelo ? ' (' + d.modelo + ')' : '') +
-              (d.cerebro ? ' · instrucciones: ' + d.cerebro : ''));
-            // "Falta la pregunta" ante un ping = worker anterior al ping: la
-            // dirección y el token son buenos, lo viejo es el worker
-            else if (/Falta la pregunta/.test(d.error || ''))
-              setHint('🔌 ⚠️ Dirección y token BIEN — el cerebro contestó. Lo que está viejo es el worker: en la laptop, cd max-power-app\\mxp-brain · git pull · wrangler deploy');
-            else setHint('🔌 ✗ ' + (d.error || 'Esa dirección contesta, pero no es el cerebro MXP'));
-          }).catch(function (e) { setHint('🔌 ✗ No se llega al cerebro: ' + e.message); });
-        }
+        if (cerebroCfg().url) pingCerebro();
         abrirAsistente();
       });
     });
