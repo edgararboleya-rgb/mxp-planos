@@ -202,7 +202,7 @@
             <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
             <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
           </div>
-          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Revisa el plano y te dice qué está mal y cómo arreglarlo">🤖 Asistente: revisar el plano</button></div>
+          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Pregúntale a Claude sobre este plano. No toca nada: contesta.">💬 Preguntarle a Claude</button></div>
           <div class="sub"><button id="btnPlanoIA" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="El cerebro lee la imagen del plano (el fondo, o una foto que escojas) y arma los cuartos como piezas editables">🪄 IA: plano desde imagen</button></div>
           <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí">📋 Recibo del último escaneo importado</button></div>
           <div class="sub"><button id="btnGuiaDel" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Borrar el contorno de guia calcado del survey (las piezas se quedan donde estan)">🧭</button><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
@@ -314,7 +314,7 @@
 <div id="aiModal" class="modal" hidden style="z-index:75">
   <div class="modalBox" style="width:min(760px,96vw)">
     <div class="modalHead">
-      <b>🤖 ASISTENTE MXP — revisión del plano</b>
+      <b>💬 PREGÚNTALE A CLAUDE — sobre este plano</b>
       <div class="mbtns"><button id="aiClose">✕ Cerrar</button></div>
     </div>
     <div id="aiBody" class="pbody"></div>

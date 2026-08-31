@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.F';
+  var APP_VERSION = 'v28.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5893,39 +5893,30 @@
     return { av: av, rooms: rooms.length, paredes: W.length };
   }
 
+  /* EL ASISTENTE YA NO TOCA EL PLANO (Edgar, 30/08, después de que le
+     destrozara la casa de Caroline: "supuestamente había paredes que no
+     estaban rectas y lo que hizo fue joroba rlas, porque sí estaban rectas").
+     Tenía razón y el fallo era de raíz, el MISMO que ya me había cazado con
+     el SHIFT: el chequeo medía cada pared contra los ejes DEL PAPEL. Su casa
+     está girada un par de grados respecto a la hoja, así que TODAS sus
+     paredes salían "torcidas 1-2°" — y el arreglo las aplastaba a horizontal
+     o vertical del papel, abriendo las esquinas y despegando lo que estaba
+     bien. Ese chequeo se escribió para planos ESCANEADOS, donde sí hay ruido
+     del sensor; en un plano dibujado a mano no hay ruido ninguno que quitar.
+     Un botón que "arregla" solo y se equivoca es peor que no tenerlo: cuesta
+     horas de trabajo. Queda el chat, que aconseja y no mueve nada. */
   function abrirAsistente() {
-    if (!state.walls.length) { uiAlert('Todavía no hay paredes en la hoja. Importa un escaneo o dibuja algo y te lo reviso.'); return; }
-    var r = analizarPlano();
-    window.__aiFix = r.av;
-    var h = '<div class="muted small" style="margin-bottom:10px">' + r.paredes + ' paredes · ' + r.rooms +
-      ' cuarto(s) cerrados · revisado ahora mismo, sin internet</div>';
-    if (!r.av.length) {
-      h += '<div style="padding:14px;background:#eafaf0;border-radius:8px;font-size:13px">✅ <b>No le veo nada raro.</b> ' +
-        'Las paredes están a escuadra, los cuartos cierran y las aberturas están cada una en su sitio.</div>';
-    } else {
-      r.av.forEach(function (a, i) {
-        var col = a.sev === 0 ? '#c62828' : (a.sev === 1 ? '#ef6c00' : '#1c5fa8');
-        var bg = a.sev === 0 ? '#fdecea' : (a.sev === 1 ? '#fff4e5' : '#eaf3ff');
-        h += '<div style="border-left:4px solid ' + col + ';background:' + bg + ';padding:10px 12px;margin-bottom:10px;border-radius:0 8px 8px 0">' +
-          '<div style="font-weight:700;font-size:13px;color:' + col + '">' + (a.sev === 0 ? '⛔ ' : (a.sev === 1 ? '⚠️ ' : 'ℹ️ ')) + esc(a.tit) + '</div>' +
-          '<div style="font-size:12px;margin:5px 0;white-space:pre-wrap;line-height:1.45">' + esc(a.txt) + '</div>' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
-          (a.fix ? '<button class="aiFix" data-i="' + i + '" style="padding:5px 12px;border:none;background:' + col + ';color:#fff;border-radius:6px;cursor:pointer;font-size:11.5px;font-weight:700">✔ ' + esc(a.accion) + '</button>' : '') +
-          (a.fix2 ? '<button class="aiFix2" data-i="' + i + '" style="padding:5px 12px;border:none;background:' + col + ';color:#fff;border-radius:6px;cursor:pointer;font-size:11.5px;font-weight:700">' + esc(a.accion2) + '</button>' : '') +
-          (a.refs ? '<button class="aiSel" data-i="' + i + '" style="padding:5px 12px;border:1px solid #c9c9c3;background:#fff;border-radius:6px;cursor:pointer;font-size:11.5px">👁 Enseñármelo en el plano</button>' : '') +
-          '</div></div>';
-      });
-    }
+    var h = '';
     // ——— preguntarle a Claude (el cerebro, si está conectado) ———
     var cfg = cerebroCfg();
-    h += '<div style="border-top:1px solid #e3e1da;margin-top:12px;padding-top:12px">' +
+    h += '<div>' +
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<div style="font-weight:700;font-size:12.5px">💬 Pregúntale a Claude sobre este plano</div>' +
       '<div style="display:flex;gap:5px">' +
       (cfg.url ? '<button id="aiPingBtn" title="Comprueba dirección, token y qué instrucciones corren. No cuesta nada." style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">🔌 Probar</button>' : '') +
       '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">⚙ Ajustes</button></div></div>' +
       (cfg.url
-        ? '<div class="muted small" style="margin:4px 0 6px">Va con el plano entero y el diagnóstico de arriba. Cuesta unos 9 centavos por pregunta.</div>' +
+        ? '<div class="muted small" style="margin:4px 0 6px">Va con el plano entero: cada pared con sus medidas, las aberturas y los cuartos. Cuesta unos 9 centavos por pregunta.</div>' +
           '<textarea id="aiPreg" rows="2" placeholder="ej: ¿cómo armo estas 13 piezas? · ¿este cuarto puede ser dormitorio? · ¿qué circuitos necesita esta cocina?" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-family:inherit;font-size:12.5px"></textarea>' +
           '<button id="aiPregOk" style="margin-top:5px;padding:7px 16px;border:none;background:#0b84ff;color:#fff;border-radius:6px;cursor:pointer;font-weight:700">Preguntar</button>' +
           '<div id="aiResp" style="margin-top:8px;font-size:12.5px;line-height:1.5"></div>'
@@ -5939,28 +5930,6 @@
       '<div id="aiMedMsg" class="muted small" style="margin-top:5px"></div></div>';
     $('#aiBody').innerHTML = h;
     $('#aiModal').hidden = false;
-    $$('.aiFix').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var a = window.__aiFix[+b.dataset.i];
-        if (a && a.fix) { a.fix(); $('#aiModal').hidden = true; setHint('🤖 ' + a.accion + ': hecho — Ctrl+Z lo deshace'); }
-      });
-    });
-    $$('.aiFix2').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var a = window.__aiFix[+b.dataset.i];
-        if (a && a.fix2) { $('#aiModal').hidden = true; a.fix2(); }
-      });
-    });
-    $$('.aiSel').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var a = window.__aiFix[+b.dataset.i];
-        if (!a || !a.refs) return;
-        sel = null; selGroup = a.refs.slice();
-        $('#aiModal').hidden = true;
-        refresh(); renderSel(); zoomSel();
-        setHint('🤖 Ahí está lo que te decía — seleccionado en azul');
-      });
-    });
     var mb = $('#aiMedOk');
     if (mb) mb.addEventListener('click', corregirMedida);
     var pb = $('#aiPingBtn');
@@ -6084,11 +6053,11 @@
     if (state.guia && state.guia.length) {
       L.push('HAY GUÍA en la hoja (' + state.guia.length + ' tramos): el contorno del survey o la casa fantasma — referencia, no cuenta en materiales.');
     }
-    var an = analizarPlano();
-    if (an.av.length) {
-      L.push('DIAGNÓSTICO YA MEDIDO POR LA APP:');
-      an.av.forEach(function (a) { L.push(' [' + (a.sev === 0 ? 'GRAVE' : a.sev === 1 ? 'AVISO' : 'nota') + '] ' + a.tit); });
-    }
+    // Aquí iba el "diagnóstico ya medido por la app". Fuera: ese diagnóstico
+    // medía las paredes contra los ejes DEL PAPEL, y en una casa girada un
+    // par de grados marcaba TODAS como torcidas. Mandárselo a Claude sería
+    // pasarle una mentira medida y que la repita con seguridad. Va la
+    // geometría de verdad —cada pared con sus coordenadas— y que juzgue él.
     return L.join('\n');
   }
   /* El cerebro contesta en markdown (tablas de circuitos, negritas, títulos).
