@@ -169,8 +169,27 @@
   /* ============================ RISER / ONE-LINE ============================ */
   // Equipos para diagramas unifilares E-1 (estilo cajas de permiso, NTS)
 
-  S.riser_meter = { name: 'Meter Can', short: 'Meter', cat: 'riser', layer: 'electrical', w: 44, h: 64,
-    svg: R(-21, -31, 42, 62) + C(0, -14, 11) + T(0, -11.5, 6.5, 'kWh') + L(-21, 2, 21, 2) + T(0, 14, 6.5, 'METER', { bold: true }) };
+  /* METER CAN a secas (Edgar, 30/08: "ese símbolo me parece más compatible
+     con un meter combo; hazme uno que se dibuje como un meter can solamente").
+     Tenía razón: el de antes era una caja ALTA partida en dos secciones —eso
+     es un meter-main, el todo-en-uno con el main adentro—. Un meter can es
+     UNA sola caja, casi cuadrada (13"x17" de verdad), con el disco y su hub
+     de conduit arriba. El combo se queda, pero con su nombre. */
+  S.riser_meter = { name: 'Meter Can (socket)', short: 'Meter Can', cat: 'riser', layer: 'electrical', w: 40, h: 52,
+    svg: R(-6, -26, 12, 5) +                       // el hub del conduit, arriba
+      R(-18, -21, 36, 42) +                        // la caja
+      C(0, -4, 12) + C(0, -4, 9) +                 // el disco y su cristal
+      T(0, -1.4, 6.5, 'kWh') +
+      T(0, 16, 6.5, 'METER', { bold: true }) };
+
+  S.riser_meter_main = { name: 'Meter-Main Combo (medidor + main)', short: 'Meter-Main',
+    cat: 'riser', layer: 'electrical', w: 44, h: 64,
+    svg: R(-21, -31, 42, 62) +
+      C(0, -16, 11) + C(0, -16, 8.5) + T(0, -13.5, 6, 'kWh') +
+      L(-21, -2, 21, -2) +                         // la división de las dos secciones
+      // el main: el interruptor del one-line
+      L(-9, 8, 9, 8, 1.2) + L(-4, 8, 5, 2, 1.2) + C(-4, 8, 1.3) + C(5, 8, 1.3) +
+      T(0, 22, 6, 'MAIN', { bold: true }) };
 
   S.riser_panel = { name: 'Panel / Load Center', short: 'Panel', cat: 'riser', layer: 'electrical', w: 44, h: 64,
     svg: R(-21, -31, 42, 62) + L(0, -24, 0, -6, 1.4) + T(0, 8, 7, 'PANEL', { bold: true }) + T(0, 18, 5.5, '120/240V') };
@@ -185,7 +204,10 @@
     svg: R(-21, -25, 42, 50) + C(0, -4, 12) + T(0, 0.5, 12, 'G', { bold: true }) + T(0, 18, 5.5, 'GEN') };
 
   S.riser_ev = { name: 'EV Charger', short: 'EV', cat: 'riser', layer: 'electrical', w: 38, h: 48,
-    svg: R(-18, -23, 36, 46) + T(0, -2, 9, 'EV', { bold: true }) + '<path d="M-3,2 L2,2 L-1,12 L6,4 L1,4 L4,-4" fill="none" stroke-width="1.1"/>' };
+    svg: R(-18, -23, 36, 46) + T(0, -8, 9, 'EV', { bold: true }) +
+      // el rayo empezaba a la altura del texto y se le montaba encima
+      '<path d="M-3,-2 L2,-2 L-1,8 L6,0 L1,0 L4,-8" fill="none" stroke-width="1.1"/>' +
+      T(0, 17, 6, 'CHARGER', { bold: true }) };
 
   S.riser_xfmr = { name: 'Transformer', short: 'Transformer', cat: 'riser', layer: 'electrical', w: 34, h: 52,
     svg: C(0, -10, 10) + C(0, 6, 10) + T(0, 24, 5.5, 'XFMR') };
