@@ -211,18 +211,42 @@
   }
 
   /* ---- medición y acometida ---- */
-  S.riser_meter = { name: 'Meter Can 200A (socket 15"×9½")', short: 'Meter Can',
-    cat: 'riser', layer: 'electrical', w: 16, h: 24,
-    svg: R(-4.75, -7.5, 9.5, 15) + C(0, -1.5, 3.6) + C(0, -1.5, 2.6) +
-      T(0, -0.4, 2.6, 'kWh') + T(0, 10.6, 3.4, 'METER', { bold: true }) };
+  /* MEDICIÓN — Siemens verificado (agosto 2026)
+       Socket 200A ringless UAT417-XGF ....... 15" x 12"
+       Meter combo MC0816 (8/16) ............. 24½" x 16½"
+       Meter combo MC4040 SECW (40/40) ....... 32¼" x 21" */
+  function meterCan(alto, ancho, rotulo) {
+    var r = Math.min(ancho, alto) * 0.30;
+    return R(-ancho / 2, -alto / 2, ancho, alto) +
+      C(0, -alto * 0.12, r) + C(0, -alto * 0.12, r * 0.74) +
+      T(0, -alto * 0.12 + r * 0.28, r * 0.62, 'kWh') +
+      T(0, alto / 2 - alto * 0.10, Math.min(ancho * 0.26, 5), rotulo, { bold: true });
+  }
+  S.riser_meter = { name: 'Meter Can 200A — Siemens UAT417 (15"×12")', short: 'Meter Can',
+    cat: 'riser', layer: 'electrical', w: 18, h: 24, svg: meterCan(15, 12, 'METER') };
 
-  S.riser_meter_main = { name: 'Meter-Main Combo 200A (Siemens MC4040, 43"×15")', short: 'Meter-Main',
-    cat: 'riser', layer: 'electrical', w: 21, h: 55,
-    svg: R(-7.5, -21.5, 15, 43) +
-      C(0, -13, 4.6) + C(0, -13, 3.4) + T(0, -11.9, 3.2, 'kWh') +
-      L(-7.5, -5, 7.5, -5) +
-      L(-4.5, 4, 4.5, 4, 1.1) + L(-2, 4, 2.5, 0.5, 1.1) + C(-2, 4, 0.9, ' fill="#14161a"') + C(2.5, 0.5, 0.9, ' fill="#14161a"') +
-      T(0, 15, 3.6, 'MAIN', { bold: true }) };
+  S.riser_meter_320 = { name: 'Meter Can 320A/400A (21"×15", oficio)', short: 'Meter 320A',
+    cat: 'riser', layer: 'electrical', w: 21, h: 30, svg: meterCan(21, 15, 'METER 320A') };
+
+  // combo = socket arriba + load center abajo, con su main
+  function meterCombo(alto, ancho, rotulo) {
+    var yDiv = -alto * 0.14;
+    var r = ancho * 0.20;
+    return R(-ancho / 2, -alto / 2, ancho, alto) +
+      C(0, (-alto / 2 + yDiv) / 2, r) + C(0, (-alto / 2 + yDiv) / 2, r * 0.74) +
+      T(0, (-alto / 2 + yDiv) / 2 + r * 0.28, r * 0.60, 'kWh') +
+      L(-ancho / 2, yDiv, ancho / 2, yDiv) +
+      L(-ancho * 0.22, yDiv + alto * 0.18, ancho * 0.22, yDiv + alto * 0.18, 1) +
+      L(-ancho * 0.10, yDiv + alto * 0.18, ancho * 0.13, yDiv + alto * 0.12, 1) +
+      C(-ancho * 0.10, yDiv + alto * 0.18, ancho * 0.045, ' fill="#14161a"') +
+      C(ancho * 0.13, yDiv + alto * 0.12, ancho * 0.045, ' fill="#14161a"') +
+      T(0, alto / 2 - alto * 0.07, Math.min(ancho * 0.20, 4.6), rotulo, { bold: true });
+  }
+  S.riser_meter_main = { name: 'Meter Combo 200A 8/16 — Siemens MC0816 (24½"×16½")', short: 'Meter Combo',
+    cat: 'riser', layer: 'electrical', w: 22, h: 34, svg: meterCombo(24.5, 16.5, 'MAIN') };
+
+  S.riser_meter_main40 = { name: 'Meter Combo 200A 40/40 — Siemens MC4040 SECW (32¼"×21")', short: 'Meter Combo 40',
+    cat: 'riser', layer: 'electrical', w: 27, h: 42, svg: meterCombo(32.25, 21, 'MAIN 40/40') };
 
   S.riser_ct = { name: 'CT Cabinet 36"×36" (oficio)', short: 'CT Cabinet',
     cat: 'riser', layer: 'electrical', w: 42, h: 48,
@@ -234,14 +258,37 @@
       '<path d="M0,-16 Q0,-28 10,-26" stroke-width="1.1"/>' + L(-6, -20, 6, -25, 0.7) };
 
   /* ---- distribución ---- */
-  S.riser_panel = { name: 'Panel / Load Center 200A (Siemens PL, 29"×14½")', short: 'Panel',
-    cat: 'riser', layer: 'electrical', w: 21, h: 42,
-    svg: R(-7.25, -14.5, 14.5, 29) + L(0, -11, 0, -4, 1.2) +
-      T(0, 5, 3.6, 'PANEL', { bold: true }) + T(0, 10, 2.8, '120/240V') };
+  /* PANELES — Siemens PL/ES verificado (agosto 2026)
+       125A 8/16 3R ....... 14¾" x 12⅛"
+       100A 12/24 T1 ...... 18"   x 14⅜"
+       100A 12/24 3R ...... 23"   x 14¼"
+       200A 20/40 3R ...... 28.6" x 14.4"
+       200A 30/40 3R ...... 36.6" x 14.4"
+       400A 42/20 3R ...... 47"   x 20"     */
+  function loadCenter(alto, ancho, rotulo, sub) {
+    var tam = Math.min(ancho * 0.24, 4.4);
+    return R(-ancho / 2, -alto / 2, ancho, alto) +
+      L(0, -alto * 0.36, 0, -alto * 0.12, 1.1) +           // la barra del main
+      T(0, alto / 2 - alto * (sub ? 0.17 : 0.10), tam, rotulo, { bold: true }) +
+      (sub ? T(0, alto / 2 - alto * 0.06, tam * 0.78, sub) : '');
+  }
+  S.riser_panel_125 = { name: 'Panel 125A 8/16 — Siemens PL 3R (14¾"×12⅛")', short: 'Panel 125A',
+    cat: 'riser', layer: 'electrical', w: 18, h: 24, svg: loadCenter(14.75, 12.125, 'PANEL') };
 
-  S.riser_subpanel = { name: 'Subpanel 100A 12/24 (20"×14", oficio)', short: 'Subpanel',
-    cat: 'riser', layer: 'electrical', w: 20, h: 32,
-    svg: R(-7, -10, 14, 20) + L(0, -7, 0, -2, 1.1) + T(0, 5, 3.4, 'SUB', { bold: true }) };
+  S.riser_subpanel = { name: 'Subpanel 100A 12/24 — Siemens PL Tipo 1 (18"×14⅜")', short: 'Subpanel',
+    cat: 'riser', layer: 'electrical', w: 20, h: 28, svg: loadCenter(18, 14.375, 'SUB') };
+
+  S.riser_panel_100 = { name: 'Panel 100A 12/24 — Siemens PL 3R (23"×14¼")', short: 'Panel 100A',
+    cat: 'riser', layer: 'electrical', w: 20, h: 33, svg: loadCenter(23, 14.25, 'PANEL', '100A') };
+
+  S.riser_panel = { name: 'Panel 200A 20/40 — Siemens PL 3R (28.6"×14.4")', short: 'Panel 200A',
+    cat: 'riser', layer: 'electrical', w: 20, h: 39, svg: loadCenter(28.6, 14.4, 'PANEL', '120/240V') };
+
+  S.riser_panel_200_30 = { name: 'Panel 200A 30/40 — Siemens PL 3R (36.6"×14.4")', short: 'Panel 200A 30sp',
+    cat: 'riser', layer: 'electrical', w: 20, h: 47, svg: loadCenter(36.6, 14.4, 'PANEL', '200A 30sp') };
+
+  S.riser_panel_400 = { name: 'Panel 400A 42/20 — Siemens PL 3R (47"×20")', short: 'Panel 400A',
+    cat: 'riser', layer: 'electrical', w: 26, h: 58, svg: loadCenter(47, 20, 'PANEL', '400A') };
 
   S.riser_gutter = { name: 'Gutter / Wireway 6×6×36 (oficio)', short: 'Gutter',
     cat: 'riser', layer: 'electrical', w: 12, h: 48,
@@ -278,11 +325,25 @@
   disc('riser_disc600', 'Disconnect >400A — 600A HD 3R (57"×26", estimado)',    'Disc >400A', 57, 26);
 
   /* ---- respaldo y generación ---- */
-  S.riser_ats = { name: 'ATS 200A (24"×16", oficio)', short: 'ATS',
-    cat: 'riser', layer: 'electrical', w: 22, h: 36,
-    svg: R(-8, -12, 16, 24) + T(0, -4, 5, 'ATS', { bold: true }) +
-      L(-4.5, 2, 0, 7, 0.9) + L(0, 7, 4.5, 2, 0.9) +
-      C(-4.5, 2, 0.9, ' fill="#14161a"') + C(4.5, 2, 0.9, ' fill="#14161a"') + C(0, 7, 0.9, ' fill="#14161a"') };
+  /* ATS — Generac verificado (agosto 2026)
+       RXSW100A3 / 150A3 / 200A3 ..... 30" x 13½"  (mismo cajón los tres)
+       RTSW400A3 ..................... 48" x 21.8"  */
+  function atsCaja(alto, ancho, rotulo) {
+    var r = ancho * 0.055;
+    var yb = alto * 0.06;
+    return R(-ancho / 2, -alto / 2, ancho, alto) +
+      T(0, -alto * 0.14, Math.min(ancho * 0.30, 6), 'ATS', { bold: true }) +
+      L(-ancho * 0.26, yb, 0, yb + alto * 0.10, 0.9) +
+      L(0, yb + alto * 0.10, ancho * 0.26, yb, 0.9) +
+      C(-ancho * 0.26, yb, r, ' fill="#14161a"') + C(ancho * 0.26, yb, r, ' fill="#14161a"') +
+      C(0, yb + alto * 0.10, r, ' fill="#14161a"') +
+      T(0, alto / 2 - alto * 0.06, Math.min(ancho * 0.20, 4.2), rotulo, { bold: true });
+  }
+  S.riser_ats = { name: 'ATS 100–200A — Generac RXSW (30"×13½")', short: 'ATS 200A',
+    cat: 'riser', layer: 'electrical', w: 19, h: 40, svg: atsCaja(30, 13.5, '200A') };
+
+  S.riser_ats400 = { name: 'ATS 400A — Generac RTSW400A3 (48"×21.8")', short: 'ATS 400A',
+    cat: 'riser', layer: 'electrical', w: 28, h: 60, svg: atsCaja(48, 21.8, '400A') };
 
   S.riser_gen = { name: 'Standby Generator 22kW (planta 48"×25", oficio)', short: 'Generator',
     cat: 'riser', layer: 'electrical', w: 54, h: 40,
