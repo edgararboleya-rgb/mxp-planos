@@ -197,8 +197,38 @@
   S.riser_panel = { name: 'Panel / Load Center', short: 'Panel', cat: 'riser', layer: 'electrical', w: 44, h: 64,
     svg: R(-21, -31, 42, 62) + L(0, -24, 0, -6, 1.4) + T(0, 8, 7, 'PANEL', { bold: true }) + T(0, 18, 5.5, '120/240V') };
 
-  S.riser_disc = { name: 'Disconnect / Safety Switch', short: 'Disconnect', cat: 'riser', layer: 'electrical', w: 40, h: 48,
-    svg: R(-19, -23, 38, 46) + L(-8, -2, 6, -14, 1.4) + C(-8, -2, 1.6, ' fill="#14161a"') + C(8, -14, 1.6, ' fill="#14161a"') + T(0, 12, 6, 'DISC', { bold: true }) };
+  /* DISCONNECTS POR TAMAÑO (Edgar, 30/08: "hazme de dos o tres tipos… de 100
+     a 150, de 200 a 250, de 400 y más de 400, o menores de 100. NO que le
+     pongas los números en el desconectivo, sino así en la lista de símbolos
+     para diferenciar en tamaños"). Tiene sentido de obra: en el riser el
+     tamaño del cajón se LEE, y un safety switch de 60A no ocupa lo mismo que
+     uno de 600A. Las proporciones salen de los cajones NEMA 3R de verdad
+     (un 60A ronda 9"x15"; un 600A, 24"x48"), llevadas a la escala del
+     diagrama. En el dibujo NO va el amperaje: eso va en el rótulo que
+     escribas al lado o en la etiqueta del feeder. */
+  function safetySwitch(an, al) {
+    var hx = an / 2, hy = al / 2;
+    var m = Math.min(an, al);                       // la cuchilla se escala con la caja
+    var bx = m * 0.30, by = m * 0.26;
+    var cy = -al * 0.12;                            // la cuchilla, por encima del rótulo
+    return R(-hx, -hy, an, al) +
+      L(-bx, cy, bx * 0.75, cy - by, 1.4) +
+      C(-bx, cy, Math.max(1.2, m * 0.055), ' fill="#14161a"') +
+      C(bx, cy - by, Math.max(1.2, m * 0.055), ' fill="#14161a"') +
+      T(0, hy - al * 0.15, Math.max(5.5, m * 0.20), 'DISC', { bold: true });
+  }
+  function disc(clave, nombre, corto, an, al) {
+    S[clave] = { name: nombre, short: corto, cat: 'riser', layer: 'electrical',
+      w: an + 3, h: al + 3, svg: safetySwitch(an, al) };
+  }
+  disc('riser_disc60',  'Disconnect ≤100A (30–60A) — cajón chico',      'Disc ≤100A', 18, 24);
+  disc('riser_disc100', 'Disconnect 100–150A',                           'Disc 100–150A', 22, 30);
+  // el de siempre conserva su clave: lo que ya esté puesto en un plano no se
+  // pierde, y 200A es el que más se usa en casa
+  S.riser_disc = { name: 'Disconnect 200–250A', short: 'Disc 200–250A', cat: 'riser', layer: 'electrical',
+    w: 31, h: 41, svg: safetySwitch(28, 38) };
+  disc('riser_disc400', 'Disconnect 400A',                               'Disc 400A', 34, 48);
+  disc('riser_disc600', 'Disconnect >400A (600A y más)',                 'Disc >400A', 42, 58);
 
   S.riser_ats = { name: 'ATS (Transfer Switch)', short: 'ATS', cat: 'riser', layer: 'electrical', w: 44, h: 56,
     svg: R(-21, -27, 42, 54) + T(0, -8, 8, 'ATS', { bold: true }) + L(-10, 2, 0, 12, 1.2) + L(0, 12, 10, 2, 1.2) + C(-10, 2, 1.5, ' fill="#14161a"') + C(10, 2, 1.5, ' fill="#14161a"') + C(0, 12, 1.5, ' fill="#14161a"') };
