@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.U';
+  var APP_VERSION = 'v28.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -264,6 +264,7 @@
   var placingRot = 0;
   var lastWireStyle = 'dashed';       // la herramienta Cable recuerda el último estilo
   var eqNameOff = false;              // nombres impresos en el equipo del riser (PANEL, DISC…)
+  var lastWireLw = 0.7;               // …y el último grosor
 
   var svg = $('#canvas');
   var G = {
@@ -2235,6 +2236,16 @@
     ['ortho', 'Thin L / ortho (solid)'],
     ['orthodashed', 'Dashed L / ortho']
   ];
+  /* GROSOR DE LINEA (Edgar, 31/08: "que tambien las lineas pueda editarles
+     el grosor"). En pulgadas de mundo, que es como mide todo lo demas. Las
+     puntas se escalan solas con este numero. */
+  var LW_OPTS = [
+    [0.4, 'Extra fina'],
+    [0.7, 'Fina (por defecto)'],
+    [1.1, 'Media'],
+    [1.6, 'Gruesa'],
+    [2.4, 'Extra gruesa']
+  ];
   var WIRE_STYLE_NAMES = {
     dashed: 'Switch Leg', solid: 'Circuit (curved)',
     conduit: 'Conduit (straight)', conduitortho: 'Conduit (L)',
@@ -2259,38 +2270,126 @@
     var d2x = w.x2 - wp.cx, d2y = w.y2 - wp.cy, L2 = Math.hypot(d2x, d2y) || 1;
     return { s: [-d1x / L1, -d1y / L1], e: [d2x / L2, d2y / L2] };
   }
-  function capMarkup(P, u, type) {
+  /* PUNTAS DE LINEA (Edgar, 31/08: "que le pueda editar las puntas — una
+     flecha y un circulito pequeno o un rombo y dos tipos distintos de
+     flechas pequenos DE ACORDE A LA LINEA, no me hagas los start y ends tan
+     grandes"). Dos cosas ahi:
+       - el tamano BAJA a la mitad de lo que era (la flecha medía 6" de
+         largo por 4.8" de ancho en unidades de mundo: en una hoja a 1/4"
+         eso es un pajarraco);
+       - y deja de ser fijo: TODAS las puntas se escalan con el grosor de la
+         linea, que es lo que quiere decir "de acorde a la linea". Una linea
+         fina lleva punta fina; si engordas la linea, la punta engorda con
+         ella. */
+  var LW_BASE = 0.7;                    // el grosor por defecto de .wire
+  function lwDe(w) { return w && w.lw ? w.lw : LW_BASE; }
+  function capMarkup(P, u, type, lw) {
     if (!type || type === 'none') return '';
+    var k = (lw || LW_BASE) / LW_BASE;   // todo escala con el grosor
     var nx = -u[1], ny = u[0];
-    if (type === 'arrow') {
-      var bx = P[0] - u[0] * 6, by = P[1] - u[1] * 6;
-      return '<polygon points="' + P[0] + ',' + P[1] + ' ' + (bx + nx * 2.4).toFixed(1) + ',' + (by + ny * 2.4).toFixed(1) +
-        ' ' + (bx - nx * 2.4).toFixed(1) + ',' + (by - ny * 2.4).toFixed(1) + '" fill="#14161a" stroke="none"/>';
+    var f = function (v) { return (+v).toFixed(2); };
+    function poly(pts) {
+      return '<polygon points="' + pts.map(function (q) { return f(q[0]) + ',' + f(q[1]); }).join(' ') +
+        '" fill="#14161a" stroke="none"/>';
     }
-    if (type === 'dot') return '<circle cx="' + P[0] + '" cy="' + P[1] + '" r="1.8" fill="#14161a" stroke="none"/>';
-    if (type === 'tick') return '<line x1="' + (P[0] + nx * 3.2).toFixed(1) + '" y1="' + (P[1] + ny * 3.2).toFixed(1) +
-      '" x2="' + (P[0] - nx * 3.2).toFixed(1) + '" y2="' + (P[1] - ny * 3.2).toFixed(1) + '" stroke="#14161a" stroke-width="1"/>';
+    function atras(d) { return [P[0] - u[0] * d * k, P[1] - u[1] * d * k]; }
+    function lado(B, d) { return [B[0] + nx * d * k, B[1] + ny * d * k]; }
+    if (type === 'arrow') {              // flecha llena, la de toda la vida
+      var b1 = atras(3.2);
+      return poly([P, lado(b1, 1.2), lado(b1, -1.2)]);
+    }
+    if (type === 'arrowSlim') {          // flecha fina y larga (feeder, homerun)
+      var b2 = atras(4.2);
+      return poly([P, lado(b2, 0.85), lado(b2, -0.85)]);
+    }
+    if (type === 'arrowOpen') {          // flecha abierta: dos rayas en V
+      var b3 = atras(3.4), a = lado(b3, 1.5), b = lado(b3, -1.5);
+      var g = (0.55 * k).toFixed(2);
+      return '<line x1="' + f(P[0]) + '" y1="' + f(P[1]) + '" x2="' + f(a[0]) + '" y2="' + f(a[1]) +
+        '" stroke="#14161a" stroke-width="' + g + '" stroke-linecap="round"/>' +
+        '<line x1="' + f(P[0]) + '" y1="' + f(P[1]) + '" x2="' + f(b[0]) + '" y2="' + f(b[1]) +
+        '" stroke="#14161a" stroke-width="' + g + '" stroke-linecap="round"/>';
+    }
+    if (type === 'dot') {
+      return '<circle cx="' + f(P[0]) + '" cy="' + f(P[1]) + '" r="' + (1.1 * k).toFixed(2) +
+        '" fill="#14161a" stroke="none"/>';
+    }
+    if (type === 'circle') {             // circulito HUECO (empalme, nodo)
+      return '<circle cx="' + f(P[0]) + '" cy="' + f(P[1]) + '" r="' + (1.3 * k).toFixed(2) +
+        '" fill="#ffffff" stroke="#14161a" stroke-width="' + (0.5 * k).toFixed(2) + '"/>';
+    }
+    if (type === 'diamond') {            // rombo
+      var c = atras(1.5);
+      var pu = atras(3.0);
+      return poly([P, lado(c, 1.15), pu, lado(c, -1.15)]);
+    }
+    if (type === 'tick') {
+      var t = 2.0 * k;
+      return '<line x1="' + f(P[0] + nx * t) + '" y1="' + f(P[1] + ny * t) +
+        '" x2="' + f(P[0] - nx * t) + '" y2="' + f(P[1] - ny * t) +
+        '" stroke="#14161a" stroke-width="' + (0.7 * k).toFixed(2) + '"/>';
+    }
     return '';
+  }
+  // en la TUBERIA la punta se mide contra el ancho del TUBO, no contra el
+  // trazo: una flecha mas flaca que el tubo que remata se ve enclenque
+  function capLw(w) {
+    return lwDe(w) * (ES_TUBO[w.style || 'dashed'] != null ? 2.25 : 1);
+  }
+  /* LA LINEA SE RECORTA DONDE EMPIEZA LA PUNTA. Las puntas que terminan en
+     pico (flecha, flecha fina, rombo) se afinan mas que el ancho de la linea
+     justo antes del vertice, asi que el nucleo blanco del tubo asomaba por
+     los lados de la flecha y la dejaba con cola de pescado. Visto en
+     pantalla, no en los numeros: los numeros decian que el poligono iba
+     encima. Va encima — pero no la tapa, porque en la punta es mas fino que
+     ella. La solucion de verdad es que el tubo TERMINE donde arranca la
+     cabeza, que ademas es como se dibuja. */
+  var CAP_LARGO = { arrow: 3.2, arrowSlim: 4.2, diamond: 3.0 };
+  function capTrim(tipo, lw) {
+    var d = CAP_LARGO[tipo];
+    return d ? d * ((lw || LW_BASE) / LW_BASE) : 0;
+  }
+  function wireRecortado(w) {
+    var dS = capTrim(w.capS, capLw(w)), dE = capTrim(w.capE, capLw(w));
+    if (!dS && !dE) return w;
+    var tg = wireEndTangents(w);
+    var q = { x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2, style: w.style, side: w.side, bulge: w.bulge };
+    var largo = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    // nunca recortar mas de un tercio: si la linea es corta, mejor que asome
+    // un pelo a que desaparezca
+    var tope = largo / 3;
+    dS = Math.min(dS, tope); dE = Math.min(dE, tope);
+    q.x1 -= tg.s[0] * dS; q.y1 -= tg.s[1] * dS;
+    q.x2 -= tg.e[0] * dE; q.y2 -= tg.e[1] * dE;
+    return q;
   }
   function wireCaps(w) {
     if ((!w.capS || w.capS === 'none') && (!w.capE || w.capE === 'none')) return '';
-    var tg = wireEndTangents(w);
-    return capMarkup([w.x1, w.y1], tg.s, w.capS) + capMarkup([w.x2, w.y2], tg.e, w.capE);
+    var tg = wireEndTangents(w), lw = capLw(w);
+    return capMarkup([w.x1, w.y1], tg.s, w.capS, lw) + capMarkup([w.x2, w.y2], tg.e, w.capE, lw);
   }
   function wireMarkup(w, extraCls) {
     var st = w.style || 'dashed';
-    var d = wirePath(w).d;
+    var d = wirePath(wireRecortado(w)).d;
     if (ES_TUBO[st] != null) {
       // tubería: doble línea (trazo grueso oscuro con núcleo claro encima).
       // El PVC y lo enterrado van discontinuos: la raya se pone en las DOS
       // capas y con el mismo patrón, si no el núcleo claro se come los huecos
       var da = ES_TUBO[st] ? ' stroke-dasharray="' + ES_TUBO[st] + '"' : '';
-      return '<path class="wire-conduit-outer' + (extraCls || '') + '" data-id="' + w.id + '" d="' + d + '"' + da + '/>' +
-        '<path class="wire-conduit-inner" data-id="' + w.id + '" d="' + d + '"' + da + '/>' + wireCaps(w);
+      // en la tuberia el grosor escala la DOBLE linea entera: el tubo se ve
+      // mas gordo o mas flaco pero sigue siendo un tubo, no una raya sola
+      var kT = lwDe(w) / LW_BASE, swO = '', swI = '';
+      if (w.lw) {
+        swO = ' style="stroke-width:' + (3.6 * kT).toFixed(2) + '"';
+        swI = ' style="stroke-width:' + (2 * kT).toFixed(2) + '"';
+      }
+      return '<path class="wire-conduit-outer' + (extraCls || '') + '" data-id="' + w.id + '" d="' + d + '"' + da + swO + '/>' +
+        '<path class="wire-conduit-inner" data-id="' + w.id + '" d="' + d + '"' + da + swI + '/>' + wireCaps(w);
     }
     var dashed = (st === 'dashed' || st === 'straightdashed' || st === 'orthodashed');
+    var sw = w.lw ? ' style="stroke-width:' + w.lw + '"' : '';
     return '<path class="wire ' + (dashed ? 'dashed' : '') + (extraCls || '') +
-      '" data-id="' + w.id + '" d="' + d + '"/>' + wireCaps(w);
+      '" data-id="' + w.id + '" d="' + d + '"' + sw + '/>' + wireCaps(w);
   }
 
   function renderSymbols() {
@@ -3876,7 +3975,7 @@
       setHint('Distancia: ' + fmtFtIn(len) + ' — quedó en el plano · clic para medir otra vez · Delete la borra');
     } else if (kind === 'wire') {
       pushUndo();
-      var wr = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, bulge: 0.22 };
+      var wr = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, bulge: 0.22, lw: lastWireLw };
       state.wires.push(wr);
       sel = { kind: 'wire', id: wr.id };
       refresh();
@@ -4733,11 +4832,17 @@
         WIRE_OPTS.map(function (o) {
           return '<option value="' + o[0] + '"' + (lastWireStyle === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
         }).join('') + '</select></div>' +
+        '<div class="row"><label>Grosor</label><select id="prWireLw0">' +
+        LW_OPTS.map(function (o) {
+          return '<option value="' + o[0] + '"' + (lastWireLw === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select></div>' +
         '<div class="muted small">Elige el material y luego clic en el primer equipo y clic en el segundo. ' +
         'Las opciones <b>(en L)</b> doblan en escuadra — son las del riser, de un panel a otro. ' +
         'Con los imanes 🧲 la punta se pega al <b>borde</b> del equipo (arriba, abajo, los lados) y al centro.</div>';
       var s0 = $('#prWireStyle0');
       if (s0) s0.addEventListener('change', function () { lastWireStyle = s0.value; });
+      var l0 = $('#prWireLw0');
+      if (l0) l0.addEventListener('change', function () { lastWireLw = parseFloat(l0.value) || 0.7; });
       return;
     }
     if (!e) { body.className = 'pbody muted'; body.textContent = 'Nada seleccionado'; return; }
@@ -4851,7 +4956,20 @@
       });
       html += '</select></div>';
       html += '<div class="row"><label>Curvatura</label><input id="prWireBulge" type="number" step="0.05" min="-0.6" max="0.6" value="' + (e.bulge == null ? 0.22 : e.bulge) + '"></div>';
-      var CAPS = [['none', '— ninguno'], ['arrow', '➤ Flecha'], ['dot', '● Punto'], ['tick', '/ Raya']];
+      html += '<div class="row"><label>Grosor</label><select id="prWireLw">' +
+        LW_OPTS.map(function (o) {
+          return '<option value="' + o[0] + '"' + (lwDe(e) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select></div>';
+      var CAPS = [
+        ['none', '— ninguna'],
+        ['arrow', '➤ Flecha llena'],
+        ['arrowSlim', '➤ Flecha fina (feeder)'],
+        ['arrowOpen', '↗ Flecha abierta (en V)'],
+        ['dot', '● Punto lleno'],
+        ['circle', '○ Círculo hueco'],
+        ['diamond', '◆ Rombo'],
+        ['tick', '/ Raya']
+      ];
       ['S:Inicio', 'E:Final'].forEach(function (m) {
         var parts = m.split(':'), key = 'cap' + parts[0];
         html += '<div class="row"><label>' + parts[1] + '</label><select id="prWireCap' + parts[0] + '">';
@@ -5129,6 +5247,7 @@
     on('prWireLabel', 'change', function (n) { pushUndo(); e.label = n.value; refresh(); });
     on('prWireBulge', 'change', function (n) { pushUndo(); e.bulge = Math.max(-0.6, Math.min(0.6, parseFloat(n.value) || 0.22)); refresh(); });
     on('prWireFlip', 'click', function () { pushUndo(); e.side = -(e.side || 1); refresh(); });
+    on('prWireLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.7; lastWireLw = e.lw; refresh(); });
     on('prWireCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
     on('prWireCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
     on('prWireToWall', 'click', function () {
