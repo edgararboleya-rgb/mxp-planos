@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.L';
+  var APP_VERSION = 'v28.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2111,6 +2111,18 @@
     var d = SYM_RAYA[s && s.raya] || '';
     return d ? ' stroke-dasharray="' + d + '"' : '';
   }
+  /* QUIÉN SE PUEDE ESTIRAR POR LAS ESQUINAS (Edgar, 30/08: "lo mismo que
+     otros devices: que se pueda agrandar más, y que apretando Shift no se
+     pierda la forma"). Los MUEBLES ya lo tenían. Ahora también el EQUIPO del
+     riser —meter, panel, disconnect, ATS, generador…— porque ahí el tamaño
+     SÍ dice algo: un MSB de 400A no se dibuja igual que un subpanel de 60A.
+     Los devices chicos (un receptáculo, un switch) se quedan fuera a
+     propósito: son símbolos de medida convencional, no cajas a escala, y
+     cuatro asas encima de algo de 12 unidades harían imposible moverlos.
+     Para ésos está el campo Escala en Propiedades. */
+  function estirable(def) {
+    return !!def && (def.layer === 'furniture' || def.cat === 'riser');
+  }
   function symTransform(s) {
     var k = symK(SYMBOLS[s.key]);
     var sx = (s.scale || 1) * (s.sx || 1) * k;
@@ -2580,7 +2592,7 @@
           var def = SYMBOLS[e.key];
           s += '<g transform="' + symTransform(e) + '"><rect class="sel" x="' + (-def.w / 2 - 3) + '" y="' + (-def.h / 2 - 3) +
             '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
-          if (def.layer === 'furniture') {
+          if (estirable(def)) {
             // asas de ESQUINA: jala una y el objeto se estira a la medida
             var scs = symCorners(e), shr = 5 / view.z + 2;
             scs.forEach(function (c5) {
@@ -3241,7 +3253,7 @@
     if (sel && sel.kind === 'symbol') {
       var se = findSel();
       var sdef = se && SYMBOLS[se.key];
-      if (se && sdef && sdef.layer === 'furniture') {
+      if (se && sdef && estirable(sdef)) {
         var cs = symCorners(se);
         var cr3 = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
         for (var ci = 0; ci < 4; ci++) {
@@ -4699,7 +4711,7 @@
       html += '<div class="row"><label>Rotación</label><input id="prRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
       var def2 = SYMBOLS[e.key];
       html += '<div class="row"><label>Escala</label><input id="prScale" type="number" step="0.1" min="0.2" value="' + (e.scale || 1) + '"></div>';
-      if (def2 && def2.layer === 'furniture') {
+      if (estirable(def2)) {
         // pedido de Edgar: estirar a la MEDIDA real (un shower 36x60, una
         // tina a la medida...) — ancho y fondo independientes, en ft-in
         html += '<div class="row"><label>Ancho</label><input id="prSymW" value="' + fmtFtIn(def2.w * (e.scale || 1) * (e.sx || 1)) + '"></div>';
