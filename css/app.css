@@ -485,3 +485,4 @@ body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
 @media (max-width: 520px) {
   #chatFlot { width: calc(100vw - 16px); height: 62vh; }
 }
+.mxp.sinEqName text.eqName{display:none}

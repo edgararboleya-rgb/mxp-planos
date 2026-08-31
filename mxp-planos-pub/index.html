@@ -131,6 +131,7 @@
           .mxp .wall-fill-block { fill:url(#hatchBlock); stroke:none; }
           .mxp .jamb { stroke:#14161a; stroke-width:1.2; }
           .mxp .furr-line { stroke:#14161a; stroke-width:0.7; fill:none; }
+          .mxp.sinEqName text.eqName { display:none; }
           .mxp .wire { stroke:#14161a; stroke-width:0.7; fill:none; }
           .mxp .wire.dashed { stroke-dasharray:4 3; }
           .mxp .wire-conduit-outer { stroke:#14161a; stroke-width:3.6; fill:none; stroke-linecap:butt; stroke-linejoin:miter; }
@@ -212,6 +213,7 @@
           <label class="lay"><input type="checkbox" data-layer="electrical" checked> Electrical</label>
           <label class="lay"><input type="checkbox" data-layer="annotation" checked> Dims &amp; Text</label>
           <label class="lay"><input type="checkbox" data-layer="grid" checked> Grid</label>
+          <label class="lay" title="Esconde el nombre impreso en el equipo del riser (PANEL, DISC, ATS, METER). El dibujo se queda igual."><input type="checkbox" id="cbEqName" checked> Nombres del equipo (riser)</label>
         </div>
       </section>
 

@@ -252,59 +252,22 @@
     cat: 'riser', layer: 'electrical', w: 42, h: 48,
     svg: R(-18, -18, 36, 36) + T(0, 2, 7, 'CT', { bold: true }) };
 
-  /* WEATHERHEAD / SERVICE MAST (Edgar, 31/08: "mejorame lo del weatherhead,
-     que sea el mismo layout o el mismo simbolo de tuberia rigida").
-     Antes era UNA raya fina: no se leia como tuberia. Ahora el mastil se
-     dibuja igual que la tuberia del riser — DOBLE LINEA, con el diametro
-     real del RMC — para que empalme visualmente con la linea de conduit que
-     baja al meter. 2" RMC = 2.375" OD; 2 1/2" RMC = 2.875" OD.
-     La campana del service head arriba y los tres drip loops del service
-     drop entrando en angulo, que es como se dibuja en el riser de la FPL. */
-  function mastil(alto, od, rotulo) {
-    var r = od / 2, top = -alto / 2, bot = alto / 2;
-    var hb = 5.5;            // alto de la campana del service head
-    var hw = od * 1.9;       // ancho de la boca (un service head de 2" abre asi)
-    var yc = top + hb;       // donde la campana empalma con el tubo
-    // MASTIL: doble linea, el diametro real del RMC — igual que la tuberia
-    var out = L(-r, yc, -r, bot, 0.55) + L(r, yc, r, bot, 0.55);
-    // SERVICE HEAD: la campana, con el labio de porcelana arriba
-    out += '<path d="M' + (-r) + ',' + yc.toFixed(2) +
-      ' L' + (-hw).toFixed(2) + ',' + (top + 1.6).toFixed(2) +
-      ' L' + (-hw).toFixed(2) + ',' + top.toFixed(2) +
-      ' L' + hw.toFixed(2) + ',' + top.toFixed(2) +
-      ' L' + hw.toFixed(2) + ',' + (top + 1.6).toFixed(2) +
-      ' L' + r + ',' + yc.toFixed(2) + '" fill="none" stroke-width="0.55"/>';
-    out += L(-hw, top + 1.6, hw, top + 1.6, 0.4);
-    // SERVICE DROP: los tres conductores saliendo del labio hacia el poste,
-    // colgados (el control va por DEBAJO de la cuerda, que es como cuelga un
-    // triplex de verdad). Un drip loop dibujado encima de la campana solo
-    // ensucia el simbolo — se anota, no se dibuja.
-    for (var i = 0; i < 3; i++) {
-      var x0 = (-hw * 0.55 + i * hw * 0.55), y0 = top - 0.4;
-      var xf = x0 + hw * 3.2, yf = y0 - 12 - i * 1.8;
-      out += '<path d="M' + x0.toFixed(2) + ',' + y0.toFixed(2) +
-        ' Q' + (x0 + hw * 1.7).toFixed(2) + ',' + (y0 - 3 - i * 0.8).toFixed(2) +
-        ' ' + xf.toFixed(2) + ',' + yf.toFixed(2) + '" fill="none" stroke-width="0.4"/>';
-    }
-    return out + T(0, bot + 5, 4, rotulo, { bold: true });
-  }
+  /* WEATHERHEAD (Edgar, 31/08). Se probo redibujarlo como tuberia rigida a
+     doble linea, con campana y service drop, y NO le gusto: "me gusta mas
+     como se veia antes". Vuelve el original tal cual. Y sin rotulo: el
+     nombre debajo estorbaba al armar el riser. */
+  S.riser_wh = { name: 'Weatherhead / Service Drop', short: 'Weatherhead',
+    cat: 'riser', layer: 'electrical', w: 22, h: 60,
+    svg: '<path d="M0,28 L0,-16" stroke-width="0.8"/>' +
+      '<path d="M0,-16 Q0,-28 10,-26" stroke-width="0.75"/>' + L(-6, -20, 6, -25, 0.5) };
 
-  S.riser_wh = { name: 'Weatherhead / Service Mast 2" RMC (36" sobre techo)', short: 'Weatherhead',
-    cat: 'riser', layer: 'electrical', w: 34, h: 52,
-    svg: mastil(36, 2.375, 'WEATHERHEAD') };
-
-  S.riser_wh25 = { name: 'Weatherhead / Service Mast 2\u00bd" RMC (48" sobre techo)', short: 'Weatherhead 2\u00bd"',
-    cat: 'riser', layer: 'electrical', w: 40, h: 64,
-    svg: mastil(48, 2.875, 'WEATHERHEAD') };
-
-  /* MASTIL SOLO: el tramo de tuberia rigida vertical, sin la campana. Es lo
-     que se usa entre el meter y el gutter, o subiendo por la pared. */
+  /* MASTIL SOLO: el tramo de tuberia rigida vertical, para entre el meter y
+     el gutter o subiendo por la pared. Sin rotulo. */
   S.riser_mast = { name: 'Rigid Conduit / Mast 2" RMC (tramo 36")', short: 'Mast RMC',
-    cat: 'riser', layer: 'electrical', w: 16, h: 44,
+    cat: 'riser', layer: 'electrical', w: 12, h: 40,
     svg: (function () {
       var r = 2.375 / 2;
-      return L(-r, -18, -r, 18, 0.55) + L(r, -18, r, 18, 0.55) +
-        T(0, 23, 4, '2" RMC', { bold: true });
+      return L(-r, -18, -r, 18, 0.55) + L(r, -18, r, 18, 0.55);
     })() };
 
   /* ---- distribución ---- */
@@ -353,13 +316,13 @@
       var t = -largo / 2 + largo * (i / 3);
       out += vertical ? L(-lado / 2, t, lado / 2, t, 0.4) : L(t, -lado / 2, t, lado / 2, 0.4);
     }
-    return out + T(0, al / 2 + 4.5, 4, 'GUTTER', { bold: true });
+    return out;   // sin rotulo: el nombre estorbaba al armar el riser
   }
   S.riser_gutter = { name: 'Gutter / Wireway 6×6×36 — VERTICAL (oficio)', short: 'Gutter vert.',
-    cat: 'riser', layer: 'electrical', w: 14, h: 48, svg: wireway(36, 6, true) };
+    cat: 'riser', layer: 'electrical', w: 10, h: 40, svg: wireway(36, 6, true) };
 
   S.riser_gutter_h = { name: 'Gutter / Wireway 6×6×36 — HORIZONTAL (oficio)', short: 'Gutter horiz.',
-    cat: 'riser', layer: 'electrical', w: 40, h: 20, svg: wireway(36, 6, false) };
+    cat: 'riser', layer: 'electrical', w: 40, h: 10, svg: wireway(36, 6, false) };
 
   S.riser_jbox = { name: 'Junction Box 12×12 (oficio)', short: 'J-Box',
     cat: 'riser', layer: 'electrical', w: 18, h: 22,
@@ -1016,6 +979,24 @@
      ser el 8%, y el símbolo salió engordado —el disco parecía un anillo
      macizo y el "kWh" no se leía—. Ahora cada familia lleva su grosor de
      dibujante, proporcional a lo que mide de verdad. */
+  /* ROTULOS DEL EQUIPO APAGABLES (Edgar, 31/08: "no me gusta que las piezas
+     como weatherhead y los gutters tengan nombres porque eso me molesta a la
+     hora de hacer el riser"). El weatherhead y los gutters se quedaron SIN
+     rotulo de raiz; para el resto —PANEL, DISC, ATS, METER— el nombre lleva
+     class="eqName" y una casilla en CAPAS los esconde todos de un golpe. Asi
+     el que decide es el, no yo: senala, no obliga.
+     Lo que NO es un nombre sino parte del DIBUJO se queda siempre: el kWh del
+     disco del meter, la G del generador y la cota de los 6'-0" del ground. */
+  var ES_DIBUJO = { 'kWh': 1, 'G': 1 };
+  Object.keys(S).forEach(function (k) {
+    var d = S[k];
+    if (d.cat !== 'riser' || !d.svg) return;
+    d.svg = d.svg.replace(/<text([^>]*)>([^<]*)<\/text>/g, function (m, at, tx) {
+      if (ES_DIBUJO[tx] || tx.indexOf("'-0\"") >= 0) return m;
+      return '<text class="eqName"' + at + '>' + tx + '</text>';
+    });
+  });
+
   Object.keys(S).forEach(function (k) {
     var d = S[k];
     if (d.lw != null) return;                      // el que ya trae el suyo, se respeta

@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.T';
+  var APP_VERSION = 'v28.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -263,6 +263,7 @@
   var placingKey = null;              // símbolo en colocación
   var placingRot = 0;
   var lastWireStyle = 'dashed';       // la herramienta Cable recuerda el último estilo
+  var eqNameOff = false;              // nombres impresos en el equipo del riser (PANEL, DISC…)
 
   var svg = $('#canvas');
   var G = {
@@ -2921,6 +2922,14 @@
   };
   function setHint(t) { $('#hint').textContent = t; }
 
+  function ponEqName(off) {
+    eqNameOff = !!off;
+    svg.classList.toggle('sinEqName', eqNameOff);
+    var cb = $('#cbEqName');
+    if (cb) cb.checked = !eqNameOff;
+    state.eqNameOff = eqNameOff || undefined;
+  }
+
   function setTool(t) {
     tool = t;
     if (t !== 'place') placingKey = null;
@@ -2928,7 +2937,7 @@
     drawing = null; G.prev.innerHTML = '';
     $$('#toolButtons .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
     $$('.symBtn').forEach(function (b) { b.classList.toggle('active', t === 'place' && b.dataset.key === placingKey); });
-    svg.className.baseVal = 'mxp tool-' + t;
+    svg.className.baseVal = 'mxp tool-' + t + (eqNameOff ? ' sinEqName' : '');
     if (!sel && !selGroup) showProps();   // Cable muestra su lista de materiales
     setHint(HINTS[t] || '');
     if (t === 'calibrate' && !state.bg) setHint('CALIBRAR: primero importa un plano de fondo con el botón "Fondo"');
@@ -5425,7 +5434,13 @@
 
   /* ---------------- capas ---------------- */
   var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], grid: ['gGridBase'] };
+  /* NOMBRES DEL EQUIPO DEL RISER (Edgar, 31/08). Es una casilla, no una
+     decisión mía: el que arma el riser decide si quiere el nombre impreso
+     dentro de cada caja o la caja limpia. Se guarda con el proyecto. */
+  var cbEq = $('#cbEqName');
+  if (cbEq) cbEq.addEventListener('change', function () { ponEqName(!cbEq.checked); });
   $$('#layersBody input[type=checkbox]').forEach(function (cb) {
+    if (!cb.dataset.layer) return;
     cb.addEventListener('change', function () {
       layerVisible[cb.dataset.layer] = cb.checked;
       (LAYER_GROUPS[cb.dataset.layer] || []).forEach(function (gid) {
@@ -9545,6 +9560,7 @@
     $('#pjPrec').value = String(state.precision);
     state.printScale = o.state.printScale || 'fit';
     $('#pjScale').value = state.printScale;
+    ponEqName(!!o.state.eqNameOff);   // la casilla de los nombres viaja con el proyecto
     // proyectos viejos (sin multi-hoja): se envuelven en una sola hoja
     if (!state.sheets || !state.sheets.length) {
       state.sheets = [{ no: state.project.sheetNo || 'E-1', title: state.project.sheetTitle || '', data: null }];
