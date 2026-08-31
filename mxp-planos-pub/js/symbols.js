@@ -175,9 +175,12 @@
      es un meter-main, el todo-en-uno con el main adentro—. Un meter can es
      UNA sola caja, casi cuadrada (13"x17" de verdad), con el disco y su hub
      de conduit arriba. El combo se queda, pero con su nombre. */
-  S.riser_meter = { name: 'Meter Can (socket)', short: 'Meter Can', cat: 'riser', layer: 'electrical', w: 40, h: 52,
-    svg: R(-6, -26, 12, 5) +                       // el hub del conduit, arriba
-      R(-18, -21, 36, 42) +                        // la caja
+  // sin el hub de conduit arriba (Edgar, 30/08: "quítale el rectángulo de
+  // arriba al centro, déjalo solo el cuadrado del meter"). En el one-line el
+  // hub no aporta nada: por dónde entra la tubería ya lo dice la línea que
+  // llega. Lo que tiene que leerse es la caja y su disco.
+  S.riser_meter = { name: 'Meter Can (socket)', short: 'Meter Can', cat: 'riser', layer: 'electrical', w: 40, h: 46,
+    svg: R(-18, -21, 36, 42) +                     // la caja
       C(0, -4, 12) + C(0, -4, 9) +                 // el disco y su cristal
       T(0, -1.4, 6.5, 'kWh') +
       T(0, 16, 6.5, 'METER', { bold: true }) };
