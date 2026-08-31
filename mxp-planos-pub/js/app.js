@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.S';
+  var APP_VERSION = 'v28.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -426,7 +426,23 @@
       cand(w.x1, w.y1, 'end'); cand(w.x2, w.y2, 'end');
       cand((w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2, 'mid');
     });
-    state.symbols.forEach(function (s) { cand(s.x, s.y, 'center'); });
+    /* LA TUBERÍA ENTRE PANELES (Edgar, 31/08: "dime cómo hago las tuberías
+       entre los paneles"). Un conduit no sale del CENTRO de un panel: sale
+       del tope, del fondo o del costado del cajón. Antes el único punto
+       imantado de un símbolo era su centro, así que la línea nacía cruzada
+       por encima del dibujo. Ahora el equipo del riser ofrece además los
+       cuatro puntos medios de sus lados, que es de donde sale el tubo. */
+    state.symbols.forEach(function (s) {
+      cand(s.x, s.y, 'center');
+      var sd = SYMBOLS[s.key];
+      if (!sd || sd.cat !== 'riser') return;
+      var cs = symCorners(s);
+      if (!cs) return;
+      for (var ei = 0; ei < 4; ei++) {
+        var a = cs[ei], b = cs[(ei + 1) % 4];
+        cand((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 'mid');
+      }
+    });
     state.wires.forEach(function (w) { cand(w.x1, w.y1, 'end'); cand(w.x2, w.y2, 'end'); });
     state.areas.forEach(function (a) { a.pts.forEach(function (q) { cand(q[0], q[1], 'end'); }); });
     state.dims.forEach(function (d) { cand(d.x1, d.y1, 'end'); cand(d.x2, d.y2, 'end'); });
@@ -2196,6 +2212,28 @@
     }
     return L;
   }
+  /* LA TUBERÍA ESTABA ESCONDIDA (Edgar, 31/08: "dónde está lo de la
+     tubería"). Estaba: es el ESTILO de la herramienta Cable — pero solo se
+     podía cambiar DESPUÉS de dibujar la línea y seleccionarla. O sea que
+     había que dibujar un switch leg curvo primero para poder pedir un EMT.
+     Ahora la misma lista sale en Propiedades con la herramienta Cable activa
+     y SIN nada seleccionado: se elige el material ANTES de tirar la línea. */
+  var WIRE_OPTS = [
+    ['dashed', 'Switch leg (dashed curve)'],
+    ['solid', 'Circuit (solid curve)'],
+    ['emt', '▬ EMT — tubería vista (recta)'],
+    ['emtortho', '▬ EMT — tubería vista (en L)'],
+    ['pvc', '▭ PVC — embebido / enterrado (recta)'],
+    ['pvcortho', '▭ PVC — embebido / enterrado (en L)'],
+    ['ug', '▭ Underground / bajo slab (recta)'],
+    ['ugortho', '▭ Underground / bajo slab (en L)'],
+    ['conduit', 'Conduit genérico — straight (riser)'],
+    ['conduitortho', 'Conduit genérico — L (riser)'],
+    ['straight', 'Thin straight (solid)'],
+    ['straightdashed', 'Dashed straight (GEC / ground)'],
+    ['ortho', 'Thin L / ortho (solid)'],
+    ['orthodashed', 'Dashed L / ortho']
+  ];
   var WIRE_STYLE_NAMES = {
     dashed: 'Switch Leg', solid: 'Circuit (curved)',
     conduit: 'Conduit (straight)', conduitortho: 'Conduit (L)',
@@ -2871,7 +2909,7 @@
     ellipse: 'ELIPSE: clic y clic en las esquinas del cuadro · SHIFT = círculo · el patrón se elige en Propiedades',
     pline: 'POLILÍNEA: clic en cada punto · doble clic o Enter para terminar · SHIFT = tramos rectos',
     cloud: 'NUBE DE REVISIÓN: clic en una esquina y clic en la opuesta · combínala con Callout para la nota',
-    wire: 'CABLEADO: clic en el primer dispositivo y clic en el segundo — dibuja el arco de circuito (discontinuo = línea de switch)',
+    wire: 'CABLEADO / TUBERÍA: elige el material arriba en Propiedades (EMT, PVC, underground, recta o en L) y luego clic en el primer equipo y clic en el segundo',
     leader: 'NOTA: clic donde apunta la flecha · clic donde va el texto · escribe la nota (ej: GFI, Fridge Outlet)',
     door: 'Toca una pared para colocar la puerta · luego ajusta ancho y abatimiento en Propiedades',
     window: 'Toca una pared para colocar la ventana',
@@ -2891,6 +2929,7 @@
     $$('#toolButtons .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
     $$('.symBtn').forEach(function (b) { b.classList.toggle('active', t === 'place' && b.dataset.key === placingKey); });
     svg.className.baseVal = 'mxp tool-' + t;
+    if (!sel && !selGroup) showProps();   // Cable muestra su lista de materiales
     setHint(HINTS[t] || '');
     if (t === 'calibrate' && !state.bg) setHint('CALIBRAR: primero importa un plano de fondo con el botón "Fondo"');
   }
@@ -4677,6 +4716,21 @@
       return;
     }
     var e = findSel();
+    if (!e && tool === 'wire') {
+      // el material de la tubería se elige ANTES de tirar la línea
+      body.className = 'pbody';
+      body.innerHTML = '<div><b>⌇ CABLEADO / TUBERÍA</b></div>' +
+        '<div class="row"><label>Estilo</label><select id="prWireStyle0">' +
+        WIRE_OPTS.map(function (o) {
+          return '<option value="' + o[0] + '"' + (lastWireStyle === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select></div>' +
+        '<div class="muted small">Elige el material y luego clic en el primer equipo y clic en el segundo. ' +
+        'Las opciones <b>(en L)</b> doblan en escuadra — son las del riser, de un panel a otro. ' +
+        'Con los imanes 🧲 la punta se pega al <b>borde</b> del equipo (arriba, abajo, los lados) y al centro.</div>';
+      var s0 = $('#prWireStyle0');
+      if (s0) s0.addEventListener('change', function () { lastWireStyle = s0.value; });
+      return;
+    }
     if (!e) { body.className = 'pbody muted'; body.textContent = 'Nada seleccionado'; return; }
     body.className = 'pbody';
     var html = '';
@@ -4782,24 +4836,8 @@
     } else if (sel.kind === 'wire') {
       html += '<div><b>Longitud: ' + fmtFtIn(wireLen(e)) + '</b></div>';
       html += '<div class="row"><label>Etiqueta</label><input id="prWireLabel" placeholder="ej: Feeder (1) FPL→MSB" value="' + esc(e.label || '') + '"></div>';
-      var wireOpts = [
-        ['dashed', 'Switch leg (dashed curve)'],
-        ['solid', 'Circuit (solid curve)'],
-        ['emt', '▬ EMT — tubería vista (recta)'],
-        ['emtortho', '▬ EMT — tubería vista (en L)'],
-        ['pvc', '▭ PVC — embebido / enterrado (recta)'],
-        ['pvcortho', '▭ PVC — embebido / enterrado (en L)'],
-        ['ug', '▭ Underground / bajo slab (recta)'],
-        ['ugortho', '▭ Underground / bajo slab (en L)'],
-        ['conduit', 'Conduit genérico — straight (riser)'],
-        ['conduitortho', 'Conduit genérico — L (riser)'],
-        ['straight', 'Thin straight (solid)'],
-        ['straightdashed', 'Dashed straight (GEC / ground)'],
-        ['ortho', 'Thin L / ortho (solid)'],
-        ['orthodashed', 'Dashed L / ortho']
-      ];
       html += '<div class="row"><label>Estilo</label><select id="prWireStyle">';
-      wireOpts.forEach(function (o) {
+      WIRE_OPTS.forEach(function (o) {
         html += '<option value="' + o[0] + '"' + ((e.style || 'dashed') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       });
       html += '</select></div>';
@@ -10575,6 +10613,7 @@
   window.__guiaDbg = function (p, desde, ev) { var r = guiaAjusta(p, desde, ev || {}); return { p: r, guias: guiasVivas.length }; };
   window.__snapDbg = snapWallPt;
   window.__hitDbg = hitTest;            // gancho de pruebas: que agarra un clic
+  window.__osnapDbg = osnapPt;          // gancho de pruebas: el iman de referencia
   window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   window.__planoJsonDbg = planoDesdeJSON;   // gancho de pruebas del importador IA
   // logo oficial de Max Power en la barra (viene de js/logo.js)

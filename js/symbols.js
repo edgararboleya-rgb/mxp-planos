@@ -252,10 +252,60 @@
     cat: 'riser', layer: 'electrical', w: 42, h: 48,
     svg: R(-18, -18, 36, 36) + T(0, 2, 7, 'CT', { bold: true }) };
 
-  S.riser_wh = { name: 'Weatherhead / Service Drop', short: 'Weatherhead',
-    cat: 'riser', layer: 'electrical', w: 22, h: 60,
-    svg: '<path d="M0,28 L0,-16" stroke-width="0.8"/>' +
-      '<path d="M0,-16 Q0,-28 10,-26" stroke-width="0.75"/>' + L(-6, -20, 6, -25, 0.5) };
+  /* WEATHERHEAD / SERVICE MAST (Edgar, 31/08: "mejorame lo del weatherhead,
+     que sea el mismo layout o el mismo simbolo de tuberia rigida").
+     Antes era UNA raya fina: no se leia como tuberia. Ahora el mastil se
+     dibuja igual que la tuberia del riser — DOBLE LINEA, con el diametro
+     real del RMC — para que empalme visualmente con la linea de conduit que
+     baja al meter. 2" RMC = 2.375" OD; 2 1/2" RMC = 2.875" OD.
+     La campana del service head arriba y los tres drip loops del service
+     drop entrando en angulo, que es como se dibuja en el riser de la FPL. */
+  function mastil(alto, od, rotulo) {
+    var r = od / 2, top = -alto / 2, bot = alto / 2;
+    var hb = 5.5;            // alto de la campana del service head
+    var hw = od * 1.9;       // ancho de la boca (un service head de 2" abre asi)
+    var yc = top + hb;       // donde la campana empalma con el tubo
+    // MASTIL: doble linea, el diametro real del RMC — igual que la tuberia
+    var out = L(-r, yc, -r, bot, 0.55) + L(r, yc, r, bot, 0.55);
+    // SERVICE HEAD: la campana, con el labio de porcelana arriba
+    out += '<path d="M' + (-r) + ',' + yc.toFixed(2) +
+      ' L' + (-hw).toFixed(2) + ',' + (top + 1.6).toFixed(2) +
+      ' L' + (-hw).toFixed(2) + ',' + top.toFixed(2) +
+      ' L' + hw.toFixed(2) + ',' + top.toFixed(2) +
+      ' L' + hw.toFixed(2) + ',' + (top + 1.6).toFixed(2) +
+      ' L' + r + ',' + yc.toFixed(2) + '" fill="none" stroke-width="0.55"/>';
+    out += L(-hw, top + 1.6, hw, top + 1.6, 0.4);
+    // SERVICE DROP: los tres conductores saliendo del labio hacia el poste,
+    // colgados (el control va por DEBAJO de la cuerda, que es como cuelga un
+    // triplex de verdad). Un drip loop dibujado encima de la campana solo
+    // ensucia el simbolo — se anota, no se dibuja.
+    for (var i = 0; i < 3; i++) {
+      var x0 = (-hw * 0.55 + i * hw * 0.55), y0 = top - 0.4;
+      var xf = x0 + hw * 3.2, yf = y0 - 12 - i * 1.8;
+      out += '<path d="M' + x0.toFixed(2) + ',' + y0.toFixed(2) +
+        ' Q' + (x0 + hw * 1.7).toFixed(2) + ',' + (y0 - 3 - i * 0.8).toFixed(2) +
+        ' ' + xf.toFixed(2) + ',' + yf.toFixed(2) + '" fill="none" stroke-width="0.4"/>';
+    }
+    return out + T(0, bot + 5, 4, rotulo, { bold: true });
+  }
+
+  S.riser_wh = { name: 'Weatherhead / Service Mast 2" RMC (36" sobre techo)', short: 'Weatherhead',
+    cat: 'riser', layer: 'electrical', w: 34, h: 52,
+    svg: mastil(36, 2.375, 'WEATHERHEAD') };
+
+  S.riser_wh25 = { name: 'Weatherhead / Service Mast 2\u00bd" RMC (48" sobre techo)', short: 'Weatherhead 2\u00bd"',
+    cat: 'riser', layer: 'electrical', w: 40, h: 64,
+    svg: mastil(48, 2.875, 'WEATHERHEAD') };
+
+  /* MASTIL SOLO: el tramo de tuberia rigida vertical, sin la campana. Es lo
+     que se usa entre el meter y el gutter, o subiendo por la pared. */
+  S.riser_mast = { name: 'Rigid Conduit / Mast 2" RMC (tramo 36")', short: 'Mast RMC',
+    cat: 'riser', layer: 'electrical', w: 16, h: 44,
+    svg: (function () {
+      var r = 2.375 / 2;
+      return L(-r, -18, -r, 18, 0.55) + L(r, -18, r, 18, 0.55) +
+        T(0, 23, 4, '2" RMC', { bold: true });
+    })() };
 
   /* ---- distribución ---- */
   /* PANELES — Siemens PL/ES verificado (agosto 2026)
@@ -403,14 +453,40 @@
     cat: 'riser', layer: 'electrical', w: 12, h: 18,
     svg: R(-2.25, -3.5, 4.5, 7) + T(0, 8, 3.6, 'SPD', { bold: true }) };
 
-  S.riser_ground = { name: 'Ground Rods (2) — 6\'-0" de separación', short: 'Ground Rods',
-    cat: 'riser', layer: 'electrical', w: 86, h: 44,
+  /* GROUND RODS (Edgar, 31/08: "revisa lo del ground que esta exageradamente
+     grande"). Tenia razon: estaba dibujado a ESCALA — 6'-0" de separacion son
+     72" reales, casi tres veces el ancho de un panel de 200A, y en la hoja se
+     comia el riser entero. En un riser diagram los electrodos van
+     ESQUEMATICOS y la separacion se ANOTA, no se mide; el unico dibujo donde
+     esos 6 pies van a escala es la planta del site. Ahora mide 30" de ancho —
+     lo mismo que un panel — con la cota puesta como nota. */
+  S.riser_ground = { name: 'Ground Rods (2) — esquemático, 6\'-0" anotado', short: 'Ground Rods',
+    cat: 'riser', layer: 'electrical', w: 34, h: 30,
     svg: (function () {
       function rod(x) {
-        return L(x, -16, x, 5, 0.7) +
-          L(x - 6, 5, x + 6, 5, 0.9) + L(x - 4, 9, x + 4, 9, 0.7) + L(x - 1.8, 13, x + 1.8, 13, 0.55);
+        return L(x, -9, x, 1, 0.55) +
+          L(x - 3.4, 1, x + 3.4, 1, 0.7) + L(x - 2.2, 3.6, x + 2.2, 3.6, 0.55) +
+          L(x - 1, 6.2, x + 1, 6.2, 0.45);
       }
-      return rod(-36) + rod(36) + L(-36, -16, 36, -16, 0.6) + T(0, -20, 5, "6'-0\" MIN.");
+      // la cota de los 6'-0" con sus dos ticks, igual que en una cota de plano.
+      // El rotulo va ENCIMA de la linea: en el hueco no cabia y se montaba.
+      var y = -12;
+      return rod(-11) + rod(11) + L(-11, -9, 11, -9, 0.45) +
+        L(-11, y - 2, -11, y + 2, 0.4) + L(11, y - 2, 11, y + 2, 0.4) +
+        L(-11, y, 11, y, 0.4) +
+        T(0, y - 3, 4, "6'-0\" MIN.", { bold: true });
+    })() };
+
+  /* Los mismos electrodos A ESCALA, para cuando se dibujan en la PLANTA del
+     site y los 6'-0" tienen que medir 6'-0" de verdad. */
+  S.riser_ground_esc = { name: 'Ground Rods (2) — A ESCALA 6\'-0" real (site plan)', short: 'Ground Rods esc.',
+    cat: 'riser', layer: 'electrical', w: 86, h: 40,
+    svg: (function () {
+      function rod(x) {
+        return L(x, -14, x, 3, 0.55) +
+          L(x - 5, 3, x + 5, 3, 0.7) + L(x - 3.4, 7, x + 3.4, 7, 0.55) + L(x - 1.6, 11, x + 1.6, 11, 0.45);
+      }
+      return rod(-36) + rod(36) + L(-36, -14, 36, -14, 0.45) + T(0, -17.5, 5, "6'-0\" MIN.", { bold: true });
     })() };
 
   S.riser_gnd_sym = { name: 'Ground Symbol', short: 'Ground',
