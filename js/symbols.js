@@ -663,86 +663,68 @@
    * el REPETIDOR es el que necesita su tomacorriente. Si el inspector ve
    * una "S" donde va un Pico, cuenta un circuito que no existe.
    * =================================================================== */
-  function lutKeypad(n, etiqueta) {
-    var out = R(-6, -11, 12, 22, 1.6);
-    // los botones se REPARTEN el frente: con 5 y 6 se pegaban al borde
-    var hueco = 0.9;
-    var alto = Math.min(2.8, (17 - (n - 1) * hueco) / n);
-    var total = n * alto + (n - 1) * hueco;
-    for (var i = 0; i < n; i++) {
-      out += R(-4, +(-total / 2 + i * (alto + hueco)).toFixed(2), 8, +alto.toFixed(2), 0.6);
-    }
-    return out + T(0, 18, 6, etiqueta, { bold: true });
+  /* EN PLANTA SE DIBUJA COMO SWITCH, NO COMO EL APARATO (Edgar, 30/08:
+     "créamelos no para planos verticales o 3D o frontales; créamelos como el
+     símbolo de S, quizás con KP que signifique keypad, o con PICO"). Tenía
+     razón: lo que yo había dibujado era el FRENTE del aparato —la carátula
+     con sus botoncitos— y eso es una vista de elevación. En planta se ve el
+     techo cortado a 4 pies: de un keypad no se ve la carátula, se ve dónde
+     está. Por eso todo el oficio usa la "S" con su subíndice, y ahí es donde
+     tienen que estar éstos para que se lean con los demás.
+     El subíndice va en INGLÉS del oficio: KP4, PICO, LUT, FS. */
+  // geometría de la "S" con subíndice: la misma separación de siempre
+  // (S3, SDM, SWP), pero el conjunto CENTRADO en el punto que se marca. Sin
+  // centrarlo, un subíndice largo como PICO-T se salía de la caja del
+  // símbolo y en la paleta salía cortado.
+  function geoSub(sub) {
+    var n = String(sub).length;
+    var off = n <= 1 ? 2 : (n === 2 ? 3 : (n === 3 ? 4 : 5));
+    var tam = n <= 1 ? 7 : (n <= 3 ? 6.5 : 6);
+    var xS = -off, xSub = 7.5 - off, wsub = n * tam * 0.58;
+    var izq = xS - 4.5, der = xSub + wsub;
+    var d = -(izq + der) / 2;
+    return { xS: +(xS + d).toFixed(2), xSub: +(xSub + d).toFixed(2), tam: tam, w: Math.ceil(der - izq) + 3 };
   }
-  // ondas de radio: lo que NO va cableado se marca así en el plano
-  function ondas(cx, cy, r0) {
-    var out = '';
-    for (var i = 0; i < 3; i++) {
-      var r = r0 + i * 2.2;
-      out += '<path d="M' + (cx - r * 0.7).toFixed(2) + ',' + (cy - r * 0.7).toFixed(2) +
-        ' A' + r.toFixed(2) + ',' + r.toFixed(2) + ' 0 0 1 ' + (cx + r * 0.7).toFixed(2) + ',' + (cy - r * 0.7).toFixed(2) +
-        '" fill="none" stroke-width="0.7"/>';
-    }
-    return out;
+  function swSub(sub) {
+    var g = geoSub(sub);
+    return T(g.xS, 5, 14, 'S', { italic: true, bold: true }) +
+      T(g.xSub, 8, g.tam, sub, { anchor: 'start' });
+  }
+  function anchoSub(sub) { return geoSub(sub).w; }
+  function swLutron(clave, nombre, corto, sub) {
+    S[clave] = { name: nombre, short: corto, cat: 'lutron', layer: 'electrical',
+      w: anchoSub(sub), h: 16, svg: swSub(sub) };
   }
 
-  S.lut_kp2 = { name: 'Lutron Keypad 2 botones', short: 'Lutron KP2',
-    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(2, 'KP2') };
-  S.lut_kp4 = { name: 'Lutron Keypad 4 botones', short: 'Lutron KP4',
-    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(4, 'KP4') };
-  S.lut_kp5 = { name: 'Lutron Keypad 5 botones', short: 'Lutron KP5',
-    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(5, 'KP5') };
-  S.lut_kp6 = { name: 'Lutron Keypad 6 botones', short: 'Lutron KP6',
-    cat: 'lutron', layer: 'electrical', w: 16, h: 30, svg: lutKeypad(6, 'KP6') };
+  swLutron('lut_kp2', 'Lutron Keypad 2 botones', 'Lutron KP2', 'KP2');
+  swLutron('lut_kp4', 'Lutron Keypad 4 botones', 'Lutron KP4', 'KP4');
+  swLutron('lut_kp5', 'Lutron Keypad 5 botones', 'Lutron KP5', 'KP5');
+  swLutron('lut_kp6', 'Lutron Keypad 6 botones', 'Lutron KP6', 'KP6');
+  // PICO: no lleva caja ni cable. Va con su propio subíndice para que nadie
+  // le cuente un circuito — no es un switch, es un mando por radio.
+  swLutron('lut_pico', 'Lutron Pico Remote (pared, inalámbrico)', 'Pico', 'PICO');
+  swLutron('lut_pico_ped', 'Lutron Pico + pedestal (mesa)', 'Pico ped.', 'PICO-T');
+  swLutron('lut_dim', 'Lutron Dimmer (Sunnata / Maestro)', 'Lutron Dim', 'LUT');
+  swLutron('lut_fan', 'Lutron Fan Speed Control', 'Lutron Fan', 'FS');
+  swLutron('lut_occ', 'Lutron Radio Powr Savr (ocupación, inalámbrico)', 'Lutron OCC', 'OS');
 
-  // PICO: los 5 botones de verdad — on / subir / favorito / bajar / off
-  S.lut_pico = { name: 'Lutron Pico Remote (pared)', short: 'Pico',
-    cat: 'lutron', layer: 'electrical', w: 15, h: 30,
-    svg: R(-5, -11, 10, 22, 2) +
-      R(-3.2, -9, 6.4, 2.4, 0.6) +                                  // ON
-      '<path d="M-1.8,-3.6 L0,-6 L1.8,-3.6" fill="none" stroke-width="0.8"/>' +   // subir
-      C(0, 0, 1.9) +                                                // favorito
-      '<path d="M-1.8,3.6 L0,6 L1.8,3.6" fill="none" stroke-width="0.8"/>' +      // bajar
-      R(-3.2, 6.6, 6.4, 2.4, 0.6) +                                 // OFF
-      T(0, 18, 6, 'PICO', { bold: true }) };
-
-  S.lut_pico_ped = { name: 'Lutron Pico + pedestal (mesa)', short: 'Pico ped.',
-    cat: 'lutron', layer: 'electrical', w: 20, h: 30,
-    svg: R(-5, -11, 10, 18, 2) + C(0, -4, 1.9) +
-      '<path d="M-8,7.5 L8,7.5 L6,11 L-6,11 Z" fill="none"/>' +
-      T(0, 18, 5.5, 'PICO/PED', { bold: true }) };
-
-  S.lut_dim = { name: 'Lutron Dimmer (Sunnata / Maestro)', short: 'Lutron Dim',
-    cat: 'lutron', layer: 'electrical', w: 22, h: 16,
-    svg: T(-4, 5, 14, 'S', { italic: true, bold: true }) + T(3.5, 8, 6.5, 'LUT', { anchor: 'start' }) };
-
-  S.lut_fan = { name: 'Lutron Fan Speed Control', short: 'Lutron Fan',
-    cat: 'lutron', layer: 'electrical', w: 20, h: 16,
-    svg: T(-3, 5, 14, 'S', { italic: true, bold: true }) + T(4.5, 8, 6.5, 'FS', { anchor: 'start' }) };
-
+  /* Estos tres NO son switches: son EQUIPO. En planta el equipo se dibuja
+     como una caja con su rótulo, igual que el panel o el subpanel. */
   S.lut_rep = { name: 'Lutron Main Repeater / Hub (necesita receptáculo)', short: 'Lutron RPT',
-    cat: 'lutron', layer: 'electrical', w: 24, h: 26,
-    svg: R(-9, -7, 18, 12, 1.5) + T(0, 1.5, 6, 'RA2', { bold: true }) + ondas(0, -9, 3) +
-      T(0, 13, 5.5, 'REPEATER', { bold: true }) };
-
-  S.lut_occ = { name: 'Lutron Radio Powr Savr (ocupación, inalámbrico)', short: 'Lutron OCC',
-    cat: 'lutron', layer: 'electrical', w: 22, h: 22,
-    svg: R(-6, -8, 12, 9, 1.2) + T(0, -1.4, 5.5, 'OS', { bold: true }) +
-      '<path d="M-6,1 L-10,8 M6,1 L10,8 M0,1 L0,9" fill="none" stroke-width="0.7" stroke-dasharray="2 1.6"/>' +
-      ondas(0, -11, 2.6) };
-
-  S.lut_shade = { name: 'Lutron Shade (motorizada)', short: 'Lutron Shade',
-    cat: 'lutron', layer: 'electrical', w: 40, h: 16,
-    svg: R(-18, -6, 36, 5, 1) +
-      '<path d="M-18,-1 L-18,5 M18,-1 L18,5" fill="none" stroke-width="0.7"/>' +
-      '<path d="M-18,5 Q0,8 18,5" fill="none" stroke-width="0.8"/>' +
-      T(0, 12.5, 5.5, 'SHADE', { bold: true }) };
+    cat: 'lutron', layer: 'electrical', w: 22, h: 16,
+    svg: R(-10, -6, 20, 12) + T(0, 2.6, 6.5, 'RPT', { bold: true }) };
 
   S.lut_panel = { name: 'Lutron Power Panel / QS (casa grande)', short: 'Lutron Panel',
-    cat: 'lutron', layer: 'electrical', w: 26, h: 30,
-    svg: R(-10, -13, 20, 26) + L(-10, -5, 10, -5) +
-      T(0, -7.4, 4.6, 'LUTRON', { bold: true }) +
-      L(-6, 1, 6, 1, 0.6) + L(-6, 5, 6, 5, 0.6) + L(-6, 9, 6, 9, 0.6) };
+    cat: 'lutron', layer: 'electrical', w: 26, h: 20,
+    svg: R(-12, -8, 24, 16) + L(-12, -2, 12, -2) +
+      T(0, -3.6, 4.6, 'LUTRON', { bold: true }) + T(0, 5, 6, 'QS', { bold: true }) };
+
+  // la shade SÍ se ve en planta: es el rodillo sobre la ventana
+  S.lut_shade = { name: 'Lutron Shade (motorizada)', short: 'Lutron Shade',
+    cat: 'lutron', layer: 'electrical', w: 40, h: 14,
+    svg: R(-18, -5, 36, 4, 0.8) +
+      '<path d="M-18,-1 L-18,3 M18,-1 L18,3" fill="none" stroke-width="0.7"/>' +
+      T(0, 10, 5.5, 'SHADE', { bold: true }) };
 
   window.SYMBOL_CATS = {
     electrical: '⚡ Electrical',
