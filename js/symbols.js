@@ -236,8 +236,8 @@
       C(0, (-alto / 2 + yDiv) / 2, r) + C(0, (-alto / 2 + yDiv) / 2, r * 0.74) +
       T(0, (-alto / 2 + yDiv) / 2 + r * 0.28, r * 0.60, 'kWh') +
       L(-ancho / 2, yDiv, ancho / 2, yDiv) +
-      L(-ancho * 0.22, yDiv + alto * 0.18, ancho * 0.22, yDiv + alto * 0.18, 1) +
-      L(-ancho * 0.10, yDiv + alto * 0.18, ancho * 0.13, yDiv + alto * 0.12, 1) +
+      L(-ancho * 0.22, yDiv + alto * 0.18, ancho * 0.22, yDiv + alto * 0.18, 0.7) +
+      L(-ancho * 0.10, yDiv + alto * 0.18, ancho * 0.13, yDiv + alto * 0.12, 0.7) +
       C(-ancho * 0.10, yDiv + alto * 0.18, ancho * 0.045, ' fill="#14161a"') +
       C(ancho * 0.13, yDiv + alto * 0.12, ancho * 0.045, ' fill="#14161a"') +
       T(0, alto / 2 - alto * 0.07, Math.min(ancho * 0.20, 4.6), rotulo, { bold: true });
@@ -254,8 +254,8 @@
 
   S.riser_wh = { name: 'Weatherhead / Service Drop', short: 'Weatherhead',
     cat: 'riser', layer: 'electrical', w: 22, h: 60,
-    svg: '<path d="M0,28 L0,-16" stroke-width="1.2"/>' +
-      '<path d="M0,-16 Q0,-28 10,-26" stroke-width="1.1"/>' + L(-6, -20, 6, -25, 0.7) };
+    svg: '<path d="M0,28 L0,-16" stroke-width="0.8"/>' +
+      '<path d="M0,-16 Q0,-28 10,-26" stroke-width="0.75"/>' + L(-6, -20, 6, -25, 0.5) };
 
   /* ---- distribución ---- */
   /* PANELES — Siemens PL/ES verificado (agosto 2026)
@@ -268,7 +268,7 @@
   function loadCenter(alto, ancho, rotulo, sub) {
     var tam = Math.min(ancho * 0.24, 4.4);
     return R(-ancho / 2, -alto / 2, ancho, alto) +
-      L(0, -alto * 0.36, 0, -alto * 0.12, 1.1) +           // la barra del main
+      L(0, -alto * 0.36, 0, -alto * 0.12, 0.8) +           // la barra del main
       T(0, alto / 2 - alto * (sub ? 0.17 : 0.10), tam, rotulo, { bold: true }) +
       (sub ? T(0, alto / 2 - alto * 0.06, tam * 0.78, sub) : '');
   }
@@ -292,12 +292,12 @@
 
   S.riser_gutter = { name: 'Gutter / Wireway 6×6×36 (oficio)', short: 'Gutter',
     cat: 'riser', layer: 'electrical', w: 12, h: 48,
-    svg: R(-3, -18, 6, 36) + L(-3, -12, 3, -12, 0.6) + L(-3, 12, 3, 12, 0.6) +
+    svg: R(-3, -18, 6, 36) + L(-3, -12, 3, -12, 0.4) + L(-3, 12, 3, 12, 0.4) +
       T(0, 22.5, 4, 'GUTTER', { bold: true }) };
 
   S.riser_jbox = { name: 'Junction Box 12×12 (oficio)', short: 'J-Box',
     cat: 'riser', layer: 'electrical', w: 18, h: 22,
-    svg: R(-6, -6, 12, 12) + L(-6, -6, 6, 6, 0.6) + L(6, -6, -6, 6, 0.6) +
+    svg: R(-6, -6, 12, 12) + L(-6, -6, 6, 6, 0.4) + L(6, -6, -6, 6, 0.4) +
       T(0, 11, 4, 'J-BOX', { bold: true }) };
 
   /* ---- desconectivos: el tamaño ES el amperaje ---- */
@@ -306,9 +306,9 @@
     var m = Math.min(ancho, alto);
     var bx = ancho * 0.26, by = alto * 0.16;
     var cy = -alto * 0.10;
-    var r = Math.max(0.55, m * 0.055);
+    var r = Math.max(0.45, m * 0.045);
     return R(-hx, -hy, ancho, alto) +
-      L(-bx, cy, bx * 0.75, cy - by, Math.max(0.8, m * 0.045)) +
+      L(-bx, cy, bx * 0.75, cy - by, Math.max(0.35, m * 0.030)) +
       C(-bx, cy, r, ' fill="#14161a"') + C(bx, cy - by, r, ' fill="#14161a"') +
       rotuloCaja('DISC', alto, ancho, true);
   }
@@ -329,12 +329,12 @@
        RXSW100A3 / 150A3 / 200A3 ..... 30" x 13½"  (mismo cajón los tres)
        RTSW400A3 ..................... 48" x 21.8"  */
   function atsCaja(alto, ancho, rotulo) {
-    var r = ancho * 0.055;
+    var r = ancho * 0.045;
     var yb = alto * 0.06;
     return R(-ancho / 2, -alto / 2, ancho, alto) +
       T(0, -alto * 0.14, Math.min(ancho * 0.30, 6), 'ATS', { bold: true }) +
-      L(-ancho * 0.26, yb, 0, yb + alto * 0.10, 0.9) +
-      L(0, yb + alto * 0.10, ancho * 0.26, yb, 0.9) +
+      L(-ancho * 0.26, yb, 0, yb + alto * 0.10, 0.65) +
+      L(0, yb + alto * 0.10, ancho * 0.26, yb, 0.65) +
       C(-ancho * 0.26, yb, r, ' fill="#14161a"') + C(ancho * 0.26, yb, r, ' fill="#14161a"') +
       C(0, yb + alto * 0.10, r, ' fill="#14161a"') +
       T(0, alto / 2 - alto * 0.06, Math.min(ancho * 0.20, 4.2), rotulo, { bold: true });
@@ -353,13 +353,13 @@
   S.riser_bat = { name: 'Battery / ESS (45"×29", oficio)', short: 'Battery ESS',
     cat: 'riser', layer: 'electrical', w: 35, h: 58,
     svg: R(-14.5, -22.5, 29, 45, 1.5) +
-      L(-7, -6, 7, -6, 1.2) + L(-4, -2, 4, -2, 1.2) + L(-7, 3, 7, 3, 1.2) + L(-4, 7, 4, 7, 1.2) +
+      L(-7, -6, 7, -6, 0.8) + L(-4, -2, 4, -2, 0.8) + L(-7, 3, 7, 3, 0.8) + L(-4, 7, 4, 7, 0.8) +
       T(0, 18, 4.6, 'ESS', { bold: true }) };
 
   S.riser_pv = { name: 'Solar Inverter PV (26"×17", oficio)', short: 'PV Inverter',
     cat: 'riser', layer: 'electrical', w: 23, h: 38,
     svg: R(-8.5, -13, 17, 26) +
-      '<path d="M-5,-4 L-1,-4 L-3,3 L5,-5 L1,-5 L4,-11" fill="none" stroke-width="0.9"/>' +
+      '<path d="M-5,-4 L-1,-4 L-3,3 L5,-5 L1,-5 L4,-11" fill="none" stroke-width="0.6"/>' +
       T(0, 8, 4, 'PV INV', { bold: true }) };
 
   /* ---- otros ---- */
@@ -375,12 +375,12 @@
   S.riser_ev = { name: 'EV Charger (14"×8", oficio)', short: 'EV',
     cat: 'riser', layer: 'electrical', w: 14, h: 24,
     svg: R(-4, -7, 8, 14) +
-      '<path d="M-1.6,-3 L0.8,-3 L-0.5,1.5 L2.6,-2 L0.4,-2 L2,-5.5" fill="none" stroke-width="0.7"/>' +
+      '<path d="M-1.6,-3 L0.8,-3 L-0.5,1.5 L2.6,-2 L0.4,-2 L2,-5.5" fill="none" stroke-width="0.5"/>' +
       T(0, 11, 3.6, 'EV', { bold: true }) };
 
   S.riser_pool = { name: 'Pool Panel / Time Clock (20"×12", oficio)', short: 'Pool Panel',
     cat: 'riser', layer: 'electrical', w: 18, h: 32,
-    svg: R(-6, -10, 12, 20) + C(0, -4, 3.4) + L(0, -4, 0, -6.6, 0.7) + L(0, -4, 2, -4, 0.7) +
+    svg: R(-6, -10, 12, 20) + C(0, -4, 3.4) + L(0, -4, 0, -6.6, 0.45) + L(0, -4, 2, -4, 0.45) +
       T(0, 6, 3.4, 'POOL', { bold: true }) };
 
   S.riser_spd = { name: 'Surge Protector SPD (7"×4½", oficio)', short: 'SPD',
@@ -391,10 +391,10 @@
     cat: 'riser', layer: 'electrical', w: 86, h: 44,
     svg: (function () {
       function rod(x) {
-        return L(x, -16, x, 5, 1) +
-          L(x - 6, 5, x + 6, 5, 1.2) + L(x - 4, 9, x + 4, 9, 1) + L(x - 1.8, 13, x + 1.8, 13, 0.8);
+        return L(x, -16, x, 5, 0.7) +
+          L(x - 6, 5, x + 6, 5, 0.9) + L(x - 4, 9, x + 4, 9, 0.7) + L(x - 1.8, 13, x + 1.8, 13, 0.55);
       }
-      return rod(-36) + rod(36) + L(-36, -16, 36, -16, 0.9) + T(0, -20, 5, "6'-0\" MIN.");
+      return rod(-36) + rod(36) + L(-36, -16, 36, -16, 0.6) + T(0, -20, 5, "6'-0\" MIN.");
     })() };
 
   S.riser_gnd_sym = { name: 'Ground Symbol', short: 'Ground',
@@ -915,6 +915,21 @@
     svg: R(-18, -5, 36, 4, 0.8) +
       '<path d="M-18,-1 L-18,3 M18,-1 L18,3" fill="none" stroke-width="0.7"/>' +
       T(0, 10, 5.5, 'SHADE', { bold: true }) };
+
+  /* GROSOR DE LÍNEA POR FAMILIA (Edgar, 30/08, con foto del meter: "¿puede
+     ser que las líneas del meter y de todos en general sean más finitas?").
+     Tenía razón y era consecuencia directa de haberlos puesto a medida real:
+     el trazo es de 1 pulgada de MUNDO y no cambia con el tamaño del símbolo.
+     En una caja de 28" eso era el 3½% del ancho; en el meter de 12" pasó a
+     ser el 8%, y el símbolo salió engordado —el disco parecía un anillo
+     macizo y el "kWh" no se leía—. Ahora cada familia lleva su grosor de
+     dibujante, proporcional a lo que mide de verdad. */
+  Object.keys(S).forEach(function (k) {
+    var d = S[k];
+    if (d.lw != null) return;                      // el que ya trae el suyo, se respeta
+    if (d.cat === 'riser') d.lw = 0.4;             // cajas chicas a medida real
+    else if (d.layer === 'furniture') d.lw = 0.7;  // muebles y equipo grande
+  });
 
   window.SYMBOL_CATS = {
     electrical: '⚡ Electrical',
