@@ -290,10 +290,26 @@
   S.riser_panel_400 = { name: 'Panel 400A 42/20 — Siemens PL 3R (47"×20")', short: 'Panel 400A',
     cat: 'riser', layer: 'electrical', w: 26, h: 58, svg: loadCenter(47, 20, 'PANEL', '400A') };
 
-  S.riser_gutter = { name: 'Gutter / Wireway 6×6×36 (oficio)', short: 'Gutter',
-    cat: 'riser', layer: 'electrical', w: 12, h: 48,
-    svg: R(-3, -18, 6, 36) + L(-3, -12, 3, -12, 0.4) + L(-3, 12, 3, 12, 0.4) +
-      T(0, 22.5, 4, 'GUTTER', { bold: true }) };
+  /* GUTTER / WIREWAY en las dos posiciones (Edgar, 30/08: "gutter hazme uno
+     vertical y uno horizontal"). En obra va de las dos maneras: vertical
+     bajando del meter a los paneles, y horizontal corriendo por encima de una
+     fila de disconnects. Girar el símbolo también valdría, pero teniéndolos
+     los dos no hay que acordarse. Las rayas son las juntas de los tramos. */
+  function wireway(largo, lado, vertical) {
+    var an = vertical ? lado : largo, al = vertical ? largo : lado;
+    var out = R(-an / 2, -al / 2, an, al);
+    // juntas cada tercio
+    for (var i = 1; i <= 2; i++) {
+      var t = -largo / 2 + largo * (i / 3);
+      out += vertical ? L(-lado / 2, t, lado / 2, t, 0.4) : L(t, -lado / 2, t, lado / 2, 0.4);
+    }
+    return out + T(0, al / 2 + 4.5, 4, 'GUTTER', { bold: true });
+  }
+  S.riser_gutter = { name: 'Gutter / Wireway 6×6×36 — VERTICAL (oficio)', short: 'Gutter vert.',
+    cat: 'riser', layer: 'electrical', w: 14, h: 48, svg: wireway(36, 6, true) };
+
+  S.riser_gutter_h = { name: 'Gutter / Wireway 6×6×36 — HORIZONTAL (oficio)', short: 'Gutter horiz.',
+    cat: 'riser', layer: 'electrical', w: 40, h: 20, svg: wireway(36, 6, false) };
 
   S.riser_jbox = { name: 'Junction Box 12×12 (oficio)', short: 'J-Box',
     cat: 'riser', layer: 'electrical', w: 18, h: 22,
