@@ -169,101 +169,175 @@
   /* ============================ RISER / ONE-LINE ============================ */
   // Equipos para diagramas unifilares E-1 (estilo cajas de permiso, NTS)
 
-  /* METER CAN a secas (Edgar, 30/08: "ese símbolo me parece más compatible
-     con un meter combo; hazme uno que se dibuje como un meter can solamente").
-     Tenía razón: el de antes era una caja ALTA partida en dos secciones —eso
-     es un meter-main, el todo-en-uno con el main adentro—. Un meter can es
-     UNA sola caja, casi cuadrada (13"x17" de verdad), con el disco y su hub
-     de conduit arriba. El combo se queda, pero con su nombre. */
-  // sin el hub de conduit arriba (Edgar, 30/08: "quítale el rectángulo de
-  // arriba al centro, déjalo solo el cuadrado del meter"). En el one-line el
-  // hub no aporta nada: por dónde entra la tubería ya lo dice la línea que
-  // llega. Lo que tiene que leerse es la caja y su disco.
-  S.riser_meter = { name: 'Meter Can (socket)', short: 'Meter Can', cat: 'riser', layer: 'electrical', w: 40, h: 46,
-    svg: R(-18, -21, 36, 42) +                     // la caja
-      C(0, -4, 12) + C(0, -4, 9) +                 // el disco y su cristal
-      T(0, -1.4, 6.5, 'kWh') +
-      T(0, 16, 6.5, 'METER', { bold: true }) };
-
-  S.riser_meter_main = { name: 'Meter-Main Combo (medidor + main)', short: 'Meter-Main',
-    cat: 'riser', layer: 'electrical', w: 44, h: 64,
-    svg: R(-21, -31, 42, 62) +
-      C(0, -16, 11) + C(0, -16, 8.5) + T(0, -13.5, 6, 'kWh') +
-      L(-21, -2, 21, -2) +                         // la división de las dos secciones
-      // el main: el interruptor del one-line
-      L(-9, 8, 9, 8, 1.2) + L(-4, 8, 5, 2, 1.2) + C(-4, 8, 1.3) + C(5, 8, 1.3) +
-      T(0, 22, 6, 'MAIN', { bold: true }) };
-
-  S.riser_panel = { name: 'Panel / Load Center', short: 'Panel', cat: 'riser', layer: 'electrical', w: 44, h: 64,
-    svg: R(-21, -31, 42, 62) + L(0, -24, 0, -6, 1.4) + T(0, 8, 7, 'PANEL', { bold: true }) + T(0, 18, 5.5, '120/240V') };
-
-  /* DISCONNECTS POR TAMAÑO (Edgar, 30/08: "hazme de dos o tres tipos… de 100
-     a 150, de 200 a 250, de 400 y más de 400, o menores de 100. NO que le
-     pongas los números en el desconectivo, sino así en la lista de símbolos
-     para diferenciar en tamaños"). Tiene sentido de obra: en el riser el
-     tamaño del cajón se LEE, y un safety switch de 60A no ocupa lo mismo que
-     uno de 600A. Las proporciones salen de los cajones NEMA 3R de verdad
-     (un 60A ronda 9"x15"; un 600A, 24"x48"), llevadas a la escala del
-     diagrama. En el dibujo NO va el amperaje: eso va en el rótulo que
-     escribas al lado o en la etiqueta del feeder. */
-  function safetySwitch(an, al) {
-    var hx = an / 2, hy = al / 2;
-    var m = Math.min(an, al);                       // la cuchilla se escala con la caja
-    var bx = m * 0.30, by = m * 0.26;
-    var cy = -al * 0.12;                            // la cuchilla, por encima del rótulo
-    return R(-hx, -hy, an, al) +
-      L(-bx, cy, bx * 0.75, cy - by, 1.4) +
-      C(-bx, cy, Math.max(1.2, m * 0.055), ' fill="#14161a"') +
-      C(bx, cy - by, Math.max(1.2, m * 0.055), ' fill="#14161a"') +
-      T(0, hy - al * 0.15, Math.max(5.5, m * 0.20), 'DISC', { bold: true });
+  /* ======================= EQUIPO DEL RISER =======================
+   * A ESCALA DE VERDAD (Edgar, 30/08: "busca una mejor referencia de medidas
+   * a escala porque las veo disparejas… los desconectivos a veces son más
+   * rectangulares; busca referencia en Siemens y escálame todos los equipos").
+   *
+   * Tenía razón: las cajas estaban dibujadas "a ojo", todas con proporción
+   * parecida, y en la vida real no es así — un safety switch de 200A es ALTO
+   * Y ESTRECHO (25" x 11½"), no casi cuadrado. Aquí las medidas son PULGADAS
+   * REALES del cajón, así que las proporciones y los tamaños relativos salen
+   * solos y no hay que adivinarlos.
+   *
+   * Verificado en catálogo Siemens (agosto 2026):
+   *   60A GD 3R (GNF322RA) ....... 8.6" x 5.4"
+   *   100A GD .................... 17" de alto
+   *   200A GD .................... 25" de alto
+   *   200A HD 3R (HF364NR) ....... 29.9" x 15.9"
+   *   400A HD 3R (HF365R) ........ 45.3" x 22.4"
+   *   Load center PL 200A 20/40 .. 28.6" x 14.4"
+   * El resto (600A, meter socket, CT, ATS, gutter, J-box…) son medidas de
+   * oficio de los cajones que se usan en Florida; van marcadas abajo con
+   * "(oficio)" para que se sepa cuál es cuál y se pueda afinar el día que
+   * haga falta.
+   *
+   * OJO: estos símbolos se dibujan a TAMAÑO REAL (ver symK), no al 0.7 de los
+   * devices. Un panel puesto sobre el plano de la casa tiene que ocupar los
+   * 14½" que ocupa en la pared.
+   * =============================================================== */
+  function rotuloCaja(txt, alto, ancho, dentro) {
+    var tam = Math.max(3.2, Math.min(ancho * 0.26, alto * 0.16, 7));
+    // en una caja estrecha el rótulo no cabe dentro: se pone debajo
+    return dentro === false || ancho < tam * txt.length * 0.62
+      ? T(0, alto / 2 + tam * 1.35, tam, txt, { bold: true })
+      : T(0, alto / 2 - alto * 0.09, tam, txt, { bold: true });
   }
-  function disc(clave, nombre, corto, an, al) {
+  function equipo(clave, nombre, corto, alto, ancho, dentro, extra) {
+    var svg = R(-ancho / 2, -alto / 2, ancho, alto) + (extra || '') +
+      (corto ? rotuloCaja(corto, alto, ancho, dentro) : '');
     S[clave] = { name: nombre, short: corto, cat: 'riser', layer: 'electrical',
-      w: an + 3, h: al + 3, svg: safetySwitch(an, al) };
+      w: ancho + 6, h: alto + 12, svg: svg };
   }
-  disc('riser_disc60',  'Disconnect ≤100A (30–60A) — cajón chico',      'Disc ≤100A', 18, 24);
-  disc('riser_disc100', 'Disconnect 100–150A',                           'Disc 100–150A', 22, 30);
-  // el de siempre conserva su clave: lo que ya esté puesto en un plano no se
-  // pierde, y 200A es el que más se usa en casa
-  S.riser_disc = { name: 'Disconnect 200–250A', short: 'Disc 200–250A', cat: 'riser', layer: 'electrical',
-    w: 31, h: 41, svg: safetySwitch(28, 38) };
-  disc('riser_disc400', 'Disconnect 400A',                               'Disc 400A', 34, 48);
-  disc('riser_disc600', 'Disconnect >400A (600A y más)',                 'Disc >400A', 42, 58);
 
-  S.riser_ats = { name: 'ATS (Transfer Switch)', short: 'ATS', cat: 'riser', layer: 'electrical', w: 44, h: 56,
-    svg: R(-21, -27, 42, 54) + T(0, -8, 8, 'ATS', { bold: true }) + L(-10, 2, 0, 12, 1.2) + L(0, 12, 10, 2, 1.2) + C(-10, 2, 1.5, ' fill="#14161a"') + C(10, 2, 1.5, ' fill="#14161a"') + C(0, 12, 1.5, ' fill="#14161a"') };
+  /* ---- medición y acometida ---- */
+  S.riser_meter = { name: 'Meter Can 200A (socket 15"×9½")', short: 'Meter Can',
+    cat: 'riser', layer: 'electrical', w: 16, h: 24,
+    svg: R(-4.75, -7.5, 9.5, 15) + C(0, -1.5, 3.6) + C(0, -1.5, 2.6) +
+      T(0, -0.4, 2.6, 'kWh') + T(0, 10.6, 3.4, 'METER', { bold: true }) };
 
-  S.riser_gen = { name: 'Standby Generator', short: 'Generator', cat: 'riser', layer: 'electrical', w: 44, h: 52,
-    svg: R(-21, -25, 42, 50) + C(0, -4, 12) + T(0, 0.5, 12, 'G', { bold: true }) + T(0, 18, 5.5, 'GEN') };
+  S.riser_meter_main = { name: 'Meter-Main Combo 200A (Siemens MC4040, 43"×15")', short: 'Meter-Main',
+    cat: 'riser', layer: 'electrical', w: 21, h: 55,
+    svg: R(-7.5, -21.5, 15, 43) +
+      C(0, -13, 4.6) + C(0, -13, 3.4) + T(0, -11.9, 3.2, 'kWh') +
+      L(-7.5, -5, 7.5, -5) +
+      L(-4.5, 4, 4.5, 4, 1.1) + L(-2, 4, 2.5, 0.5, 1.1) + C(-2, 4, 0.9, ' fill="#14161a"') + C(2.5, 0.5, 0.9, ' fill="#14161a"') +
+      T(0, 15, 3.6, 'MAIN', { bold: true }) };
 
-  S.riser_ev = { name: 'EV Charger', short: 'EV', cat: 'riser', layer: 'electrical', w: 38, h: 48,
-    svg: R(-18, -23, 36, 46) + T(0, -8, 9, 'EV', { bold: true }) +
-      // el rayo empezaba a la altura del texto y se le montaba encima
-      '<path d="M-3,-2 L2,-2 L-1,8 L6,0 L1,0 L4,-8" fill="none" stroke-width="1.1"/>' +
-      T(0, 17, 6, 'CHARGER', { bold: true }) };
+  S.riser_ct = { name: 'CT Cabinet 36"×36" (oficio)', short: 'CT Cabinet',
+    cat: 'riser', layer: 'electrical', w: 42, h: 48,
+    svg: R(-18, -18, 36, 36) + T(0, 2, 7, 'CT', { bold: true }) };
 
-  S.riser_xfmr = { name: 'Transformer', short: 'Transformer', cat: 'riser', layer: 'electrical', w: 34, h: 52,
-    svg: C(0, -10, 10) + C(0, 6, 10) + T(0, 24, 5.5, 'XFMR') };
+  S.riser_wh = { name: 'Weatherhead / Service Drop', short: 'Weatherhead',
+    cat: 'riser', layer: 'electrical', w: 22, h: 60,
+    svg: '<path d="M0,28 L0,-16" stroke-width="1.2"/>' +
+      '<path d="M0,-16 Q0,-28 10,-26" stroke-width="1.1"/>' + L(-6, -20, 6, -25, 0.7) };
 
-  S.riser_ct = { name: 'CT Cabinet', short: 'CT Cabinet', cat: 'riser', layer: 'electrical', w: 44, h: 44,
-    svg: R(-21, -21, 42, 42) + T(0, 2.5, 8, 'CT', { bold: true }) };
+  /* ---- distribución ---- */
+  S.riser_panel = { name: 'Panel / Load Center 200A (Siemens PL, 29"×14½")', short: 'Panel',
+    cat: 'riser', layer: 'electrical', w: 21, h: 42,
+    svg: R(-7.25, -14.5, 14.5, 29) + L(0, -11, 0, -4, 1.2) +
+      T(0, 5, 3.6, 'PANEL', { bold: true }) + T(0, 10, 2.8, '120/240V') };
 
-  S.riser_wh = { name: 'Weatherhead / Service Drop', short: 'Weatherhead', cat: 'riser', layer: 'electrical', w: 26, h: 56,
-    svg: '<path d="M0,26 L0,-14" stroke-width="1.6"/>' + '<path d="M0,-14 Q0,-26 12,-24" stroke-width="1.4"/>' + L(-7, -18, 7, -24, 0.8) };
+  S.riser_subpanel = { name: 'Subpanel 100A 12/24 (20"×14", oficio)', short: 'Subpanel',
+    cat: 'riser', layer: 'electrical', w: 20, h: 32,
+    svg: R(-7, -10, 14, 20) + L(0, -7, 0, -2, 1.1) + T(0, 5, 3.4, 'SUB', { bold: true }) };
 
-  S.riser_ground = { name: 'Ground Rods (2)', short: 'Ground Rods', cat: 'riser', layer: 'electrical', w: 90, h: 46,
+  S.riser_gutter = { name: 'Gutter / Wireway 6×6×36 (oficio)', short: 'Gutter',
+    cat: 'riser', layer: 'electrical', w: 12, h: 48,
+    svg: R(-3, -18, 6, 36) + L(-3, -12, 3, -12, 0.6) + L(-3, 12, 3, 12, 0.6) +
+      T(0, 22.5, 4, 'GUTTER', { bold: true }) };
+
+  S.riser_jbox = { name: 'Junction Box 12×12 (oficio)', short: 'J-Box',
+    cat: 'riser', layer: 'electrical', w: 18, h: 22,
+    svg: R(-6, -6, 12, 12) + L(-6, -6, 6, 6, 0.6) + L(6, -6, -6, 6, 0.6) +
+      T(0, 11, 4, 'J-BOX', { bold: true }) };
+
+  /* ---- desconectivos: el tamaño ES el amperaje ---- */
+  function safetySwitch(alto, ancho) {
+    var hx = ancho / 2, hy = alto / 2;
+    var m = Math.min(ancho, alto);
+    var bx = ancho * 0.26, by = alto * 0.16;
+    var cy = -alto * 0.10;
+    var r = Math.max(0.55, m * 0.055);
+    return R(-hx, -hy, ancho, alto) +
+      L(-bx, cy, bx * 0.75, cy - by, Math.max(0.8, m * 0.045)) +
+      C(-bx, cy, r, ' fill="#14161a"') + C(bx, cy - by, r, ' fill="#14161a"') +
+      rotuloCaja('DISC', alto, ancho, true);
+  }
+  function disc(clave, nombre, corto, alto, ancho) {
+    S[clave] = { name: nombre, short: corto, cat: 'riser', layer: 'electrical',
+      w: ancho + 6, h: alto + 12, svg: safetySwitch(alto, ancho) };
+  }
+  disc('riser_disc60',  'Disconnect ≤100A — 60A GD 3R Siemens (8.6"×5.4")', 'Disc ≤100A', 8.6, 5.4);
+  disc('riser_disc100', 'Disconnect 100–150A — 100A GD Siemens (17"×9")',   'Disc 100–150A', 17, 9);
+  // el de siempre conserva su clave: 200A es el que más se usa en casa
+  S.riser_disc = { name: 'Disconnect 200–250A — 200A GD Siemens (25"×11½")', short: 'Disc 200–250A',
+    cat: 'riser', layer: 'electrical', w: 17.5, h: 37, svg: safetySwitch(25, 11.5) };
+  disc('riser_disc400', 'Disconnect 400A — HF365R HD 3R Siemens (45.3"×22.4")', 'Disc 400A', 45.3, 22.4);
+  disc('riser_disc600', 'Disconnect >400A — 600A HD 3R (57"×26", estimado)',    'Disc >400A', 57, 26);
+
+  /* ---- respaldo y generación ---- */
+  S.riser_ats = { name: 'ATS 200A (24"×16", oficio)', short: 'ATS',
+    cat: 'riser', layer: 'electrical', w: 22, h: 36,
+    svg: R(-8, -12, 16, 24) + T(0, -4, 5, 'ATS', { bold: true }) +
+      L(-4.5, 2, 0, 7, 0.9) + L(0, 7, 4.5, 2, 0.9) +
+      C(-4.5, 2, 0.9, ' fill="#14161a"') + C(4.5, 2, 0.9, ' fill="#14161a"') + C(0, 7, 0.9, ' fill="#14161a"') };
+
+  S.riser_gen = { name: 'Standby Generator 22kW (planta 48"×25", oficio)', short: 'Generator',
+    cat: 'riser', layer: 'electrical', w: 54, h: 40,
+    svg: R(-24, -12.5, 48, 25, 2) + C(0, -1, 7) + T(0, 2.4, 8, 'G', { bold: true }) +
+      T(0, 18, 5, 'GENERATOR', { bold: true }) };
+
+  S.riser_bat = { name: 'Battery / ESS (45"×29", oficio)', short: 'Battery ESS',
+    cat: 'riser', layer: 'electrical', w: 35, h: 58,
+    svg: R(-14.5, -22.5, 29, 45, 1.5) +
+      L(-7, -6, 7, -6, 1.2) + L(-4, -2, 4, -2, 1.2) + L(-7, 3, 7, 3, 1.2) + L(-4, 7, 4, 7, 1.2) +
+      T(0, 18, 4.6, 'ESS', { bold: true }) };
+
+  S.riser_pv = { name: 'Solar Inverter PV (26"×17", oficio)', short: 'PV Inverter',
+    cat: 'riser', layer: 'electrical', w: 23, h: 38,
+    svg: R(-8.5, -13, 17, 26) +
+      '<path d="M-5,-4 L-1,-4 L-3,3 L5,-5 L1,-5 L4,-11" fill="none" stroke-width="0.9"/>' +
+      T(0, 8, 4, 'PV INV', { bold: true }) };
+
+  /* ---- otros ---- */
+  S.riser_xfmr = { name: 'Transformer 75kVA (30"×24", oficio)', short: 'Transformer',
+    cat: 'riser', layer: 'electrical', w: 30, h: 46,
+    svg: C(0, -6, 8) + C(0, 6, 8) + T(0, 21, 5, 'XFMR', { bold: true }) };
+
+  S.riser_padmount = { name: 'Pad-mount Transformer (planta 60"×48", utility)', short: 'Pad-mount',
+    cat: 'riser', layer: 'electrical', w: 66, h: 62,
+    svg: R(-30, -24, 60, 48, 2) + C(-9, 0, 8) + C(9, 0, 8) +
+      T(0, 32, 6, 'PAD-MOUNT XFMR', { bold: true }) };
+
+  S.riser_ev = { name: 'EV Charger (14"×8", oficio)', short: 'EV',
+    cat: 'riser', layer: 'electrical', w: 14, h: 24,
+    svg: R(-4, -7, 8, 14) +
+      '<path d="M-1.6,-3 L0.8,-3 L-0.5,1.5 L2.6,-2 L0.4,-2 L2,-5.5" fill="none" stroke-width="0.7"/>' +
+      T(0, 11, 3.6, 'EV', { bold: true }) };
+
+  S.riser_pool = { name: 'Pool Panel / Time Clock (20"×12", oficio)', short: 'Pool Panel',
+    cat: 'riser', layer: 'electrical', w: 18, h: 32,
+    svg: R(-6, -10, 12, 20) + C(0, -4, 3.4) + L(0, -4, 0, -6.6, 0.7) + L(0, -4, 2, -4, 0.7) +
+      T(0, 6, 3.4, 'POOL', { bold: true }) };
+
+  S.riser_spd = { name: 'Surge Protector SPD (7"×4½", oficio)', short: 'SPD',
+    cat: 'riser', layer: 'electrical', w: 12, h: 18,
+    svg: R(-2.25, -3.5, 4.5, 7) + T(0, 8, 3.6, 'SPD', { bold: true }) };
+
+  S.riser_ground = { name: 'Ground Rods (2) — 6\'-0" de separación', short: 'Ground Rods',
+    cat: 'riser', layer: 'electrical', w: 86, h: 44,
     svg: (function () {
       function rod(x) {
-        return L(x, -18, x, 6, 1.2) +
-          L(x - 7, 6, x + 7, 6, 1.4) + L(x - 4.5, 10, x + 4.5, 10, 1.2) + L(x - 2, 14, x + 2, 14, 1);
+        return L(x, -16, x, 5, 1) +
+          L(x - 6, 5, x + 6, 5, 1.2) + L(x - 4, 9, x + 4, 9, 1) + L(x - 1.8, 13, x + 1.8, 13, 0.8);
       }
-      return rod(-30) + rod(30) + L(-30, -18, 30, -18, 1) + T(0, -23, 5.5, "6'-0\" MIN.");
+      return rod(-36) + rod(36) + L(-36, -16, 36, -16, 0.9) + T(0, -20, 5, "6'-0\" MIN.");
     })() };
 
-  S.riser_spd = { name: 'Surge Protector (SPD)', short: 'SPD', cat: 'riser', layer: 'electrical', w: 30, h: 36,
-    svg: R(-14, -17, 28, 34) + T(0, 2.5, 6.5, 'SPD', { bold: true }) };
-
-  S.riser_gnd_sym = { name: 'Ground Symbol', short: 'Ground', cat: 'riser', layer: 'electrical', w: 18, h: 22,
+  S.riser_gnd_sym = { name: 'Ground Symbol', short: 'Ground',
+    cat: 'riser', layer: 'electrical', w: 18, h: 22,
     svg: L(0, -10, 0, 0, 1.2) + L(-8, 0, 8, 0, 1.4) + L(-5, 4, 5, 4, 1.2) + L(-2, 8, 2, 8, 1) };
 
   /* ============================ PLOMERÍA / EQUIPOS ============================ */

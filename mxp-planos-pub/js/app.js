@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.N';
+  var APP_VERSION = 'v28.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2075,8 +2075,13 @@
   // site del escaneo NO se tocan: van a tamaño real de la casa.
   function symK(def) {
     // capa 'furniture' = objetos a TAMAÑO REAL (camas, toilet, tub, nevera
-    // — vengan del escaneo o de la paleta); site (árboles) igual
-    return (def && (def.layer === 'furniture' || def.cat === 'site')) ? 1 : 0.7;
+    // — vengan del escaneo o de la paleta); site (árboles) igual.
+    // 'riser' también, desde el 30/08: sus medidas son las PULGADAS REALES
+    // del cajón (un load center de 29"x14½"), así que un panel puesto sobre
+    // el plano de la casa tiene que ocupar lo que ocupa en la pared. Los
+    // devices —receptáculos, switches— siguen al 0.7: ésos son símbolos de
+    // medida convencional, no cajas a escala.
+    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'riser')) ? 1 : 0.7;
   }
   /* FONDO OPACO DEL EQUIPO (Edgar, 08/30: "cuando yo haga un area, por ejemplo
    * un counter, los equipos que ponga encima —un sink, un dishwasher— que no
