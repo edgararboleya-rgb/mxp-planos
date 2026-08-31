@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.O';
+  var APP_VERSION = 'v28.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3517,8 +3517,12 @@
       var vx = p[0] - drag.opp[0], vy = p[1] - drag.opp[1];
       // la diagonal, vista en el marco local del objeto (rotación incluida)
       var lw = vx * c4 + vy * s4, lh = -vx * s4 + vy * c4;
-      var W4 = Math.max(6, Math.round(Math.abs(lw)));
-      var H4 = Math.max(6, Math.round(Math.abs(lh)));
+      // a CUARTO DE PULGADA, no a pulgada entera: desde que el equipo del
+      // riser va a medida real (un meter socket de 9½"), redondear a 1" era
+      // un 5% de error y con SHIFT la forma se notaba cambiada
+      var q4 = function (v) { return Math.max(2, Math.round(v * 4) / 4); };
+      var W4 = q4(Math.abs(lw));
+      var H4 = q4(Math.abs(lh));
       // SHIFT: el objeto no pierde su forma (Edgar, 08/30 — el sink y el
       // dishwasher se achataban al jalar la esquina). Se conserva la
       // proporcion que TENIA al empezar a estirar, no la de fabrica: si ya
@@ -3529,8 +3533,8 @@
       if (propOn) {
         var prop4 = drag.prop || (d4.w / d4.h) || 1;
         var lado = Math.max(W4, H4 * prop4);
-        W4 = Math.max(6, Math.round(lado));
-        H4 = Math.max(6, Math.round(lado / prop4));
+        W4 = q4(lado);
+        H4 = q4(lado / prop4);
         // el vector diagonal se recalcula con la medida ya corregida
         var lwA = (lw < 0 ? -1 : 1) * W4, lhA = (lh < 0 ? -1 : 1) * H4;
         vx = lwA * c4 - lhA * s4;
