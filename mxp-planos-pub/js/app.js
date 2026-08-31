@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.I';
+  var APP_VERSION = 'v28.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2098,6 +2098,19 @@
     return '<rect x="' + (-w / 2) + '" y="' + (-h / 2) + '" width="' + w + '" height="' + h +
       '" fill="' + PAPEL + '" stroke="none"/>';
   }
+  /* CONTORNO DISCONTINUO (Edgar, 30/08: "que a esos símbolos —meter, panel,
+   * disconnect, ATS o lo que fuese— les pongas la opción de tener todo el
+   * borde de líneas discontinuas… equipo que se instalará en el futuro, o que
+   * simplemente no es parte de este dibujo"). Es la convención de siempre:
+   * lo que está en la hoja pero NO entra en este contrato se dibuja
+   * discontinuo. Va en el <g>, así que lo heredan todos los trazos del
+   * símbolo — pero NO el texto, que lleva stroke:none y se queda legible.
+   * Tampoco el fondo opaco, que no tiene contorno. */
+  var SYM_RAYA = { '': '', fut: '5 3.5', ex: '2.5 2.5' };
+  function rayaSym(s) {
+    var d = SYM_RAYA[s && s.raya] || '';
+    return d ? ' stroke-dasharray="' + d + '"' : '';
+  }
   function symTransform(s) {
     var k = symK(SYMBOLS[s.key]);
     var sx = (s.scale || 1) * (s.sx || 1) * k;
@@ -2115,15 +2128,31 @@
     function P(lx, ly) { return [e.x + lx * cr - ly * sr, e.y + lx * sr + ly * cr]; }
     return [P(-hx, -hy), P(hx, -hy), P(hx, hy), P(-hx, hy)];
   }
+  /* TUBERÍA CON MATERIAL (Edgar, 30/08: "hazme algunas líneas que simularan
+     tuberías de PVC o de EMT"). En el riser la tubería se dibuja a doble
+     línea; lo que cambia entre un material y otro es el trazo: el EMT va
+     visto y se dibuja CONTINUO; el PVC casi siempre va enterrado o embebido
+     en el slab, y lo que no se ve va DISCONTINUO. Además cada uno lleva su
+     rótulo en el campo Etiqueta: 2" EMT, 2½" PVC SCH-40, lo que sea. */
+  var ES_L = { ortho: 1, orthodashed: 1, conduitortho: 1, emtortho: 1, pvcortho: 1, ugortho: 1 };
+  var ES_TUBO = {
+    conduit: '', conduitortho: '',
+    emt: '', emtortho: '',
+    pvc: '7 5', pvcortho: '7 5',
+    ug: '12 5', ugortho: '12 5'
+  };
   function wirePath(w) {
     var st = w.style || 'dashed';
-    if (st === 'straight' || st === 'straightdashed' || st === 'conduit') {
-      // recta (para diagramas riser / one-line)
-      return { d: 'M' + w.x1 + ',' + w.y1 + ' L' + w.x2 + ',' + w.y2, cx: (w.x1 + w.x2) / 2, cy: (w.y1 + w.y2) / 2 };
-    }
-    if (st === 'ortho' || st === 'orthodashed' || st === 'conduitortho') {
+    // el candado de la L va PRIMERO: los tubos en L (emtortho, pvcortho…)
+    // también son tubos, y si se pregunta antes por el tubo se los come la
+    // rama de la recta y salen en diagonal en vez de doblar
+    if (ES_L[st]) {
       // en L: horizontal y luego vertical (riser)
       return { d: 'M' + w.x1 + ',' + w.y1 + ' L' + w.x2 + ',' + w.y1 + ' L' + w.x2 + ',' + w.y2, cx: w.x2, cy: w.y1 };
+    }
+    if (st === 'straight' || st === 'straightdashed' || ES_TUBO[st] != null) {
+      // recta (para diagramas riser / one-line)
+      return { d: 'M' + w.x1 + ',' + w.y1 + ' L' + w.x2 + ',' + w.y2, cx: (w.x1 + w.x2) / 2, cy: (w.y1 + w.y2) / 2 };
     }
     var dx = w.x2 - w.x1, dy = w.y2 - w.y1, len = Math.hypot(dx, dy) || 1e-6;
     var nx = -dy / len, ny = dx / len;
@@ -2136,7 +2165,7 @@
     if (st === 'straight' || st === 'straightdashed' || st === 'conduit') {
       return Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
     }
-    if (st === 'ortho' || st === 'orthodashed' || st === 'conduitortho') {
+    if (ES_L[st]) {
       return Math.abs(w.x2 - w.x1) + Math.abs(w.y2 - w.y1);
     }
     // curva: longitud aproximada muestreando la cuadrática
@@ -2153,16 +2182,19 @@
   var WIRE_STYLE_NAMES = {
     dashed: 'Switch Leg', solid: 'Circuit (curved)',
     conduit: 'Conduit (straight)', conduitortho: 'Conduit (L)',
+    emt: 'EMT Conduit', emtortho: 'EMT Conduit (L)',
+    pvc: 'PVC Conduit', pvcortho: 'PVC Conduit (L)',
+    ug: 'Underground Conduit', ugortho: 'Underground Conduit (L)',
     straight: 'Straight Conductor', straightdashed: 'GEC / Dashed',
     ortho: 'L Conductor', orthodashed: 'L Dashed'
   };
   function wireEndTangents(w) {
     var st = w.style || 'dashed';
-    if (st === 'ortho' || st === 'orthodashed' || st === 'conduitortho') {
+    if (ES_L[st]) {
       var sx = Math.sign(w.x2 - w.x1) || 1, sy = Math.sign(w.y2 - w.y1) || 1;
       return { s: [-sx, 0], e: [0, sy] };
     }
-    if (st === 'straight' || st === 'straightdashed' || st === 'conduit') {
+    if (st === 'straight' || st === 'straightdashed' || ES_TUBO[st] != null) {
       var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
       return { s: [-dx / L, -dy / L], e: [dx / L, dy / L] };
     }
@@ -2192,10 +2224,13 @@
   function wireMarkup(w, extraCls) {
     var st = w.style || 'dashed';
     var d = wirePath(w).d;
-    if (st === 'conduit' || st === 'conduitortho') {
-      // tubería: doble línea (trazo grueso oscuro con núcleo claro encima)
-      return '<path class="wire-conduit-outer' + (extraCls || '') + '" data-id="' + w.id + '" d="' + d + '"/>' +
-        '<path class="wire-conduit-inner" data-id="' + w.id + '" d="' + d + '"/>' + wireCaps(w);
+    if (ES_TUBO[st] != null) {
+      // tubería: doble línea (trazo grueso oscuro con núcleo claro encima).
+      // El PVC y lo enterrado van discontinuos: la raya se pone en las DOS
+      // capas y con el mismo patrón, si no el núcleo claro se come los huecos
+      var da = ES_TUBO[st] ? ' stroke-dasharray="' + ES_TUBO[st] + '"' : '';
+      return '<path class="wire-conduit-outer' + (extraCls || '') + '" data-id="' + w.id + '" d="' + d + '"' + da + '/>' +
+        '<path class="wire-conduit-inner" data-id="' + w.id + '" d="' + d + '"' + da + '/>' + wireCaps(w);
     }
     var dashed = (st === 'dashed' || st === 'straightdashed' || st === 'orthodashed');
     return '<path class="wire ' + (dashed ? 'dashed' : '') + (extraCls || '') +
@@ -2211,7 +2246,7 @@
     state.symbols.forEach(function (s) {
       var def = SYMBOLS[s.key]; if (!def) return;
       var sw = def.lw ? ' style="stroke-width:' + def.lw + '"' : '';
-      var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + opAttr(s) + '>' +
+      var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + rayaSym(s) + opAttr(s) + '>' +
         fondoSym(s, def) + def.svg + '</g>';
       if (def.layer === 'electrical') elec += frag; else furn += frag;
     });
@@ -4670,6 +4705,12 @@
         html += '<div class="row"><label>Ancho</label><input id="prSymW" value="' + fmtFtIn(def2.w * (e.scale || 1) * (e.sx || 1)) + '"></div>';
         html += '<div class="row"><label>Fondo</label><input id="prSymH" value="' + fmtFtIn(def2.h * (e.scale || 1) * (e.sy || 1)) + '"></div>';
       }
+      html += '<div class="row"><label>Contorno</label><select id="prSymRaya">' +
+        [['', '——— Continuo (va en este contrato)'],
+         ['fut', '– – – Discontinuo — futuro / N.I.C. / fuera de este scope'],
+         ['ex', '· · · Punteado — existente, se queda']].map(function (rr) {
+          return '<option value="' + rr[0] + '"' + ((e.raya || '') === rr[0] ? ' selected' : '') + '>' + esc(rr[1]) + '</option>';
+        }).join('') + '</select></div>';
       var fdAct = (e.bg == null) ? (def2 && def2.layer === 'furniture' && def2.bg !== 'none') : !!e.bg;
       html += '<div class="row"><label style="flex:1">Fondo opaco</label><input id="prSymBg" type="checkbox"' +
         (fdAct ? ' checked' : '') + ' title="Tapa el patrón del mostrador o del piso que queda debajo"></div>';
@@ -4723,8 +4764,14 @@
       var wireOpts = [
         ['dashed', 'Switch leg (dashed curve)'],
         ['solid', 'Circuit (solid curve)'],
-        ['conduit', 'Conduit double-line — straight (riser)'],
-        ['conduitortho', 'Conduit double-line — L (riser)'],
+        ['emt', '▬ EMT — tubería vista (recta)'],
+        ['emtortho', '▬ EMT — tubería vista (en L)'],
+        ['pvc', '▭ PVC — embebido / enterrado (recta)'],
+        ['pvcortho', '▭ PVC — embebido / enterrado (en L)'],
+        ['ug', '▭ Underground / bajo slab (recta)'],
+        ['ugortho', '▭ Underground / bajo slab (en L)'],
+        ['conduit', 'Conduit genérico — straight (riser)'],
+        ['conduitortho', 'Conduit genérico — L (riser)'],
         ['straight', 'Thin straight (solid)'],
         ['straightdashed', 'Dashed straight (GEC / ground)'],
         ['ortho', 'Thin L / ortho (solid)'],
@@ -4874,6 +4921,13 @@
     on('prFlipDry', 'click', function () { pushUndo(); e.drySide = -(e.drySide || 1); e.dryManual = 1; refresh(); });
     on('prFlipSwing', 'click', function () { pushUndo(); e.swing = -(e.swing || 1); refresh(); });
     on('prFlipHinge', 'click', function () { pushUndo(); e.hinge = e.hinge ? 0 : 1; refresh(); });
+    on('prSymRaya', 'change', function (n) {
+      var et = findSel(); if (!et) return;
+      pushUndo(); et.raya = n.value || ''; refresh();
+      setHint(n.value === 'fut' ? 'Contorno discontinuo — futuro / N.I.C. (no entra en este contrato)'
+        : n.value === 'ex' ? 'Contorno punteado — equipo existente que se queda'
+        : 'Contorno continuo — va en este contrato');
+    });
     on('prSymBg', 'change', function (n) {
       var et = findSel(); if (!et) return;
       pushUndo(); et.bg = n.checked ? 1 : 0; refresh();
