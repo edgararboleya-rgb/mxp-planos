@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.B';
+  var APP_VERSION = 'v29.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -3083,6 +3083,7 @@
   function refresh() {
     renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderBg(); renderGuia(); renderSel();
     refreshCounts(); showProps();
+    if (typeof renderMarcas === 'function') renderMarcas();   // la Lista de marcas, si está abierta
   }
 
   /* ---------------- hit testing ---------------- */
@@ -5659,6 +5660,172 @@
     }
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
   }
+
+  /* ================= LISTA DE MARCAS — el Markups List de Bluebeam =================
+     (Edgar, 31/08: "revisa cómo funciona Bluebeam, qué le puede faltar a esta
+     aplicación, y ejecútalo".) El Markups List es LA pieza de Bluebeam: cada
+     marca del plano en una tabla — tipo, nombre, medida — y un clic te lleva a
+     ella. Aquí el conteo de Materiales agrupa (12 duplex, 340 ft de drywall);
+     esto es lo contrario: UNA fila por objeto, para revisar, buscar ("¿dónde
+     puse la nota del GFI?") y exportar con detalle.
+     Es un panel FLOTANTE, no un modal: se queda abierto mientras recorres el
+     plano fila por fila. Se arrastra por la barra y se redimensiona por la
+     esquina, igual que el chat. */
+  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', wire: 'Cable/Tubo' };
+  function filasMarcas() {
+    var out = [];
+    state.walls.forEach(function (w) {
+      var g = wallGeom(w);
+      out.push({ kind: 'wall', tipo: 'wall', id: w.id, nombre: (WALL_TYPES[w.type] || {}).name || w.type, det: '', medida: fmtFtIn(g.len), num: g.len });
+    });
+    aberturasVivas().forEach(function (o) {
+      out.push({ kind: 'opening', tipo: 'opening', id: o.id, nombre: OPEN_NAMES[o.type] || o.type, det: '', medida: fmtFtIn(o.w), num: o.w });
+    });
+    state.symbols.forEach(function (sy) {
+      var d = SYMBOLS[sy.key]; if (!d) return;
+      var an = d.w * (sy.scale || 1) * (sy.sx || 1) * symK(d), al = d.h * (sy.scale || 1) * (sy.sy || 1) * symK(d);
+      out.push({ kind: 'symbol', tipo: 'symbol', id: sy.id, nombre: d.name, det: SYMBOL_CATS[d.cat] || d.cat, medida: (d.layer === 'furniture' || d.cat === 'riser' || d.cat === 'site' || d.cat === 'siteplan') ? fmtFtIn(an) + ' × ' + fmtFtIn(al) : '', num: 1 });
+    });
+    state.texts.forEach(function (t) {
+      out.push({ kind: 'text', tipo: 'text', id: t.id, nombre: String(t.text || '').replace(/\n/g, ' / '), det: t.style === 'circle' ? 'burbuja' : t.style === 'hex' ? 'hexágono' : '', medida: '', num: 0 });
+    });
+    state.leaders.forEach(function (l) {
+      out.push({ kind: 'leader', tipo: 'leader', id: l.id, nombre: l.text || '', det: 'callout', medida: '', num: 0 });
+    });
+    state.dims.forEach(function (d) {
+      var L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1);
+      out.push({ kind: 'dim', tipo: 'dim', id: d.id, nombre: d.meas ? 'Medición' : 'Cota', det: '', medida: fmtFtIn(L), num: L });
+    });
+    state.areas.forEach(function (a) {
+      var est = LINE_STYLES[a.lineStyle] || LINE_STYLES.solid;
+      if (a.open) {
+        var L2 = perimDe(a);
+        out.push({ kind: 'area', tipo: 'line', id: a.id, nombre: est.name.replace(/^[^A-Za-zÁ-ú]+/, ''), det: a.pts.length === 2 ? 'línea' : 'polilínea ' + a.pts.length + ' pts', medida: fmtFtIn(L2), num: L2 });
+      } else {
+        var pd = AREA_PATTERNS[a.pattern], sq = areaDe(a) / 144;
+        out.push({ kind: 'area', tipo: 'area', id: a.id, nombre: pd ? pd.name : (a.pattern || 'Polígono'), det: a.lineStyle && a.lineStyle !== 'solid' ? est.name.replace(/^[^A-Za-zÁ-ú]+/, '') : '', medida: sq.toFixed(1) + ' sq ft · ' + fmtFtIn(perimDe(a)), num: sq });
+      }
+    });
+    state.wires.forEach(function (w) {
+      var L3 = wireLen(w);
+      out.push({ kind: 'wire', tipo: 'wire', id: w.id, nombre: WIRE_STYLE_NAMES[w.style || 'dashed'] || w.style, det: w.label || '', medida: fmtFtIn(L3), num: L3 });
+    });
+    return out;
+  }
+  // caja de un objeto en coordenadas de mundo, para encuadrarlo
+  function bboxDe(kind, e) {
+    var xs = [], ys = [];
+    if (kind === 'wall') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
+    else if (kind === 'opening') {
+      var w = state.walls.find(function (q) { return q.id === e.wallId; });
+      if (w) { var g = wallGeom(w), P = ptAlong(w, g, e.pos); xs.push(P[0] - e.w / 2, P[0] + e.w / 2); ys.push(P[1] - e.w / 2, P[1] + e.w / 2); }
+    }
+    else if (kind === 'symbol') { var cs = symCorners(e) || [[e.x, e.y]]; cs.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
+    else if (kind === 'text') { var sz = e.size || 9; xs.push(e.x - 20, e.x + textAncho(e.text, sz) + 20); ys.push(e.y - textAlto(e.text, sz) - 10, e.y + 10); }
+    else if (kind === 'leader') { xs.push(e.x, e.tx); ys.push(e.y, e.ty); }
+    else if (kind === 'dim' || kind === 'wire') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
+    else if (kind === 'area') { e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
+    if (!xs.length) return null;
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    return { x: x0, y: y0, w: Math.max(12, x1 - x0), h: Math.max(12, y1 - y0) };
+  }
+  // encuadra una caja con margen, sin acercarse más de la cuenta (un
+  // receptáculo a 20x es un borrón: tope 6x)
+  function zoomToBox(b) {
+    if (!b) return;
+    var r = svg.getBoundingClientRect();
+    var pad = Math.max(b.w, b.h) * 0.9 + 24;
+    var bw = b.w + pad * 2, bh = b.h + pad * 2;
+    var z = Math.min(r.width / bw, r.height / bh);
+    view.z = Math.max(0.05, Math.min(6, z));
+    view.tx = r.width / 2 - (b.x + b.w / 2) * view.z;
+    view.ty = r.height / 2 - (b.y + b.h / 2) * view.z;
+    applyView();
+  }
+  var marcasCache = [];
+  var marcasOrden = { col: 'tipo', asc: true };
+  function marcasAbierto() { var b = $('#marcasBox'); return b && !b.classList.contains('oculto'); }
+  function renderMarcas() {
+    if (!marcasAbierto()) return;
+    var q = ($('#marcasBusca').value || '').trim().toLowerCase();
+    var tipo = $('#marcasTipo').value;
+    var todas = filasMarcas();
+    var filas = todas.filter(function (f) {
+      if (tipo && f.tipo !== tipo) return false;
+      if (!q) return true;
+      return (f.nombre + ' ' + f.det + ' ' + f.medida + ' ' + (MARCAS_TIPO[f.tipo] || '')).toLowerCase().indexOf(q) >= 0;
+    });
+    var col = marcasOrden.col, asc = marcasOrden.asc ? 1 : -1;
+    filas.sort(function (a, b) {
+      var va = col === 'medida' ? a.num : String(a[col] || '').toLowerCase();
+      var vb = col === 'medida' ? b.num : String(b[col] || '').toLowerCase();
+      return (va < vb ? -1 : va > vb ? 1 : 0) * asc;
+    });
+    marcasCache = filas;
+    var flecha = function (c) { return marcasOrden.col === c ? (marcasOrden.asc ? ' ▲' : ' ▼') : ''; };
+    var h = '<thead><tr><th data-c="tipo">Tipo' + flecha('tipo') + '</th><th data-c="nombre">Nombre' + flecha('nombre') + '</th><th data-c="det">Detalle' + flecha('det') + '</th><th data-c="medida" style="text-align:right">Medida' + flecha('medida') + '</th></tr></thead><tbody>';
+    filas.forEach(function (f, i) {
+      var cur = sel && sel.kind === f.kind && sel.id === f.id;
+      h += '<tr class="fila' + (cur ? ' cur' : '') + '" data-i="' + i + '"><td class="k">' + esc(MARCAS_TIPO[f.tipo] || f.tipo) + '</td><td title="' + esc(f.nombre) + '">' + esc(f.nombre) + '</td><td class="k">' + esc(f.det) + '</td><td class="n">' + esc(f.medida) + '</td></tr>';
+    });
+    if (!filas.length) h += '<tr><td colspan="4" class="k" style="padding:14px;text-align:center">Nada que listar' + (q || tipo ? ' con ese filtro' : ' — el plano está vacío') + '</td></tr>';
+    $('#marcasTabla').innerHTML = h + '</tbody>';
+    $('#marcasN').textContent = filas.length === todas.length ? todas.length + ' marcas' : filas.length + ' de ' + todas.length;
+    // clic en fila = seleccionar y encuadrar; el panel se queda abierto
+    $$('#marcasTabla tr.fila').forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        var f = marcasCache[+tr.dataset.i]; if (!f) return;
+        selGroup = null; sel = { kind: f.kind, id: f.id };
+        var e = findSel(); if (!e) { sel = null; renderMarcas(); return; }
+        if (tool !== 'select') setTool('select');
+        zoomToBox(bboxDe(f.kind, e));
+        renderSel(); showProps();
+        $$('#marcasTabla tr.fila').forEach(function (t2) { t2.classList.toggle('cur', t2 === tr); });
+        tr.scrollIntoView({ block: 'nearest' });
+      });
+    });
+    $$('#marcasTabla th').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var c = th.dataset.c;
+        if (marcasOrden.col === c) marcasOrden.asc = !marcasOrden.asc; else { marcasOrden.col = c; marcasOrden.asc = true; }
+        renderMarcas();
+      });
+    });
+  }
+  function marcasCsv() {
+    var rows = [['Tipo', 'Nombre', 'Detalle', 'Medida', 'Hoja']];
+    var hoja = (state.sheets[state.curSheet] || {}).no || '';
+    marcasCache.forEach(function (f) { rows.push([MARCAS_TIPO[f.tipo] || f.tipo, f.nombre, f.det, f.medida, hoja]); });
+    var csv = '\ufeff' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+    saveFile((state.project.name || 'proyecto') + '_marcas.csv', csv);
+    setHint('Lista de marcas exportada a CSV (' + marcasCache.length + ' filas)');
+  }
+  (function () {
+    var box = $('#marcasBox'); if (!box) return;
+    $('#btnMarcas').addEventListener('click', function () {
+      box.classList.toggle('oculto');
+      if (marcasAbierto()) { renderMarcas(); $('#marcasBusca').focus(); }
+    });
+    $('#marcasCerrar').addEventListener('click', function () { box.classList.add('oculto'); });
+    $('#marcasCsv').addEventListener('click', marcasCsv);
+    $('#marcasBusca').addEventListener('input', renderMarcas);
+    $('#marcasTipo').addEventListener('change', renderMarcas);
+    // arrastrar por la barra, igual que el chat
+    var cab = $('#marcasCab'), ar = null;
+    cab.addEventListener('pointerdown', function (ev) {
+      if (/BUTTON/.test(ev.target.tagName)) return;
+      var r = box.getBoundingClientRect();
+      ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+      cab.setPointerCapture(ev.pointerId); ev.preventDefault();
+    });
+    cab.addEventListener('pointermove', function (ev) {
+      if (!ar) return;
+      box.style.left = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - ar.dx)) + 'px';
+      box.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - ar.dy)) + 'px';
+    });
+    cab.addEventListener('pointerup', function () { ar = null; });
+    cab.addEventListener('pointercancel', function () { ar = null; });
+  })();
 
   /* ---------------- exportar lista de materiales (estilo Markups List) ---------------- */
   function exportTakeoffCsv() {

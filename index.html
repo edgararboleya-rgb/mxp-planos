@@ -260,10 +260,36 @@
       </section>
 
       <section class="panel">
-        <h3>Materiales <span class="muted small">(automático)</span> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)">📤 Estimador</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)">⬇ CSV</button></h3>
+        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV">📋 Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)">📤 Estimador</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)">⬇ CSV</button></h3>
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
       </section>
     </aside>
+  </div>
+
+  <!-- ======= LISTA DE MARCAS (Markups List) — panel flotante, no modal: se queda abierto mientras recorres el plano ======= -->
+  <div id="marcasBox" class="oculto">
+    <div id="marcasCab">
+      <span id="marcasTit">📋 LISTA DE MARCAS</span>
+      <span id="marcasN" class="muted small"></span>
+      <button id="marcasCsv" title="Exportar esta lista (con el filtro puesto) a CSV">⬇</button>
+      <button id="marcasCerrar" title="Cerrar">✕</button>
+    </div>
+    <div id="marcasFiltro">
+      <input type="search" id="marcasBusca" placeholder="Buscar… (texto, etiqueta, tipo)">
+      <select id="marcasTipo">
+        <option value="">Todo</option>
+        <option value="wall">Paredes</option>
+        <option value="opening">Puertas y ventanas</option>
+        <option value="symbol">Símbolos</option>
+        <option value="text">Textos</option>
+        <option value="leader">Notas (callout)</option>
+        <option value="dim">Cotas</option>
+        <option value="area">Superficies</option>
+        <option value="line">Líneas y polilíneas</option>
+        <option value="wire">Cableado y tubería</option>
+      </select>
+    </div>
+    <div id="marcasCuerpo"><table id="marcasTabla"></table></div>
   </div>
 
   <!-- ======= BARRA DE ESTADO ======= -->

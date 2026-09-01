@@ -493,3 +493,36 @@ body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
   #chatFlot { width: calc(100vw - 16px); height: 62vh; }
 }
 .mxp.sinEqName text.eqName{display:none}
+
+/* ======= LISTA DE MARCAS (Markups List) ======= */
+#marcasBox {
+  position: fixed; left: 250px; top: 78px; z-index: 61;
+  width: 580px; max-width: calc(100vw - 16px);
+  height: 440px; max-height: calc(100vh - 90px);
+  display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #c9c9c3; border-radius: 10px;
+  box-shadow: 0 6px 26px rgba(0,0,0,.22); overflow: hidden; resize: both;
+}
+#marcasBox.oculto { display: none; }
+#marcasCab {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  background: #f4f4ef; border-bottom: 1px solid #e2e2dc;
+  cursor: move; touch-action: none; user-select: none;
+}
+#marcasTit { font-weight: 700; font-size: 12.5px; flex: 1; letter-spacing: .4px; }
+#marcasCab button { border: 1px solid #d5d5cf; background: #fff; border-radius: 5px; width: 26px; height: 26px; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
+#marcasCab button:hover { background: #eee; }
+#marcasFiltro { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid #eee; }
+#marcasFiltro input { flex: 1; min-width: 0; }
+#marcasCuerpo { flex: 1; overflow: auto; }
+#marcasTabla { width: 100%; border-collapse: collapse; font-size: 12px; }
+#marcasTabla th { position: sticky; top: 0; background: #fafaf7; text-align: left; padding: 5px 8px; border-bottom: 1px solid #e2e2dc; font-size: 11px; letter-spacing: .3px; color: #555; cursor: pointer; }
+#marcasTabla td { padding: 4px 8px; border-bottom: 1px solid #f0f0ec; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+#marcasTabla tr.fila { cursor: pointer; }
+#marcasTabla tr.fila:hover { background: #f3f7fc; }
+#marcasTabla tr.fila.cur { background: #dbe9f8; }
+#marcasTabla td.n { text-align: right; font-variant-numeric: tabular-nums; min-width: 92px; padding-right: 14px; }
+#marcasTabla th:last-child { text-align: right; padding-right: 14px; }
+#marcasTabla td.k { color: #777; font-size: 11px; }
+body.touch #marcasBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 55vh; }
+body.touch #marcasCab button { width: 34px; height: 34px; }
