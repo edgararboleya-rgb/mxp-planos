@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.G';
+  var APP_VERSION = 'v29.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2358,11 +2358,11 @@
   function fondoSym(s, def) {
     var quiere = (s.bg == null) ? (def.layer === 'furniture' && def.bg !== 'none') : !!s.bg;
     if (!quiere || def.bg === 'none') return '';
-    var w = def.w, h = def.h;
+    var w = def.w, h = def.h, bx = def.bx || 0, by = def.by || 0;
     if (def.bg === 'ellipse') {
-      return '<ellipse cx="0" cy="0" rx="' + (w / 2) + '" ry="' + (h / 2) + '" fill="' + PAPEL + '" stroke="none"/>';
+      return '<ellipse cx="' + bx + '" cy="' + by + '" rx="' + (w / 2) + '" ry="' + (h / 2) + '" fill="' + PAPEL + '" stroke="none"/>';
     }
-    return '<rect x="' + (-w / 2) + '" y="' + (-h / 2) + '" width="' + w + '" height="' + h +
+    return '<rect x="' + (bx - w / 2) + '" y="' + (by - h / 2) + '" width="' + w + '" height="' + h +
       '" fill="' + PAPEL + '" stroke="none"/>';
   }
   /* CONTORNO DISCONTINUO (Edgar, 30/08: "que a esos símbolos —meter, panel,
@@ -2375,7 +2375,9 @@
    * Tampoco el fondo opaco, que no tiene contorno. */
   var SYM_RAYA = { '': '', fut: '5 3.5', ex: '2.5 2.5' };
   function rayaSym(s) {
-    var d = SYM_RAYA[s && s.raya] || '';
+    // (auditoria 31/08) def.raya nunca se leia: 'LP Tank ENTERRADO' salia continuo
+    var quiere = (s && s.raya != null) ? s.raya : ((s && SYMBOLS[s.key] && SYMBOLS[s.key].raya) || '');
+    var d = SYM_RAYA[quiere] || '';
     return d ? ' stroke-dasharray="' + d + '"' : '';
   }
   /* QUIÉN SE PUEDE ESTIRAR POR LAS ESQUINAS (Edgar, 30/08: "lo mismo que
@@ -2404,7 +2406,9 @@
     var hx = def.w / 2 * (e.scale || 1) * (e.sx || 1) * k;
     var hy = def.h / 2 * (e.scale || 1) * (e.sy || 1) * k;
     var r = (e.rot || 0) * Math.PI / 180, cr = Math.cos(r), sr = Math.sin(r);
-    function P(lx, ly) { return [e.x + lx * cr - ly * sr, e.y + lx * sr + ly * cr]; }
+    // centro de la caja (puede ir desplazado del origen: def.bx/by)
+    var ox = (def.bx || 0) * (e.scale || 1) * (e.sx || 1) * k, oy = (def.by || 0) * (e.scale || 1) * (e.sy || 1) * k;
+    function P(lx, ly) { lx += ox; ly += oy; return [e.x + lx * cr - ly * sr, e.y + lx * sr + ly * cr]; }
     return [P(-hx, -hy), P(hx, -hy), P(hx, hy), P(-hx, hy)];
   }
   /* TUBERÍA CON MATERIAL (Edgar, 30/08: "hazme algunas líneas que simularan
@@ -3141,9 +3145,11 @@
       var dxs = p[0] - e.x, dys = p[1] - e.y;
       var lx = (dxs * Math.cos(rot) - dys * Math.sin(rot)) / scx;
       var ly = (dxs * Math.sin(rot) + dys * Math.cos(rot)) / scy;
-      // distancia REAL al borde de su caja (0 si el punto cae dentro)
-      var fx = Math.max(0, Math.abs(lx) - def.w / 2) * scx;
-      var fy = Math.max(0, Math.abs(ly) - def.h / 2) * scy;
+      // distancia REAL al borde de su caja (0 si el punto cae dentro). La caja
+      // puede estar DESPLAZADA del origen (def.bx/by): el origen es el
+      // dispositivo — donde se hace clic al colocar — y el rotulo cuelga abajo
+      var fx = Math.max(0, Math.abs(lx - (def.bx || 0)) - def.w / 2) * scx;
+      var fy = Math.max(0, Math.abs(ly - (def.by || 0)) - def.h / 2) * scy;
       var ds = Math.hypot(fx, fy);
       if (ds <= PX(4)) pon('symbol', e.id, ds, def.layer === 'electrical' ? 9 : 8);
     }
@@ -3628,7 +3634,11 @@
       }
     } else if (tool === 'place' && placingKey) {
       var def = SYMBOLS[placingKey];
-      G.prev.innerHTML = '<g class="preview"><g class="sym" transform="translate(' + p[0] + ' ' + p[1] + ') rotate(' + placingRot + ')">' + def.svg + '</g></g>';
+      // (auditoria 31/08) el fantasma salia 1.43x mas grande que la pieza real
+      // (sin symK) y con otro trazo: ahora es exactamente lo que se va a poner
+      var kG = symK(def);
+      G.prev.innerHTML = '<g class="preview"><g class="sym" transform="translate(' + p[0] + ' ' + p[1] + ') rotate(' + placingRot + ') scale(' + kG + ')"' +
+        (def.lw ? ' style="stroke-width:' + def.lw + '"' : '') + '>' + def.svg + '</g></g>';
     } else {
       hadPreview = false;
     }
@@ -4409,10 +4419,14 @@
   /* ---------------- paleta ---------------- */
   var activeCat = 'electrical';
   function symPreviewSvg(def, wpx, hpx) {
-    var pad = 4;
-    var vb = (-def.w / 2 - pad) + ' ' + (-def.h / 2 - pad) + ' ' + (def.w + pad * 2) + ' ' + (def.h + pad * 2);
+    var pad = 4, bxP = def.bx || 0, byP = def.by || 0;
+    var vb = (bxP - def.w / 2 - pad) + ' ' + (byP - def.h / 2 - pad) + ' ' + (def.w + pad * 2) + ' ' + (def.h + pad * 2);
+    // (auditoria 31/08) el trazo fino del riser/site (0.4-0.6") en una
+    // miniatura de 60 px salia como un hilo invisible: en la paleta el trazo
+    // se sube a lo que haga falta para verse (~1 px), sin tocar el plano
+    var lwMin = Math.max(def.w, def.h) / 42, lwP = Math.max(def.lw || 1, lwMin);
     return '<svg class="mxp" style="background:transparent" viewBox="' + vb + '"' + (wpx ? ' width="' + wpx + '" height="' + hpx + '"' : '') + '>' +
-      '<g class="sym"' + (def.lw ? ' style="stroke-width:' + def.lw + '"' : '') + '>' + def.svg + '</g></svg>';
+      '<g class="sym" style="stroke-width:' + lwP.toFixed(2) + '">' + def.svg + '</g></svg>';
   }
   function loadFavs() {
     try { var a = JSON.parse(localStorage.getItem('mxp_favs') || '[]'); return Array.isArray(a) ? a : []; }
@@ -4422,17 +4436,22 @@
   function buildPalette() {
     var q = ($('#symSearch').value || '').toLowerCase();
     var favs = loadFavs();
-    var keys = activeCat === 'fav'
-      ? favs.filter(function (k) { return SYMBOLS[k]; })
-      // AL BUSCAR se mira TODA la biblioteca, no solo la pestaña abierta:
-      // escribir "torre" estando en Electrical no encontraba nada, y el
-      // usuario no tiene por qué saber en qué pestaña vive cada símbolo
-      : (q ? Object.keys(SYMBOLS)
-           : Object.keys(SYMBOLS).filter(function (k) { return SYMBOLS[k].cat === activeCat; }));
+    // AL BUSCAR se mira TODA la biblioteca, no solo la pestaña abierta (ni
+    // solo los favoritos): escribir "torre" estando en Electrical no
+    // encontraba nada, y el usuario no tiene por qué saber en qué pestaña
+    // vive cada símbolo
+    var keys = q ? Object.keys(SYMBOLS)
+      : activeCat === 'fav' ? favs.filter(function (k) { return SYMBOLS[k]; })
+      : Object.keys(SYMBOLS).filter(function (k) { return SYMBOLS[k].cat === activeCat; });
     var html = '';
     keys.forEach(function (k) {
       var d = SYMBOLS[k];
-      if (q && d.name.toLowerCase().indexOf(q) < 0) return;
+      // (auditoria 31/08) la busqueda solo miraba `name`: 'KP4', 'S3', 'norte'
+      // o 'hidrante' daban "Sin resultados". Ahora tambien short, clave y pestana
+      if (q) {
+        var pajar = (d.name + ' ' + (d.short || '') + ' ' + k.replace(/_/g, ' ') + ' ' + (SYMBOL_CATS[d.cat] || d.cat)).toLowerCase();
+        if (pajar.indexOf(q) < 0) return;
+      }
       var isFav = favs.indexOf(k) >= 0;
       html += '<button class="symBtn' + (tool === 'place' && placingKey === k ? ' active' : '') + '" data-key="' + k + '">' +
         symPreviewSvg(d) + '<span class="nm">' + esc(d.short || d.name) + '</span>' +
@@ -5593,9 +5612,11 @@
       if (!prOpacUndo) { pushUndo(); prOpacUndo = true; }   // ANTES de mutar, una vez
       et.op = (v >= 100 ? null : v);       // 100 = sin campo, como siempre
       var lbl = $('#prOpacN'); if (lbl) lbl.textContent = v + '%';
-      refresh(); renderSel();
+      // (auditoria 31/08) refresh() reconstruia el panel y destruia el
+      // deslizador al primer paso: mientras se arrastra solo se redibuja
+      renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
     });
-    on('prOpac', 'change', function () { prOpacUndo = false; });
+    on('prOpac', 'change', function () { prOpacUndo = false; refreshCounts(); scheduleAutosave(); });
     on('prDelete', 'click', deleteSelected);
     on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
     on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
@@ -5606,11 +5627,23 @@
       pushUndo(); e.type = n.value; e.t = WALL_TYPES[n.value].t; refresh();
     });
     on('prWallLen', 'change', function (n) {
-      var v = parseDist(n.value); if (!v || v <= 0) return;
+      var v = parseDist(n.value);
+      if (!v || v <= 0) { n.value = fmtFtIn(wallGeom(e).len); setHint('No entendí esa medida — ejemplos: 12\'  ·  12\'-6"  ·  150"'); return; }
       pushUndo();
       var g = wallGeom(e);
       e.x2 = e.x1 + g.ux * v; e.y2 = e.y1 + g.uy * v;
+      // (auditoria 31/08) al acortar, las puertas/ventanas que quedaban fuera
+      // seguian flotando: inseleccionables y contando en materiales. Se meten
+      // dentro si caben y se quitan si no, avisando.
+      var quitadas = 0;
+      state.openings = state.openings.filter(function (o) {
+        if (o.wallId !== e.id) return true;
+        if (o.w >= v - 1) { quitadas++; return false; }
+        o.pos = Math.max(o.w / 2, Math.min(v - o.w / 2, o.pos));
+        return true;
+      });
       refresh();
+      if (quitadas) setHint('⚠️ ' + quitadas + ' abertura(s) ya no cabían en la pared y se quitaron · Ctrl+Z si no era eso');
     });
     on('prWallAng', 'change', function (n) {
       var a = parseFloat(n.value);
@@ -5628,8 +5661,18 @@
       pushUndo(); e.type = n.value; refresh();
     });
     on('prOpenW', 'change', function (n) {
-      var v = parseDist(n.value); if (!v || v < 6) return;
-      pushUndo(); e.w = v; refresh();
+      var v = parseDist(n.value);
+      if (!v || v < 6) { n.value = fmtFtIn(e.w); setHint('El ancho tiene que ser una medida de 6" o más — ejemplos: 3\'  ·  36"  ·  2\'-8"'); return; }
+      // (auditoria 31/08) sin tope, 20' en una pared de 20' sacaba la puerta
+      // 5' fuera del extremo sin avisar
+      var wp = state.walls.find(function (x) { return x.id === e.wallId; });
+      if (wp) {
+        var lenP = wallGeom(wp).len;
+        if (v > lenP) { v = Math.floor(lenP); setHint('⚠️ La pared mide ' + fmtFtIn(lenP) + ': el ancho se limitó a eso'); }
+        pushUndo(); e.w = v;
+        e.pos = Math.max(v / 2, Math.min(lenP - v / 2, e.pos));   // y se corre para quedar dentro
+      } else { pushUndo(); e.w = v; }
+      refresh();
     });
     // dryManual: el volteo A MANO manda. El orientador automático de la vuelta
     // no vuelve a tocar nunca una pared que el usuario decidió él mismo.

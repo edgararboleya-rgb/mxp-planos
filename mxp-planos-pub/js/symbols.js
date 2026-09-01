@@ -52,49 +52,49 @@
   S.recep_duplex = { name: 'Duplex Receptacle', short: 'Duplex 120V', cat: 'electrical', layer: 'electrical', w: 16, h: 20,
     svg: duplexBase() };
 
-  S.recep_quad = { name: 'Quad Receptacle', short: 'Quad Recept.', cat: 'electrical', layer: 'electrical', w: 22, h: 20,
+  S.recep_quad = { name: 'Quad Receptacle', short: 'Quad Recept.', cat: 'electrical', layer: 'electrical', w: 21, h: 20, bx: 4, by: 0,
     svg: duplexBase() + T(9.5, 3, 6, '4', { anchor: 'start', bold: true }) };
 
-  S.recep_gfci = { name: 'GFCI Receptacle', short: 'GFCI', cat: 'electrical', layer: 'electrical', w: 18, h: 26,
+  S.recep_gfci = { name: 'GFCI Receptacle', short: 'GFCI', cat: 'electrical', layer: 'electrical', w: 14.5, h: 28.5, bx: 0.5, by: 4,
     svg: duplexBase() + T(0, 16.5, 5, 'GFCI', { bold: true }) };
 
-  S.recep_wp = { name: 'Weatherproof Receptacle', short: 'WP Recept.', cat: 'electrical', layer: 'electrical', w: 18, h: 26,
+  S.recep_wp = { name: 'Weatherproof Receptacle', short: 'WP Recept.', cat: 'electrical', layer: 'electrical', w: 13, h: 28.5, bx: 0, by: 4,
     svg: duplexBase() + T(0, 16.5, 5, 'WP', { bold: true }) };
 
-  S.recep_220 = { name: '240V Receptacle', short: '240V Recept.', cat: 'electrical', layer: 'electrical', w: 18, h: 26,
+  S.recep_220 = { name: '240V Receptacle', short: '240V Recept.', cat: 'electrical', layer: 'electrical', w: 14.5, h: 29, bx: 0.5, by: 4,
     svg: C(0, 0, 5.5) + L(-3.2, -9, -3.2, 9) + L(0, -9.5, 0, 9.5) + L(3.2, -9, 3.2, 9) + T(0, 16.5, 5, '240V', { bold: true }) };
 
   S.recep_floor = { name: 'Floor Receptacle', short: 'Floor Recept.', cat: 'electrical', layer: 'electrical', w: 18, h: 18,
     svg: R(-8, -8, 16, 16) + C(0, 0, 5) + L(-2.2, -7.5, -2.2, 7.5) + L(2.2, -7.5, 2.2, 7.5) };
 
-  S.recep_usb = { name: 'USB Receptacle', short: 'USB Recept.', cat: 'electrical', layer: 'electrical', w: 18, h: 26,
+  S.recep_usb = { name: 'USB Receptacle', short: 'USB Recept.', cat: 'electrical', layer: 'electrical', w: 13, h: 28.5, bx: 0, by: 4,
     svg: duplexBase() + T(0, 16.5, 5, 'USB', { bold: true }) };
 
   S.sw_single = { name: 'Single-Pole Switch', short: 'Switch S', cat: 'electrical', layer: 'electrical', w: 12, h: 16,
     svg: T(0, 5, 14, 'S', { italic: true, bold: true }) };
 
-  S.sw_3way = { name: '3-Way Switch', short: 'Switch S3', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
+  S.sw_3way = { name: '3-Way Switch', short: 'Switch S3', cat: 'electrical', layer: 'electrical', w: 18, h: 19, bx: 1.5, by: 0.5,
     svg: T(-2, 5, 14, 'S', { italic: true, bold: true }) + T(5.5, 8, 7, '3', { anchor: 'start' }) };
 
-  S.sw_4way = { name: '4-Way Switch', short: 'Switch S4', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
+  S.sw_4way = { name: '4-Way Switch', short: 'Switch S4', cat: 'electrical', layer: 'electrical', w: 18, h: 19, bx: 1.5, by: 0.5,
     svg: T(-2, 5, 14, 'S', { italic: true, bold: true }) + T(5.5, 8, 7, '4', { anchor: 'start' }) };
 
-  S.sw_dimmer = { name: 'Dimmer Switch', short: 'Dimmer', cat: 'electrical', layer: 'electrical', w: 20, h: 16,
+  S.sw_dimmer = { name: 'Dimmer Switch', short: 'Dimmer', cat: 'electrical', layer: 'electrical', w: 24.5, h: 19, bx: 3.5, by: 0.5,
     svg: T(-3, 5, 14, 'S', { italic: true, bold: true }) + T(4.5, 8, 6.5, 'DM', { anchor: 'start' }) };
 
-  S.sw_double = { name: 'Double-Pole Switch S2', short: 'Switch S2', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
+  S.sw_double = { name: 'Double-Pole Switch S2', short: 'Switch S2', cat: 'electrical', layer: 'electrical', w: 18, h: 19, bx: 1.5, by: 0.5,
     svg: T(-2, 5, 14, 'S', { italic: true, bold: true }) + T(5.5, 8, 7, '2', { anchor: 'start' }) };
 
-  S.sw_pilot = { name: 'Switch w/ Pilot Light SP', short: 'Switch SP', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
+  S.sw_pilot = { name: 'Switch w/ Pilot Light SP', short: 'Switch SP', cat: 'electrical', layer: 'electrical', w: 19, h: 19, bx: 2, by: 0.5,
     svg: T(-2, 5, 14, 'S', { italic: true, bold: true }) + T(5.5, 8, 7, 'P', { anchor: 'start' }) };
 
-  S.sw_keyed = { name: 'Keyed Switch SK', short: 'Switch SK', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
+  S.sw_keyed = { name: 'Keyed Switch SK', short: 'Switch SK', cat: 'electrical', layer: 'electrical', w: 19, h: 19, bx: 2, by: 0.5,
     svg: T(-2, 5, 14, 'S', { italic: true, bold: true }) + T(5.5, 8, 7, 'K', { anchor: 'start' }) };
 
-  S.sw_wp2 = { name: 'Weatherproof Switch SWP', short: 'Switch SWP', cat: 'electrical', layer: 'electrical', w: 20, h: 16,
+  S.sw_wp2 = { name: 'Weatherproof Switch SWP', short: 'Switch SWP', cat: 'electrical', layer: 'electrical', w: 24.5, h: 19, bx: 3.5, by: 0.5,
     svg: T(-3, 5, 14, 'S', { italic: true, bold: true }) + T(4.5, 8, 6.5, 'WP', { anchor: 'start' }) };
 
-  S.sw_motion = { name: 'Motion Sensor Switch SM', short: 'Switch SM', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
+  S.sw_motion = { name: 'Motion Sensor Switch SM', short: 'Switch SM', cat: 'electrical', layer: 'electrical', w: 20, h: 19, bx: 2.5, by: 0.5,
     svg: T(-2, 5, 14, 'S', { italic: true, bold: true }) + T(5.5, 8, 7, 'M', { anchor: 'start' }) };
 
   S.chime = { name: 'Chime', short: 'Chime CH', cat: 'electrical', layer: 'electrical', w: 14, h: 14,
@@ -103,7 +103,7 @@
   S.motor = { name: 'Motor', short: 'Motor', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
     svg: C(0, 0, 7) + T(0, 2.8, 7, 'M', { bold: true }) };
 
-  S.subpanel = { name: 'Subpanel (hatched)', short: 'Subpanel', cat: 'electrical', layer: 'electrical', w: 26, h: 22,
+  S.subpanel = { name: 'Subpanel (hatched)', short: 'Subpanel', cat: 'electrical', layer: 'electrical', w: 29, h: 20, bx: 0, by: 5.5,
     svg: R(-10, -3.5, 20, 7) + L(-7, 3.5, -3, -3.5, 0.8) + L(-2, 3.5, 2, -3.5, 0.8) + L(3, 3.5, 7, -3.5, 0.8) + T(0, 13.5, 5, 'SUBPANEL', { bold: true }) };
 
   S.homerun = { name: 'Homerun to Panel', short: 'Homerun', cat: 'electrical', layer: 'electrical', w: 34, h: 24,
@@ -142,7 +142,7 @@
   S.co_det = { name: 'CO Detector', short: 'CO Det.', cat: 'electrical', layer: 'electrical', w: 18, h: 18,
     svg: C(0, 0, 7.5) + T(0, 2.4, 5.5, 'CO', { bold: true }) };
 
-  S.panel = { name: 'Electrical Panel', short: 'Panel', cat: 'electrical', layer: 'electrical', w: 26, h: 22,
+  S.panel = { name: 'Electrical Panel', short: 'Panel', cat: 'electrical', layer: 'electrical', w: 24, h: 20, bx: 0, by: 5.5,
     svg: R(-11, -3.5, 22, 7, 0, ' fill="#14161a"') + T(0, 13.5, 5, 'PANEL', { bold: true }) };
 
   S.jbox = { name: 'Junction Box (J-Box)', short: 'J-Box', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
@@ -151,10 +151,10 @@
   S.thermostat = { name: 'Thermostat', short: 'Thermostat', cat: 'electrical', layer: 'electrical', w: 16, h: 16,
     svg: C(0, 0, 6.5) + T(0, 2.6, 6.5, 'T', { bold: true }) };
 
-  S.tv_outlet = { name: 'TV / Coax Outlet', short: 'TV', cat: 'electrical', layer: 'electrical', w: 18, h: 24,
+  S.tv_outlet = { name: 'TV / Coax Outlet', short: 'TV', cat: 'electrical', layer: 'electrical', w: 16, h: 24.5, bx: 0, by: 4,
     svg: '<path d="M0,-7 L7,5 L-7,5 Z"/>' + T(0, 14.5, 5, 'TV', { bold: true }) };
 
-  S.data_outlet = { name: 'Data Outlet', short: 'Data', cat: 'electrical', layer: 'electrical', w: 18, h: 24,
+  S.data_outlet = { name: 'Data Outlet', short: 'Data', cat: 'electrical', layer: 'electrical', w: 16, h: 24.5, bx: 0, by: 4,
     svg: '<path d="M0,-7 L7,5 L-7,5 Z"/>' + T(0, 14.5, 5, 'DATA', { bold: true }) };
 
   S.doorbell = { name: 'Doorbell Button', short: 'Doorbell', cat: 'electrical', layer: 'electrical', w: 12, h: 12,
@@ -163,7 +163,7 @@
   S.disconnect = { name: 'Disconnect', short: 'Disconnect', cat: 'electrical', layer: 'electrical', w: 16, h: 22,
     svg: R(-7, -7, 14, 14) + T(0, 2.6, 5.5, 'DS', { bold: true }) };
 
-  S.ac_unit = { name: 'A/C Condenser', short: 'A/C', cat: 'electrical', layer: 'electrical', w: 30, h: 36,
+  S.ac_unit = { name: 'A/C Condenser', short: 'A/C', cat: 'electrical', layer: 'electrical', w: 28, h: 36.5, bx: 0, by: 4,
     svg: R(-13, -13, 26, 26) + C(0, 0, 9.5) + L(-6.7, -6.7, 6.7, 6.7, 0.7) + L(-6.7, 6.7, 6.7, -6.7, 0.7) + T(0, 20.5, 5.5, 'A/C', { bold: true }) };
 
   /* ============================ RISER / ONE-LINE ============================ */
@@ -226,7 +226,7 @@
     cat: 'riser', layer: 'electrical', w: 18, h: 24, svg: meterCan(15, 12, 'METER') };
 
   S.riser_meter_320 = { name: 'Meter Can 320A/400A (21"×15", oficio)', short: 'Meter 320A',
-    cat: 'riser', layer: 'electrical', w: 21, h: 30, svg: meterCan(21, 15, 'METER 320A') };
+    cat: 'riser', layer: 'electrical', w: 26, h: 23, svg: meterCan(21, 15, 'METER 320A') };
 
   // combo = socket arriba + load center abajo, con su main
   function meterCombo(alto, ancho, rotulo) {
@@ -264,7 +264,7 @@
   /* MASTIL SOLO: el tramo de tuberia rigida vertical, para entre el meter y
      el gutter o subiendo por la pared. Sin rotulo. */
   S.riser_mast = { name: 'Rigid Conduit / Mast 2" RMC (tramo 36")', short: 'Mast RMC',
-    cat: 'riser', layer: 'electrical', w: 12, h: 40,
+    cat: 'riser', layer: 'electrical', w: 4.5, h: 38,
     svg: (function () {
       var r = 2.375 / 2;
       return L(-r, -18, -r, 18, 0.55) + L(r, -18, r, 18, 0.55);
@@ -286,9 +286,9 @@
       (sub ? T(0, alto / 2 - alto * 0.06, tam * 0.78, sub) : '');
   }
   S.riser_panel_125 = { name: 'Panel 125A 8/16 — Siemens PL 3R (14¾"×12⅛")', short: 'Panel 125A',
-    cat: 'riser', layer: 'electrical', w: 18, h: 24, svg: loadCenter(14.75, 12.125, 'PANEL') };
+    cat: 'riser', layer: 'electrical', w: 14, h: 17, svg: loadCenter(14.75, 12.125, 'PANEL') };
 
-  S.riser_subpanel = { name: 'Subpanel 100A 12/24 — Siemens PL Tipo 1 (18"×14⅜")', short: 'Subpanel',
+  S.riser_subpanel = { name: 'Subpanel 100A 12/24 — Siemens PL Tipo 1 (18"×14⅜")', short: 'Sub (riser)',
     cat: 'riser', layer: 'electrical', w: 20, h: 28, svg: loadCenter(18, 14.375, 'SUB') };
 
   S.riser_panel_100 = { name: 'Panel 100A 12/24 — Siemens PL 3R (23"×14¼")', short: 'Panel 100A',
@@ -324,8 +324,8 @@
   S.riser_gutter_h = { name: 'Gutter / Wireway 6×6×36 — HORIZONTAL (oficio)', short: 'Gutter horiz.',
     cat: 'riser', layer: 'electrical', w: 40, h: 10, svg: wireway(36, 6, false) };
 
-  S.riser_jbox = { name: 'Junction Box 12×12 (oficio)', short: 'J-Box',
-    cat: 'riser', layer: 'electrical', w: 18, h: 22,
+  S.riser_jbox = { name: 'Junction Box 12×12 (oficio)', short: 'J-Box (riser)',
+    cat: 'riser', layer: 'electrical', w: 14.5, h: 20, bx: 0, by: 3,
     svg: R(-6, -6, 12, 12) + L(-6, -6, 6, 6, 0.4) + L(6, -6, -6, 6, 0.4) +
       T(0, 11, 4, 'J-BOX', { bold: true }) };
 
@@ -393,11 +393,11 @@
 
   /* ---- otros ---- */
   S.riser_xfmr = { name: 'Transformer 75kVA (30"×24", oficio)', short: 'Transformer',
-    cat: 'riser', layer: 'electrical', w: 30, h: 46,
+    cat: 'riser', layer: 'electrical', w: 18, h: 38, bx: 0, by: 4,
     svg: C(0, -6, 8) + C(0, 6, 8) + T(0, 21, 5, 'XFMR', { bold: true }) };
 
   S.riser_padmount = { name: 'Pad-mount Transformer (planta 60"×48", utility)', short: 'Pad-mount',
-    cat: 'riser', layer: 'electrical', w: 66, h: 62,
+    cat: 'riser', layer: 'electrical', w: 62, h: 59, bx: 0, by: 4.5,
     svg: R(-30, -24, 60, 48, 2) + C(-9, 0, 8) + C(9, 0, 8) +
       T(0, 32, 6, 'PAD-MOUNT XFMR', { bold: true }) };
 
@@ -424,7 +424,7 @@
      esos 6 pies van a escala es la planta del site. Ahora mide 30" de ancho —
      lo mismo que un panel — con la cota puesta como nota. */
   S.riser_ground = { name: 'Ground Rods (2) — esquemático, 6\'-0" anotado', short: 'Ground Rods',
-    cat: 'riser', layer: 'electrical', w: 34, h: 30,
+    cat: 'riser', layer: 'electrical', w: 31, h: 27, bx: 0, by: -6.5,
     svg: (function () {
       function rod(x) {
         return L(x, -9, x, 1, 0.55) +
@@ -443,7 +443,7 @@
   /* Los mismos electrodos A ESCALA, para cuando se dibujan en la PLANTA del
      site y los 6'-0" tienen que medir 6'-0" de verdad. */
   S.riser_ground_esc = { name: 'Ground Rods (2) — A ESCALA 6\'-0" real (site plan)', short: 'Ground Rods esc.',
-    cat: 'riser', layer: 'electrical', w: 86, h: 40,
+    cat: 'riser', layer: 'electrical', w: 84, h: 35.5, bx: 0, by: -6,
     svg: (function () {
       function rod(x) {
         return L(x, -14, x, 3, 0.55) +
@@ -492,7 +492,7 @@
     })() };
 
   S.site_north_simple = { name: 'North Arrow — flecha simple', short: 'Norte simple',
-    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 30, h: 84,
+    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 16, h: 89, bx: 0, by: -7.5,
     svg: '<polygon points="0,-36 7,36 0,26 -7,36" fill="#14161a" stroke="none"/>' +
       T(0, -40, 12, 'N', { bold: true }) };
 
@@ -514,7 +514,7 @@
     })() };
 
   S.site_bench = { name: 'Bench Mark / Spot Elevation', short: 'Bench Mark',
-    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 40, h: 40,
+    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 20, h: 20,
     svg: '<polygon points="0,-9 9,0 0,9 -9,0" fill="none" stroke-width="0.9"/>' +
       '<polygon points="0,-9 9,0 0,0" fill="#14161a" stroke="none"/>' +
       '<polygon points="0,0 -9,0 0,9" fill="#14161a" stroke="none"/>' };
@@ -536,24 +536,24 @@
     svg: C(0, 0, 9, ' fill="#14161a"') };
 
   S.site_pole_xfmr = { name: 'Pole-mounted Transformer', short: 'Xfmr en poste',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 46, h: 30,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 35.5, h: 20, bx: 8, by: 0,
     svg: posteBase(9) + C(17, 0, 7.5, ' fill="#ffffff" stroke-width="0.9"') +
       C(17, 0, 4, ' fill="none" stroke-width="0.6"') + L(9, 0, 9.5, 0, 0.7) };
 
   S.site_pole_luz = { name: 'Pole with Street Light', short: 'Poste con luz',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 52, h: 30,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 47.5, h: 20, bx: 14, by: 0,
     svg: posteBase(9) + L(9, 0, 24, 0, 0.7) +
       '<ellipse cx="30" cy="0" rx="6.5" ry="4" fill="#ffffff" stroke="#14161a" stroke-width="0.8"/>' };
 
   /* RETENIDA (guy wire + anchor): en el site plan se dibuja la linea del
      tirante y el ancla como una raya en cruz. */
   S.site_guy = { name: 'Guy Wire / Anchor', short: 'Retenida',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 40, h: 24,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 32, h: 14,
     svg: L(-15, 0, 12, 0, 0.5) + L(12, -6, 12, 6, 1.1) + L(15, -3.5, 15, 3.5, 0.8) };
 
   /* PUNTO DE SERVICIO: donde la acometida aerea aterriza en la casa. */
   S.site_service_pt = { name: 'Service Point / Point of Attachment', short: 'Punto servicio',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 30, h: 30,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 20, h: 20, bx: -2, by: -2,
     svg: C(0, 0, 7, ' fill="#ffffff" stroke-width="0.9"') + C(0, 0, 2.6, ' fill="#14161a"') +
       L(-11, -11, -5, -5, 0.7) };
 
@@ -577,13 +577,13 @@
   // ---- ILUMINACION EXTERIOR ----
 
   S.site_lightpole = { name: 'Light Pole / Area Light', short: 'Poste de luz',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 40, h: 34,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26.5, h: 13, bx: 7, by: 0,
     svg: C(0, 0, 5.5, ' fill="#ffffff" stroke-width="0.9"') +
       L(-5.5, -5.5, 5.5, 5.5, 0.7) + L(-5.5, 5.5, 5.5, -5.5, 0.7) +
       R(6, -5, 13, 10, 1.5) };
 
   S.site_lightpole2 = { name: 'Light Pole — dos cabezas', short: 'Poste 2 cabezas',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 52, h: 34,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 40, h: 13,
     svg: C(0, 0, 5.5, ' fill="#ffffff" stroke-width="0.9"') +
       L(-5.5, -5.5, 5.5, 5.5, 0.7) + L(-5.5, 5.5, 5.5, -5.5, 0.7) +
       R(6, -5, 13, 10, 1.5) + R(-19, -5, 13, 10, 1.5) };
@@ -594,16 +594,16 @@
       L(-8, 0, -5.5, 0, 0.5) + L(5.5, 0, 8, 0, 0.5) + L(0, -8, 0, -5.5, 0.5) + L(0, 5.5, 0, 8, 0.5) };
 
   S.site_wallpack = { name: 'Wall Pack / Flood Light', short: 'Wall pack',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26, h: 22,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26, h: 18, bx: 4, by: 0,
     svg: R(-8, -4, 16, 8, 1) + '<path d="M8,-4 L15,-8 M8,0 L16,0 M8,4 L15,8" stroke-width="0.5" fill="none"/>' };
 
   S.site_evped = { name: 'EV Charger Pedestal', short: 'EV pedestal',
-    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 24, h: 30,
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 14, h: 20,
     svg: R(-6, -9, 12, 18, 1.5) + T(0, 3.5, 8, 'EV', { bold: true }) };
 
   // ---- EQUIPO MECANICO Y TANQUES ----
 
-  S.site_ac = { name: 'A/C Condenser Pad 36×36', short: 'A/C',
+  S.site_ac = { name: 'A/C Condenser Pad 36×36', short: 'A/C pad',
     cat: 'siteplan', layer: 'furniture', w: 40, h: 40,
     svg: R(-18, -18, 36, 36) + C(0, 0, 13, ' fill="none" stroke-width="0.7"') +
       (function () {
@@ -652,12 +652,12 @@
   // ---- AGUA Y DRENAJE ----
 
   S.site_wmeter = { name: 'Water Meter', short: 'Water meter',
-    cat: 'siteplan', layer: 'furniture', w: 24, h: 20,
+    cat: 'siteplan', layer: 'furniture', w: 20, h: 21.5, bx: 0, by: -4,
     svg: R(-9, -6, 18, 12, 1) + C(0, 0, 3.6, ' fill="none" stroke-width="0.6"') +
       T(0, -8.5, 6, 'WM', { bold: true }) };
 
   S.site_backflow = { name: 'Backflow Preventer (RPZ)', short: 'Backflow',
-    cat: 'siteplan', layer: 'furniture', w: 30, h: 22,
+    cat: 'siteplan', layer: 'furniture', w: 28, h: 20, bx: 0, by: -4,
     svg: L(-13, 0, 13, 0, 0.9) + R(-6, -5, 12, 10, 1) +
       '<polygon points="-6,-5 0,0 -6,5" fill="#14161a" stroke="none"/>' +
       T(0, -8, 6, 'BFP', { bold: true }) };
@@ -672,7 +672,7 @@
     svg: R(-12, -12, 24, 24) + L(-12, -12, 12, 12, 0.5) + L(-12, 12, 12, -12, 0.5) };
 
   S.site_cleanout = { name: 'Sewer Clean-out', short: 'Clean-out',
-    cat: 'siteplan', layer: 'furniture', w: 20, h: 20,
+    cat: 'siteplan', layer: 'furniture', w: 12, h: 12,
     svg: C(0, 0, 5, ' fill="#ffffff" stroke-width="0.8"') + T(0, 2.4, 5.5, 'CO', { bold: true }) };
 
   // ---- VARIOS DEL LOTE ----
@@ -825,7 +825,7 @@
       return s;
     })() };
 
-  S.elev_sink_base = { name: 'Sink Base 36"', short: 'Sink Base', cat: 'elev', layer: 'furniture', w: 36, h: 35,
+  S.elev_sink_base = { name: 'Sink Base 36"', short: 'Sink Base', cat: 'elev', layer: 'furniture', w: 38, h: 43.5, bx: 0, by: -3.5,
     svg: R(-18, -17.25, 36, 34.5) + L(-18, 13.25, 18, 13.25) + L(0, -15.75, 0, 11.75) +
       R(-16.5, -15.75, 15, 27.5) + R(1.5, -15.75, 15, 27.5) + C(-3, 0, 0.7, ' fill="#14161a"') + C(3, 0, 0.7, ' fill="#14161a"') +
       '<path d="M-3,-17.25 L-3,-21 Q-3,-24 0,-24 Q3,-24 3,-21" fill="none"/>' };
@@ -923,10 +923,10 @@
       chair(-22, -30, 0) + chair(0, -30, 0) + chair(22, -30, 0) +
       chair(-22, 30, 180) + chair(0, 30, 180) + chair(22, 30, 180) };
 
-  S.table_round = { name: 'Round Table 48"', cat: 'furniture', layer: 'furniture', w: 76, h: 76,
+  S.table_round = { name: 'Round Table 48"', cat: 'furniture', layer: 'furniture', bg: 'ellipse', w: 86, h: 86,
     svg: C(0, 0, 24) + chair(0, -34, 0) + chair(0, 34, 180) + chair(-34, 0, -90) + chair(34, 0, 90) };
 
-  S.desk = { name: 'Desk 60×30', cat: 'furniture', layer: 'furniture', w: 62, h: 52,
+  S.desk = { name: 'Desk 60×30', cat: 'furniture', layer: 'furniture', w: 62, h: 51, bx: 0, by: 9.5,
     svg: R(-30, -15, 60, 30) + chair(0, 26, 180) };
 
   S.dresser = { name: 'Dresser 60×18', cat: 'furniture', layer: 'furniture', w: 62, h: 20,
@@ -940,10 +940,10 @@
 
   /* ============================ EXTERIOR / SITIO ============================ */
 
-  S.tree_lg = { name: 'Tree (10 ft canopy)', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 124, h: 124,
+  S.tree_lg = { name: 'Tree (10 ft canopy)', short: 'Tree 10 ft', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 124, h: 124,
     svg: scallop(60, 14) + C(0, 0, 2, ' fill="#14161a"') };
 
-  S.tree_md = { name: 'Tree (6 ft canopy)', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 76, h: 76,
+  S.tree_md = { name: 'Tree (6 ft canopy)', short: 'Tree 6 ft', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 76, h: 76,
     svg: scallop(36, 11) + C(0, 0, 1.8, ' fill="#14161a"') };
 
   S.shrub = { name: 'Shrub', cat: 'site', layer: 'furniture', bg: 'ellipse', w: 40, h: 40,
@@ -1122,7 +1122,7 @@
     cat: 'outdoor', layer: 'furniture', w: 17, h: 19,
     svg: R(-8, -9, 16, 18, 1) + R(-5.5, -4, 11, 11, 1) + C(0, -6.5, 1.1) };
 
-  S.hood_outdoor = { name: 'Vent Hood 36" (sobre el grill)', short: 'Hood',
+  S.hood_outdoor = { name: 'Vent Hood 36" (sobre el grill)', short: 'Hood exterior',
     cat: 'outdoor', layer: 'furniture', bg: 'none', w: 38, h: 26,
     svg: '<rect x="-18" y="-12" width="36" height="24" stroke-dasharray="4 3" fill="none"/>' +
       '<line x1="-18" y1="-12" x2="18" y2="12" stroke-width="0.5" stroke-dasharray="4 3"/>' +
@@ -1130,8 +1130,8 @@
       '<rect x="-11" y="-4.5" width="22" height="9" fill="#fbfaf7" stroke="none"/>' +
       T(0, 2, 5.5, 'HOOD') };
 
-  S.outdoor_tv = { name: 'Outdoor TV 55" (lanai)', short: 'TV',
-    cat: 'outdoor', layer: 'furniture', bg: 'none', w: 50, h: 8,
+  S.outdoor_tv = { name: 'Outdoor TV 55" (lanai)', short: 'TV exterior',
+    cat: 'outdoor', layer: 'furniture', bg: 'none', w: 50, h: 15, bx: 0, by: -3.5,
     svg: R(-24, -3, 48, 6) + T(0, -5, 5, 'TV') };
 
 
@@ -1201,7 +1201,7 @@
 
   // la shade SÍ se ve en planta: es el rodillo sobre la ventana
   S.lut_shade = { name: 'Lutron Shade (motorizada)', short: 'Lutron Shade',
-    cat: 'lutron', layer: 'electrical', w: 40, h: 14,
+    cat: 'lutron', layer: 'electrical', w: 38, h: 18, bx: 0, by: 3,
     svg: R(-18, -5, 36, 4, 0.8) +
       '<path d="M-18,-1 L-18,3 M18,-1 L18,3" fill="none" stroke-width="0.7"/>' +
       T(0, 10, 5.5, 'SHADE', { bold: true }) };
@@ -1232,6 +1232,15 @@
     });
   });
 
+  // (auditoria 31/08) 37 simbolos sin `short`: la paleta y la leyenda impresa
+  // usaban el name completo, con sus notas entre parentesis. Se genera del
+  // nombre, sin parentesis, y se recorta.
+  Object.keys(S).forEach(function (k) {
+    var d = S[k];
+    if (d.short) return;
+    var t = String(d.name || k).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    d.short = t.length > 18 ? t.slice(0, 17).trim() + '…' : t;
+  });
   Object.keys(S).forEach(function (k) {
     var d = S[k];
     if (d.lw != null) return;                      // el que ya trae el suyo, se respeta
@@ -1248,6 +1257,7 @@
     furniture: '🛋 Furniture',
     lutron: '🎛 Lutron / Control',
     outdoor: '🔥 Outdoor Kitchen',
-    site: '🌴 Site'
+    site: '🌴 Landscape',
+    siteplan: '🗺 Site Plan'
   };
 })();
