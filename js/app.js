@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.F';
+  var APP_VERSION = 'v29.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2063,9 +2063,11 @@
   // la distancia d. Se cruzan las aristas ya desplazadas, que es como se
   // saca un offset de verdad — no vale con encoger hacia el centro porque
   // en una piscina en L el borde quedaria despegado de un lado.
-  function offsetPolyIn(pts, d) {
+  function offsetPolyIn(pts, d, fuera) {
+    // fuera = true: el contorno paralelo hacia AFUERA (offset de AutoCAD)
     var n = pts.length;
     if (n < 3 || !(d > 0)) return null;
+    if (fuera) d = -d;
     // sentido del poligono: si el area con signo es negativa, la normal se invierte
     var a2 = 0;
     for (var i0 = 0; i0 < n; i0++) {
@@ -2098,6 +2100,14 @@
       a3 += s1[0] * s2[1] - s2[0] * s1[1];
     }
     if (a3 * a2 <= 0 || Math.abs(a3) < Math.abs(a2) * 0.04) return null;
+    // (31/08) con la distancia mayor que la mitad del ancho Y del alto, el
+    // poligono se invierte en los dos ejes y el signo del area se conserva:
+    // el chequeo de arriba no lo veia. Cada tramo nuevo tiene que seguir
+    // apuntando en el sentido del tramo original.
+    for (var i3 = 0; i3 < n; i3++) {
+      var oA = pts[i3], oB = pts[(i3 + 1) % n], nA = out[i3], nB = out[(i3 + 1) % n];
+      if ((oB[0] - oA[0]) * (nB[0] - nA[0]) + (oB[1] - oA[1]) * (nB[1] - nA[1]) <= 0) return null;
+    }
     return out;
   }
   function copingDe(a) {
@@ -4489,11 +4499,12 @@
     };
     setHint('✔ ' + items.length + ' elemento(s) copiados — Ctrl+V pega donde esté el cursor');
   }
-  function pasteClip(at, forceOffset) {
+  function pasteClip(at, forceOffset, sinUndo) {
     if (!clipboard) return;
-    pushUndo();
-    var dx = forceOffset != null ? forceOffset : Math.round(at[0] - clipboard.ref[0]);
-    var dy = forceOffset != null ? forceOffset : Math.round(at[1] - clipboard.ref[1]);
+    if (!sinUndo) pushUndo();
+    var dx, dy;
+    if (Array.isArray(forceOffset)) { dx = forceOffset[0]; dy = forceOffset[1]; }
+    else { dx = forceOffset != null ? forceOffset : Math.round(at[0] - clipboard.ref[0]); dy = forceOffset != null ? forceOffset : Math.round(at[1] - clipboard.ref[1]); }
     var wallMap = {};
     var newRefs = [];
     clipboard.items.forEach(function (it) {
@@ -4704,6 +4715,154 @@
     setHint('⬌ Movido ' + fmtFtIn(step) + ' — flechas = 1" · Shift+flecha = 1 pie · Alt+flecha = 1/4"');
     return true;
   }
+  /* ================= OPERACIONES DE DELINEANTE (AutoCAD) =================
+     (Edgar, 31/08: "como si tuviera AutoCAD… ejecútalo".) Tres que en un
+     plano eléctrico se usan a diario y que una app de markup no trae:
+     ESPEJO (la mitad simétrica de la casa, el baño gemelo), REPETIR (una fila
+     de receptáculos cada 6', las luminarias del parking) y OFFSET (el
+     setback a 25' del lindero, el curb paralelo a la calle). Todas son
+     botones explícitos en Propiedades: señalan, no obligan. */
+  function refsDeSel() {
+    if (selGroup && selGroup.length) return selGroup.slice();
+    if (sel && sel.kind !== 'opening') return [sel];
+    return [];
+  }
+  function espejoRefs(refs, vertical) {
+    // vertical = true: eje VERTICAL por el centro (izquierda <-> derecha)
+    var bb = refsBBox(refs); if (!bb) return;
+    var cx = bb.cx, cy = bb.cy;
+    function mx(x) { return vertical ? +(2 * cx - x).toFixed(2) : x; }
+    function my(y) { return vertical ? y : +(2 * cy - y).toFixed(2); }
+    pushUndo();
+    refs.forEach(function (r) {
+      var e = entityOf(r); if (!e) return;
+      if (r.kind === 'wall' || r.kind === 'dim' || r.kind === 'wire') {
+        var ax = mx(e.x1), ay = my(e.y1), bx = mx(e.x2), by = my(e.y2);
+        e.x1 = ax; e.y1 = ay; e.x2 = bx; e.y2 = by;
+        if (r.kind === 'wire' && e.side) e.side = -e.side;       // la curva se refleja
+        // las aberturas viajan con su pared: pos se mide desde x1, que tambien
+        // se reflejo, asi que quedan en su sitio espejo solas
+      } else if (r.kind === 'symbol') {
+        e.x = mx(e.x); e.y = my(e.y);
+        // el glifo no se refleja (las letras seguirian leyendose); la
+        // orientacion si: un angulo t pasa a 180-t (eje vertical) o -t
+        var rot = e.rot || 0;
+        e.rot = ((vertical ? 180 - rot : -rot) % 360 + 360) % 360;
+      } else if (r.kind === 'text') {
+        e.x = mx(e.x); e.y = my(e.y);
+        if (e.rot) e.rot = ((vertical ? 180 - e.rot : -e.rot) % 360 + 360) % 360;
+        if (vertical && e.anchor === 'start') e.anchor = 'end';
+        else if (vertical && e.anchor === 'end') e.anchor = 'start';
+      } else if (r.kind === 'leader') {
+        e.x = mx(e.x); e.y = my(e.y); e.tx = mx(e.tx); e.ty = my(e.ty);
+      } else if (r.kind === 'area') {
+        e.pts = e.pts.map(function (q) { return [mx(q[0]), my(q[1])]; });
+        if (e.bul) e.bul = e.bul.map(function (b) { return b ? -b : b; });   // el pandeo cambia de lado
+      }
+    });
+    refresh();
+    setHint('⇋ Espejo ' + (vertical ? 'izquierda ↔ derecha' : 'arriba ↕ abajo') + ' de ' + refs.length + ' elemento(s) · Ctrl+Z si no era');
+  }
+  function repetirRefs(refs, n, dx, dy) {
+    if (!refs.length || !(n >= 1)) return;
+    pushUndo();
+    var selAntes = { sel: sel, grupo: selGroup };
+    // copySel usa la seleccion actual: se fija a los refs pedidos
+    selGroup = refs.length > 1 ? refs.slice() : null; sel = refs.length === 1 ? refs[0] : null;
+    copySel();
+    var todos = refs.slice();
+    for (var i = 1; i <= n; i++) {
+      pasteClip(null, [+(dx * i).toFixed(2), +(dy * i).toFixed(2)], true);
+      (selGroup || (sel ? [sel] : [])).forEach(function (r) { todos.push(r); });
+    }
+    sel = null; selGroup = todos;
+    refresh();
+    setHint('⧉ ' + n + ' copia(s) cada ' + fmtFtIn(Math.hypot(dx, dy)) + ' — quedan seleccionadas todas · Ctrl+Z deshace la serie entera');
+  }
+  // OFFSET de una polilinea ABIERTA: paralela a distancia d (positivo = a la
+  // derecha del sentido del trazo). Cada tramo se desplaza por su normal y
+  // los vecinos se cortan donde se cruzan, como en el poligono.
+  function offsetPolyAbierta(pts, d) {
+    var n = pts.length; if (n < 2 || !d) return null;
+    var L = [];
+    for (var i = 0; i + 1 < n; i++) {
+      var A = pts[i], B = pts[i + 1], dx = B[0] - A[0], dy = B[1] - A[1], len = Math.hypot(dx, dy);
+      if (len < 1e-6) continue;
+      var nx = -dy / len, ny = dx / len;   // derecha del sentido de marcha (con y creciendo hacia abajo)
+      L.push([A[0] + nx * d, A[1] + ny * d, B[0] + nx * d, B[1] + ny * d]);
+    }
+    if (!L.length) return null;
+    var out = [[+L[0][0].toFixed(2), +L[0][1].toFixed(2)]];
+    for (var k = 1; k < L.length; k++) {
+      var e1 = L[k - 1], e2 = L[k];
+      var r1x = e1[2] - e1[0], r1y = e1[3] - e1[1], r2x = e2[2] - e2[0], r2y = e2[3] - e2[1];
+      var den = r1x * r2y - r1y * r2x;
+      if (Math.abs(den) < 1e-9) { out.push([+e2[0].toFixed(2), +e2[1].toFixed(2)]); continue; }
+      var t = ((e2[0] - e1[0]) * r2y - (e2[1] - e1[1]) * r2x) / den;
+      out.push([+(e1[0] + r1x * t).toFixed(2), +(e1[1] + r1y * t).toFixed(2)]);
+    }
+    var ult = L[L.length - 1];
+    out.push([+ult[2].toFixed(2), +ult[3].toFixed(2)]);
+    return out;
+  }
+  function offsetArea(a, d) {
+    if (!a || !a.pts || !d) return null;
+    var pts;
+    if (a.open) pts = offsetPolyAbierta(a.pts, d);
+    else pts = d > 0 ? offsetPolyIn(a.pts, d) : offsetPolyIn(a.pts, -d, true);
+    if (!pts) return null;
+    var nuevo = JSON.parse(JSON.stringify(a));
+    nuevo.id = uid(); nuevo.pts = pts; delete nuevo.bul; delete nuevo.showLabel; delete nuevo.coping;
+    return nuevo;
+  }
+  function pideRepetir() {
+    var refs = refsDeSel(); if (!refs.length) return;
+    uiPrompt('Repetir la selección — ¿cuántas copias y cada cuánto?\n' +
+      'Ejemplos:  4 @ 6\'     (4 copias cada 6 ft hacia la derecha)\n' +
+      '           6 @ 8\'<90  (6 copias cada 8 ft hacia arriba)\n' +
+      '           3 @ 10\'<270 (hacia abajo)  ·  <180 hacia la izquierda', "4 @ 6'", function (v) {
+      if (v == null || v === '') return;
+      var m = /^\s*(\d+)\s*[@xX×]\s*(.+?)(?:<\s*(-?[\d.]+))?\s*$/.exec(v);
+      if (!m) { uiAlert('No entendí "' + v + '". Escribe:  copias @ distancia   (ej: 4 @ 6\'  ó  4 @ 6\'<90)'); return; }
+      var n = parseInt(m[1], 10), dist = parseDist(m[2]);
+      if (!(n >= 1) || !(dist > 0)) { uiAlert('Copias y distancia tienen que ser mayores que cero.'); return; }
+      var ang = m[3] != null ? parseFloat(m[3]) * Math.PI / 180 : 0;
+      repetirRefs(refs, Math.min(n, 200), Math.cos(ang) * dist, -Math.sin(ang) * dist);
+    });
+  }
+  function pideOffset() {
+    var e = findSel(); if (!e || !sel || sel.kind !== 'area') return;
+    uiPrompt((e.open ? 'Paralela a la línea, ¿a qué distancia?\n(positivo = a la derecha del sentido del trazo, negativo = a la izquierda)' :
+      'Contorno paralelo, ¿a qué distancia?\n(positivo = hacia DENTRO, negativo = hacia FUERA — un setback de 25\' es 25\')'), "25'", function (v) {
+      if (v == null || v === '') return;
+      var neg = /^\s*-/.test(v), d = parseDist(v.replace(/^\s*-/, ''));
+      if (!(d > 0)) { uiAlert('No entendí la distancia "' + v + '".'); return; }
+      var nuevo = offsetArea(e, neg ? -d : d);
+      if (!nuevo) { uiAlert('No se puede hacer ese offset: la figura se daría la vuelta a esa distancia.'); return; }
+      pushUndo();
+      state.areas.push(nuevo);
+      sel = { kind: 'area', id: nuevo.id }; selGroup = null;
+      refresh();
+      setHint('↔ Offset de ' + fmtFtIn(d) + ' creado — queda seleccionado (cámbiale el tipo de línea si es un setback)');
+    });
+  }
+  function botonesCad(esArea) {
+    // dos por fila: cuatro en una sola fila se recortaban en el panel
+    return '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' +
+      '<button id="prEspV" style="flex:1 1 45%" title="Espejo izquierda ↔ derecha (eje vertical por el centro de la selección)">⇋ Espejo</button>' +
+      '<button id="prEspH" style="flex:1 1 45%" title="Espejo arriba ↕ abajo (eje horizontal)">⇅ Espejo</button>' +
+      '<button id="prRepetir" style="flex:1 1 45%" title="Repetir la selección N veces a una distancia (array de AutoCAD): 4 @ 6\'">⧉ Repetir…</button>' +
+      (esArea ? '<button id="prOffset" style="flex:1 1 45%" title="Contorno o línea paralela a una distancia (offset de AutoCAD): el setback a 25\' del lindero">↔ Offset…</button>' : '') +
+      '</div>';
+  }
+  function engancharCad() {
+    var bV = $('#prEspV'), bH = $('#prEspH'), bR = $('#prRepetir'), bO = $('#prOffset');
+    if (bV) bV.addEventListener('click', function () { espejoRefs(refsDeSel(), true); });
+    if (bH) bH.addEventListener('click', function () { espejoRefs(refsDeSel(), false); });
+    if (bR) bR.addEventListener('click', pideRepetir);
+    if (bO) bO.addEventListener('click', pideOffset);
+  }
+
   function rotateGroup(deg) {
     if (!selGroup) return;
     pushUndo();
@@ -5166,7 +5325,9 @@
         '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">🎯 Encajar en el plano (guía)</button>' +
         '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">🧭 Convertir en guía (survey)</button>' +
         '<button id="prFlipDryG" style="width:100%;margin-bottom:6px" title="Cambia de lado la línea fina del drywall en TODAS las paredes de bloque seleccionadas — un clic en vez de una por una">↕ Lado del drywall (grupo)</button>' +
-        '<button class="danger" id="prDelGroup">🗑 Borrar todo el grupo</button>';
+        botonesCad(false) +
+        '<button class="danger" id="prDelGroup" style="margin-top:6px">🗑 Borrar todo el grupo</button>';
+      engancharCad();
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
       var bl = $('#prRotL'), br = $('#prRotR'), b8 = $('#prRot180');
@@ -5415,7 +5576,9 @@
         '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>' +
         '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>';
     }
+    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area');
     body.innerHTML = html;
+    engancharCad();
 
     // cada control captura su propio nodo (n) para no leer el valor de otro
     function on(id, evt, fn) {
