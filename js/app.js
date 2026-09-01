@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v28.W';
+  var APP_VERSION = 'v29.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1053,6 +1053,18 @@
   // discontinua pequeña, recta y de varias formas"). Son los del plano de
   // verdad, cada uno con su significado en obra. El patrón va en pulgadas
   // reales, así que se ve igual de proporcionado a cualquier zoom.
+  /* ================== TIPOS DE LINEA ==================
+     Los de arriba son los del plano de planta. Los marcados `site: 1` son
+     los del SITE PLAN (Edgar, 31/08: "crear simbologia y lineas que se usan
+     solo en esos planos") y salen agrupados aparte en el desplegable.
+
+     Las lineas de utilidad no se distinguen por el trazo sino por la LETRA
+     que llevan en el hueco — OHE, UGE, W, S, G, SD — que es como las dibuja
+     un surveyor. Por eso llevan `glifo` (lo que se estampa) y el trazo se
+     parte con `dash: 'largo hueco'`: el hueco existe PARA que quepa la
+     letra, y la letra se coloca justo en el centro de cada hueco.
+     `glifo` tambien acepta tres formas: 'x' (cerca), 'o' (chain link) y
+     'silt' (silt fence). */
   var LINE_STYLES = {
     solid:    { name: '——— Continua (lo que se ve)', dash: '' },
     dashed:   { name: '– – – Discontinua (oculto / sobre el techo)', dash: '7 4' },
@@ -1061,8 +1073,55 @@
     centro:   { name: '—·—·— Eje (línea de centro)', dash: '12 3 1 3' },
     fantasma: { name: '—··—··— Fantasma (lote, lo que se quita)', dash: '14 3 1 3 1 3' },
     gruesa:   { name: '▬▬▬ Gruesa (contorno destacado)', dash: '', lw: 2.2 },
-    cloud:    { name: '☁ Nube de revisión', dash: '' }
+    cloud:    { name: '☁ Nube de revisión', dash: '' },
+
+    /* -- lindero y servidumbres -- */
+    propiedad:   { site: 1, name: 'PROPERTY LINE — lindero del lote', dash: '30 6 2 6 2 6', lw: 2.0 },
+    row:         { site: 1, name: 'RIGHT-OF-WAY — derecho de vía', dash: '36 7 2 7', lw: 1.5 },
+    retiro:      { site: 1, name: 'SETBACK — retiro de construcción', dash: '20 6 2 6', lw: 0.7 },
+    servidumbre: { site: 1, name: 'EASEMENT — servidumbre', dash: '12 7', lw: 0.7 },
+    limite:      { site: 1, name: 'LIMITS OF CONSTRUCTION — límite de obra', dash: '24 8', lw: 1.6 },
+    contorno:    { site: 1, name: 'CONTOUR — curva de nivel', dash: '', lw: 0.4 },
+    contornoI:   { site: 1, name: 'CONTOUR ÍNDICE — curva maestra', dash: '', lw: 1.1 },
+
+    /* -- utilidades: la letra manda -- */
+    ohe:  { site: 1, name: 'OHE — Overhead Electric (aérea)', dash: '150 84', glifo: 'OHE', lw: 0.8 },
+    uge:  { site: 1, name: 'UGE — Underground Electric', dash: '150 84', glifo: 'UGE', lw: 0.8 },
+    ugt:  { site: 1, name: 'UGT — Underground Telephone', dash: '150 84', glifo: 'UGT', lw: 0.6 },
+    catv: { site: 1, name: 'CATV — Cable / Internet', dash: '150 108', glifo: 'CATV', lw: 0.6 },
+    fo:   { site: 1, name: 'FO — Fibra óptica', dash: '150 62', glifo: 'FO', lw: 0.6 },
+    agua: { site: 1, name: 'W — Water Service (agua)', dash: '150 46', glifo: 'W', lw: 0.7 },
+    sani: { site: 1, name: 'S — Sanitary Sewer (sanitario)', dash: '150 40', glifo: 'S', lw: 0.7 },
+    gas:  { site: 1, name: 'G — Gas', dash: '150 44', glifo: 'G', lw: 0.7 },
+    sd:   { site: 1, name: 'SD — Storm Drain (pluvial)', dash: '150 62', glifo: 'SD', lw: 0.9 },
+
+    /* -- cercas y control de erosión -- */
+    cerca:     { site: 1, name: 'FENCE — cerca (—x—x—)', dash: '', glifo: 'x', paso: 96, lw: 0.6 },
+    cercaLink: { site: 1, name: 'CHAIN LINK — malla (—o—o—)', dash: '', glifo: 'o', paso: 96, lw: 0.6 },
+    silt:      { site: 1, name: 'SILT FENCE — control de erosión', dash: '', glifo: 'silt', paso: 72, lw: 0.9 }
   };
+  /* TAMANO DEL ROTULO. Aqui hay una trampa de escala que solo se ve al
+     dibujar un lote entero: una letra de 11" es perfecta en un plano de
+     planta a 1/4", y en un site plan a 1"=20' mide 0.05" en el papel — no
+     se lee. Estas lineas son PARA site plan, asi que el base son 30" (2 1/2
+     ft): a 1"=20' salen 9 pt y a 1"=10' salen 18 pt.
+     Y como cada quien dibuja el lote a la escala que le toca, el rotulo se
+     puede subir o bajar por linea con `glifoK`, y el HUECO del trazo se
+     estira con el — si no, la letra se montaria sobre la raya. */
+  var GLIFO_ALTO = 30;
+  var GLIFO_K = [[0.5, 'Chico'], [1, 'Normal (site plan)'], [1.7, 'Grande'], [2.6, 'Extra grande']];
+  /* El desplegable sale en DOS grupos: lo del plano de planta y lo del site
+     plan. Con 30 tipos en una lista plana no se encuentra nada. */
+  function opcionesLinea(actual) {
+    var pl = '', si = '';
+    Object.keys(LINE_STYLES).forEach(function (k) {
+      var o = '<option value="' + k + '"' + (actual === k ? ' selected' : '') + '>' +
+        esc(LINE_STYLES[k].name) + '</option>';
+      if (LINE_STYLES[k].site) si += o; else pl += o;
+    });
+    return '<optgroup label="Plano de planta">' + pl + '</optgroup>' +
+      '<optgroup label="🗺 SITE PLAN">' + si + '</optgroup>';
+  }
   var curLineStyle = 'solid';
   // forma de la herramienta Rect: rectangulo o poligono regular (poly3, poly5...)
   var curShapeKind = 'rect';
@@ -2089,6 +2148,100 @@
     return q;
   }
 
+  /* ============ GLIFOS A LO LARGO DE UNA LINEA DE SITE PLAN ============
+     Una linea de utilidad no se lee por el trazo, se lee por la LETRA. Aqui
+     se camina la polilinea acumulando distancia y se estampa el glifo cada
+     tanto, girado con el tramo en que cae — que es lo que hace que un
+     "—— UGE ——" siga la curva de la calle en vez de quedarse horizontal.
+
+     Para las letras el sitio no es arbitrario: el trazo se parte con
+     `dash: 'largo hueco'` y la letra va justo en el CENTRO de cada hueco,
+     o sea a `largo + hueco/2 + k*(largo+hueco)`. Asi la letra nunca se
+     dibuja encima de la linea.
+     Las letras se enderezan si el tramo va "de cabeza" (mas de 90 grados):
+     en un plano nadie escribe UGE al reves. */
+  function largoTramos(pts, cerrado) {
+    var segs = [], n = pts.length, tot = 0;
+    var lim = cerrado ? n : n - 1;
+    for (var i = 0; i < lim; i++) {
+      var A = pts[i], B = pts[(i + 1) % n];
+      var dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy);
+      if (L < 1e-6) continue;
+      segs.push({ A: A, ux: dx / L, uy: dy / L, L: L, d0: tot });
+      tot += L;
+    }
+    return { segs: segs, tot: tot };
+  }
+  function puntoEn(tr, d) {
+    for (var i = 0; i < tr.segs.length; i++) {
+      var g = tr.segs[i];
+      if (d <= g.d0 + g.L || i === tr.segs.length - 1) {
+        var t = d - g.d0;
+        return { x: g.A[0] + g.ux * t, y: g.A[1] + g.uy * t,
+                 ang: Math.atan2(g.uy, g.ux) * 180 / Math.PI };
+      }
+    }
+    return null;
+  }
+  function glifoK(a) { var k = +a.glifoK; return k > 0 ? k : 1; }
+  // el trazo de una linea con rotulo se estira con el rotulo: el hueco existe
+  // PARA que quepa la letra, asi que si la letra crece, el hueco crece
+  function dashDe(a, est) {
+    if (!est.glifo || est.paso || !est.dash) return est.dash;
+    var k = glifoK(a);
+    if (k === 1) return est.dash;
+    return String(est.dash).split(/\s+/).map(function (v) { return (parseFloat(v) * k).toFixed(1); }).join(' ');
+  }
+  function glifosLinea(a, est, col, lw) {
+    var g = est.glifo;
+    if (!g) return '';
+    var tr = largoTramos(a.pts, !a.open);
+    if (!tr.segs.length) return '';
+    var kg = glifoK(a);
+    var paso, prim;
+    if (est.paso) {                       // formas (cerca): reparto parejo
+      paso = est.paso * kg; prim = paso / 2;
+    } else {                              // letras: en el centro del hueco
+      var d2 = String(est.dash).split(/\s+/).map(parseFloat);
+      var largo = (d2[0] || 150) * kg, hueco = (d2[1] || 60) * kg;
+      paso = largo + hueco; prim = largo + hueco / 2;
+    }
+    if (!(paso > 1)) return '';
+    var out = '';
+    for (var d = prim; d <= tr.tot - 1; d += paso) {
+      var P = puntoEn(tr, d);
+      if (!P) break;
+      if (g === 'x' || g === 'o' || g === 'silt') {
+        var r = (g === 'silt' ? 13 : 11) * kg;
+        var tf = ' transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
+          ') rotate(' + P.ang.toFixed(1) + ')"';
+        if (g === 'x') {
+          out += '<g' + tf + '><path d="M' + (-r) + ',' + (-r) + ' L' + r + ',' + r +
+            ' M' + (-r) + ',' + r + ' L' + r + ',' + (-r) + '" stroke="' + col +
+            '" stroke-width="' + (lw * 0.9 * kg).toFixed(2) + '" fill="none"/></g>';
+        } else if (g === 'o') {
+          out += '<g' + tf + '><circle cx="0" cy="0" r="' + r.toFixed(1) + '" fill="none" stroke="' + col +
+            '" stroke-width="' + (lw * 0.9 * kg).toFixed(2) + '"/></g>';
+        } else {
+          // silt fence: el poste con su tela
+          out += '<g' + tf + '><path d="M0,' + (-r * 1.6) + ' L0,' + (r * 0.4) +
+            ' M' + (-r * 0.7) + ',' + (-r * 1.6) + ' L0,' + (-r * 0.5) +
+            ' L' + (r * 0.7) + ',' + (-r * 1.6) + '" stroke="' + col +
+            '" stroke-width="' + (lw * 0.8 * kg).toFixed(2) + '" fill="none"/></g>';
+        }
+      } else {
+        // la letra: derecha siempre, aunque el tramo vaya de derecha a izquierda
+        var an = P.ang;
+        if (an > 90 || an < -90) an += 180;
+        out += '<text x="0" y="0" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
+          ') rotate(' + an.toFixed(1) + ')" font-size="' + GLIFO_ALTO +
+          '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
+          '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(g) + '</text>';
+      }
+    }
+    return out;
+  }
+
   function renderAreas() {
     var out = '';
     state.areas.forEach(function (a) {
@@ -2100,7 +2253,8 @@
       var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open) : areaPath(plineRecortada(a));
       // el preset trae su tipo de linea; si el usuario eligio otra, manda la suya
       var est = LINE_STYLES[a.lineStyle] || (pdef && pdef.dash && !a.open ? LINE_STYLES[pdef.dash] : null) || LINE_STYLES.solid;
-      var dash = est.dash ? ' stroke-dasharray="' + est.dash + '"' : '';
+      var dEst = dashDe(a, est);
+      var dash = dEst ? ' stroke-dasharray="' + dEst + '"' : '';
       var col = a.color || '#14161a', lw = a.lw || est.lw || 0.9;
       // el borde de la piscina va DEBAJO: el agua se dibuja dentro de el
       var cop = copingDe(a);
@@ -2117,6 +2271,7 @@
         }
       }
       out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
+      if (est.glifo) out += glifosLinea(a, est, col, lw);
       if (a.open) out += plineCaps(a);
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
@@ -2145,7 +2300,7 @@
     // el plano de la casa tiene que ocupar lo que ocupa en la pared. Los
     // devices —receptáculos, switches— siguen al 0.7: ésos son símbolos de
     // medida convencional, no cajas a escala.
-    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'riser')) ? 1 : 0.7;
+    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'siteplan' || def.cat === 'riser')) ? 1 : 0.7;
   }
   /* FONDO OPACO DEL EQUIPO (Edgar, 08/30: "cuando yo haga un area, por ejemplo
    * un counter, los equipos que ponga encima —un sink, un dishwasher— que no
@@ -2190,7 +2345,7 @@
      cuatro asas encima de algo de 12 unidades harían imposible moverlos.
      Para ésos está el campo Escala en Propiedades. */
   function estirable(def) {
-    return !!def && (def.layer === 'furniture' || def.cat === 'riser');
+    return !!def && (def.layer === 'furniture' || def.cat === 'riser' || def.cat === 'site' || def.cat === 'siteplan');
   }
   function symTransform(s) {
     var k = symK(SYMBOLS[s.key]);
@@ -5058,10 +5213,7 @@
           }).join('') + '</select></div>';
       }
       html += '<div class="row"><label>Line</label><select id="prAreaLine">' +
-        Object.keys(LINE_STYLES).map(function (k5) {
-          var act = (e.lineStyle || 'solid') === k5;
-          return '<option value="' + k5 + '"' + (act ? ' selected' : '') + '>' + esc(LINE_STYLES[k5].name) + '</option>';
-        }).join('') + '</select></div>';
+        opcionesLinea(e.lineStyle || 'solid') + '</select></div>';
       // muestrario fijo de colores: el selector nativo no abre dentro del visor
       html += '<div class="row"><label>Color</label><div class="swRow" id="prColorRow">' +
         COLOR_PRESETS.map(function (c) {
@@ -5071,6 +5223,14 @@
         [['0.5', 'Fina'], ['0.9', 'Normal'], ['1.5', 'Gruesa'], ['2.4', 'Extra gruesa']].map(function (o2) {
           return '<option value="' + o2[0] + '"' + ((e.lw || 0.9) === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
         }).join('') + '</select></div>';
+      // el tamaño del rótulo solo se ofrece si la línea LLEVA rótulo
+      var estSel = LINE_STYLES[e.lineStyle || 'solid'];
+      if (estSel && estSel.glifo) {
+        html += '<div class="row"><label>Rótulo</label><select id="prGlifoK">' +
+          GLIFO_K.map(function (o) {
+            return '<option value="' + o[0] + '"' + (glifoK(e) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+          }).join('') + '</select></div>';
+      }
       // las puntas SOLO tienen sentido en la polilínea abierta: un polígono
       // cerrado no tiene principio ni final
       if (e.open) html += filasPuntas(e, 'prAreaCap');
@@ -5277,7 +5437,10 @@
     });
     var bSC = $('#prSinCurva');
     if (bSC) bSC.addEventListener('click', function () { pushUndo(); e.bul = null; refresh(); showProps(); });
-    on('prAreaLine', 'change', function (n) { pushUndo(); e.lineStyle = n.value; refresh(); });
+    on('prAreaLine', 'change', function (n) {
+      pushUndo(); e.lineStyle = n.value; curLineStyle = n.value;
+      refresh(); showProps();   // la fila Rótulo aparece o se va segun el estilo
+    });
     $$('#prColorRow .sw').forEach(function (sw) {
       sw.addEventListener('click', function () {
         pushUndo(); e.color = sw.dataset.c; refresh(); showProps();
@@ -5305,6 +5468,7 @@
     on('prWireBulge', 'change', function (n) { pushUndo(); e.bulge = Math.max(-0.6, Math.min(0.6, parseFloat(n.value) || 0.22)); refresh(); });
     on('prWireFlip', 'click', function () { pushUndo(); e.side = -(e.side || 1); refresh(); });
     on('prWireLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.7; lastWireLw = e.lw; refresh(); });
+    on('prGlifoK', 'change', function (n) { pushUndo(); e.glifoK = parseFloat(n.value) || 1; refresh(); });
     on('prAreaCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
     on('prAreaCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
     on('prWireCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
@@ -10608,9 +10772,16 @@
         html += '<div class="tmItem' + (k === curWinType ? ' cur' : '') + '" data-k="' + k + '"><span>' + esc(OPEN_NAMES[k]) + ' (' + fmtFtIn(OPEN_DEFAULT[k]) + ')</span></div>';
       });
     } else if (kind === 'pline') {
+      // el menu de la Polilinea tambien separado: planta arriba, site abajo
       html += '<div class="tmHead">Tipo de línea</div>';
       Object.keys(LINE_STYLES).forEach(function (k6) {
-        if (k6 === 'cloud') return;   // la nube tiene su propia herramienta
+        if (k6 === 'cloud' || LINE_STYLES[k6].site) return;   // la nube tiene su propia herramienta
+        html += '<div class="tmItem' + (k6 === curLineStyle ? ' cur' : '') + '" data-k="' + k6 + '"><span>' +
+          esc(LINE_STYLES[k6].name) + '</span></div>';
+      });
+      html += '<div class="tmHead">🗺 SITE PLAN — lindero, utilidades y cercas</div>';
+      Object.keys(LINE_STYLES).forEach(function (k6) {
+        if (!LINE_STYLES[k6].site) return;
         html += '<div class="tmItem' + (k6 === curLineStyle ? ' cur' : '') + '" data-k="' + k6 + '"><span>' +
           esc(LINE_STYLES[k6].name) + '</span></div>';
       });

@@ -456,6 +456,241 @@
     cat: 'riser', layer: 'electrical', w: 18, h: 22,
     svg: L(0, -10, 0, 0, 1.2) + L(-8, 0, 8, 0, 1.4) + L(-5, 4, 5, 4, 1.2) + L(-2, 8, 2, 8, 1) };
 
+  /* ======================= SITE PLAN — UTILIDADES Y SERVICIO =======================
+     (Edgar, 31/08: "debemos mejorar la app para la creacion de planos,
+     especificamente site plans — crear simbologia y lineas que se usan solo
+     en esos planos".)
+
+     Hasta hoy la pestana Site tenia arboles, piscina y spa: eso es
+     PAISAJISMO, no un site plan. Un site plan de electricista lleva otra
+     cosa — el poste de la FPL, la acometida, el pad del transformador, el
+     handhole, los postes de luz, el A/C, el tanque de LP, el pozo, el
+     septico, el medidor de agua, el backflow, el hidrante — y las dos
+     anotaciones que NINGUN site plan puede entregarse sin ellas: la ROSA
+     DE LOS VIENTOS y la ESCALA GRAFICA.
+
+     Todo va en pulgadas reales, como el resto de la app. Los de anotacion
+     (norte, escala, bench mark) van grandes a proposito: en un site plan a
+     1"=20' un simbolo de 12" no se ve. Todos se estiran por las esquinas. */
+
+  // ---- ANOTACION OBLIGATORIA ----
+
+  S.site_north = { name: 'North Arrow — rosa de los vientos', short: 'Norte',
+    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 62, h: 100,
+    svg: (function () {
+      var cy = 8, R0 = 24, tip = -30, tail = 24, an = 11, hom = 8;
+      // aguja de dos tonos: mitad llena, mitad hueca — la de todo surveyor
+      var llena = '<polygon points="0,' + tip + ' ' + an + ',' + tail + ' 0,' + hom + ' ' +
+        (-an) + ',' + tail + '" fill="#14161a" stroke="#14161a" stroke-width="0.6"/>';
+      var hueca = '<polygon points="0,' + tip + ' ' + (-an) + ',' + tail + ' 0,' + hom +
+        '" fill="#ffffff" stroke="#14161a" stroke-width="0.6"/>';
+      var out = C(0, cy, R0, ' fill="none" stroke-width="1"') + llena + hueca;
+      // las marcas de E, O y S en el aro
+      out += L(-R0, cy, -R0 + 6, cy, 1) + L(R0 - 6, cy, R0, cy, 1) +
+        L(0, cy + R0 - 6, 0, cy + R0, 1);
+      return out + T(0, tip - 6, 14, 'N', { bold: true });
+    })() };
+
+  S.site_north_simple = { name: 'North Arrow — flecha simple', short: 'Norte simple',
+    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 30, h: 84,
+    svg: '<polygon points="0,-36 7,36 0,26 -7,36" fill="#14161a" stroke="none"/>' +
+      T(0, -40, 12, 'N', { bold: true }) };
+
+  /* ESCALA GRAFICA: es la unica escala que sobrevive a una fotocopia o a un
+     PDF reescalado, y por eso el reviewer la exige. Cuatro tramos de 10 ft
+     alternando lleno y vacio. */
+  S.site_scalebar = { name: 'Graphic Scale — 0 a 40 ft (tramos de 10\')', short: 'Escala gráfica',
+    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 500, h: 90,
+    svg: (function () {
+      var u = 120, n = 4, x0 = -(u * n) / 2, h = 13, out = '';
+      for (var i = 0; i < n; i++) {
+        out += R(x0 + i * u, -h / 2, u, h, 0, i % 2 ? ' fill="#14161a"' : ' fill="#ffffff"');
+      }
+      for (var k = 0; k <= n; k++) {
+        out += L(x0 + k * u, h / 2, x0 + k * u, h / 2 + 7, 0.7) +
+          T(x0 + k * u, h / 2 + 24, 15, String(k * 10));
+      }
+      return out + T(0, -h / 2 - 10, 14, 'SCALE IN FEET', { bold: true });
+    })() };
+
+  S.site_bench = { name: 'Bench Mark / Spot Elevation', short: 'Bench Mark',
+    cat: 'siteplan', layer: 'furniture', bg: 'none', w: 40, h: 40,
+    svg: '<polygon points="0,-9 9,0 0,9 -9,0" fill="none" stroke-width="0.9"/>' +
+      '<polygon points="0,-9 9,0 0,0" fill="#14161a" stroke="none"/>' +
+      '<polygon points="0,0 -9,0 0,9" fill="#14161a" stroke="none"/>' };
+
+  // ---- SERVICIO ELECTRICO DEL POSTE ----
+
+  /* POSTE DE UTILIDAD: circulo con la cruz dentro, que es como lo pone la
+     FPL en sus planos. El de madera es de 12" de diametro en la base. */
+  function posteBase(r) {
+    return C(0, 0, r, ' fill="#ffffff" stroke-width="0.9"') +
+      L(-r * 0.72, -r * 0.72, r * 0.72, r * 0.72, 0.8) +
+      L(-r * 0.72, r * 0.72, r * 0.72, -r * 0.72, 0.8);
+  }
+  S.site_pole = { name: 'Utility Pole (existente)', short: 'Poste',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26, h: 26, svg: posteBase(9) };
+
+  S.site_pole_new = { name: 'Utility Pole NUEVO (relleno)', short: 'Poste nuevo',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26, h: 26,
+    svg: C(0, 0, 9, ' fill="#14161a"') };
+
+  S.site_pole_xfmr = { name: 'Pole-mounted Transformer', short: 'Xfmr en poste',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 46, h: 30,
+    svg: posteBase(9) + C(17, 0, 7.5, ' fill="#ffffff" stroke-width="0.9"') +
+      C(17, 0, 4, ' fill="none" stroke-width="0.6"') + L(9, 0, 9.5, 0, 0.7) };
+
+  S.site_pole_luz = { name: 'Pole with Street Light', short: 'Poste con luz',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 52, h: 30,
+    svg: posteBase(9) + L(9, 0, 24, 0, 0.7) +
+      '<ellipse cx="30" cy="0" rx="6.5" ry="4" fill="#ffffff" stroke="#14161a" stroke-width="0.8"/>' };
+
+  /* RETENIDA (guy wire + anchor): en el site plan se dibuja la linea del
+     tirante y el ancla como una raya en cruz. */
+  S.site_guy = { name: 'Guy Wire / Anchor', short: 'Retenida',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 40, h: 24,
+    svg: L(-15, 0, 12, 0, 0.5) + L(12, -6, 12, 6, 1.1) + L(15, -3.5, 15, 3.5, 0.8) };
+
+  /* PUNTO DE SERVICIO: donde la acometida aerea aterriza en la casa. */
+  S.site_service_pt = { name: 'Service Point / Point of Attachment', short: 'Punto servicio',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 30, h: 30,
+    svg: C(0, 0, 7, ' fill="#ffffff" stroke-width="0.9"') + C(0, 0, 2.6, ' fill="#14161a"') +
+      L(-11, -11, -5, -5, 0.7) };
+
+  // ---- SUBTERRANEO ----
+
+  S.site_handhole = { name: 'Handhole / Pull Box 17×30', short: 'Handhole',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 36, h: 24,
+    svg: R(-15, -8.5, 30, 17, 1.5) + R(-12.5, -6, 25, 12, 1) +
+      T(0, 2.6, 6, 'HH', { bold: true }) };
+
+  S.site_pullbox = { name: 'Junction / Pull Box redondo 24"', short: 'Pull box',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 30, h: 30,
+    svg: C(0, 0, 12, ' fill="#ffffff" stroke-width="0.9"') + C(0, 0, 9, ' fill="none" stroke-width="0.6"') +
+      T(0, 3, 7, 'PB', { bold: true }) };
+
+  S.site_trench = { name: 'Trench Marker / cruce de zanja', short: 'Zanja',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 34, h: 22,
+    svg: L(-14, -7, 14, -7, 0.6) + L(-14, 7, 14, 7, 0.6) +
+      L(-8, -7, -14, 7, 0.5) + L(0, -7, -6, 7, 0.5) + L(8, -7, 2, 7, 0.5) + L(14, -7, 10, 7, 0.5) };
+
+  // ---- ILUMINACION EXTERIOR ----
+
+  S.site_lightpole = { name: 'Light Pole / Area Light', short: 'Poste de luz',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 40, h: 34,
+    svg: C(0, 0, 5.5, ' fill="#ffffff" stroke-width="0.9"') +
+      L(-5.5, -5.5, 5.5, 5.5, 0.7) + L(-5.5, 5.5, 5.5, -5.5, 0.7) +
+      R(6, -5, 13, 10, 1.5) };
+
+  S.site_lightpole2 = { name: 'Light Pole — dos cabezas', short: 'Poste 2 cabezas',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 52, h: 34,
+    svg: C(0, 0, 5.5, ' fill="#ffffff" stroke-width="0.9"') +
+      L(-5.5, -5.5, 5.5, 5.5, 0.7) + L(-5.5, 5.5, 5.5, -5.5, 0.7) +
+      R(6, -5, 13, 10, 1.5) + R(-19, -5, 13, 10, 1.5) };
+
+  S.site_bollard = { name: 'Bollard Light', short: 'Bollard',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 22, h: 22,
+    svg: C(0, 0, 5, ' fill="#ffffff" stroke-width="0.9"') + C(0, 0, 2, ' fill="#14161a"') +
+      L(-8, 0, -5.5, 0, 0.5) + L(5.5, 0, 8, 0, 0.5) + L(0, -8, 0, -5.5, 0.5) + L(0, 5.5, 0, 8, 0.5) };
+
+  S.site_wallpack = { name: 'Wall Pack / Flood Light', short: 'Wall pack',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26, h: 22,
+    svg: R(-8, -4, 16, 8, 1) + '<path d="M8,-4 L15,-8 M8,0 L16,0 M8,4 L15,8" stroke-width="0.5" fill="none"/>' };
+
+  S.site_evped = { name: 'EV Charger Pedestal', short: 'EV pedestal',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 24, h: 30,
+    svg: R(-6, -9, 12, 18, 1.5) + T(0, 3.5, 8, 'EV', { bold: true }) };
+
+  // ---- EQUIPO MECANICO Y TANQUES ----
+
+  S.site_ac = { name: 'A/C Condenser Pad 36×36', short: 'A/C',
+    cat: 'siteplan', layer: 'furniture', w: 40, h: 40,
+    svg: R(-18, -18, 36, 36) + C(0, 0, 13, ' fill="none" stroke-width="0.7"') +
+      (function () {
+        var o = '';
+        for (var i = 0; i < 4; i++) {
+          var a = i * Math.PI / 2 + 0.4;
+          o += '<path d="M0,0 Q' + (9 * Math.cos(a)).toFixed(1) + ',' + (9 * Math.sin(a)).toFixed(1) +
+            ' ' + (12.5 * Math.cos(a + 0.9)).toFixed(1) + ',' + (12.5 * Math.sin(a + 0.9)).toFixed(1) +
+            '" fill="none" stroke-width="0.6"/>';
+        }
+        return o;
+      })() };
+
+  S.site_lp = { name: 'LP / Propane Tank 250 gal (30"×92")', short: 'Tanque LP',
+    cat: 'siteplan', layer: 'furniture', w: 100, h: 40,
+    svg: R(-46, -15, 92, 30, 15) + L(-46, 0, 46, 0, 0.4) +
+      T(0, 3.6, 9, 'LP', { bold: true }) };
+
+  S.site_lp_bur = { name: 'LP Tank ENTERRADO (discontinuo)', short: 'LP enterrado',
+    cat: 'siteplan', layer: 'furniture', w: 100, h: 40, raya: 'ex',
+    svg: R(-46, -15, 92, 30, 15) + T(0, 3.6, 9, 'LP', { bold: true }) };
+
+  S.site_well = { name: 'Well / Pozo', short: 'Pozo',
+    cat: 'siteplan', layer: 'furniture', w: 30, h: 30,
+    svg: C(0, 0, 11, ' fill="#ffffff" stroke-width="0.9"') + C(0, 0, 4.5, ' fill="none" stroke-width="0.6"') +
+      T(0, 3, 6.5, 'W', { bold: true }) };
+
+  S.site_septic = { name: 'Septic Tank 1050 gal (5\'×9\')', short: 'Séptico',
+    cat: 'siteplan', layer: 'furniture', w: 120, h: 72,
+    svg: R(-54, -30, 108, 60) + L(18, -30, 18, 30, 0.5) +
+      C(-30, -30, 6, ' fill="none" stroke-width="0.5"') + C(36, -30, 6, ' fill="none" stroke-width="0.5"') +
+      T(-16, 4, 11, 'SEPTIC', { bold: true }) };
+
+  S.site_drainfield = { name: 'Drain Field 20\'×30\'', short: 'Drain field',
+    cat: 'siteplan', layer: 'furniture', w: 380, h: 260,
+    svg: (function () {
+      var an = 360, al = 240, o = R(-an / 2, -al / 2, an, al);
+      for (var i = 1; i < 6; i++) {
+        var y = -al / 2 + al * (i / 6);
+        o += '<line x1="' + (-an / 2 + 12) + '" y1="' + y + '" x2="' + (an / 2 - 12) + '" y2="' + y +
+          '" stroke-width="0.7" stroke-dasharray="14 8"/>';
+      }
+      return o;
+    })() };
+
+  // ---- AGUA Y DRENAJE ----
+
+  S.site_wmeter = { name: 'Water Meter', short: 'Water meter',
+    cat: 'siteplan', layer: 'furniture', w: 24, h: 20,
+    svg: R(-9, -6, 18, 12, 1) + C(0, 0, 3.6, ' fill="none" stroke-width="0.6"') +
+      T(0, -8.5, 6, 'WM', { bold: true }) };
+
+  S.site_backflow = { name: 'Backflow Preventer (RPZ)', short: 'Backflow',
+    cat: 'siteplan', layer: 'furniture', w: 30, h: 22,
+    svg: L(-13, 0, 13, 0, 0.9) + R(-6, -5, 12, 10, 1) +
+      '<polygon points="-6,-5 0,0 -6,5" fill="#14161a" stroke="none"/>' +
+      T(0, -8, 6, 'BFP', { bold: true }) };
+
+  S.site_hydrant = { name: 'Fire Hydrant', short: 'Hidrante',
+    cat: 'siteplan', layer: 'furniture', w: 26, h: 26,
+    svg: C(0, 0, 6, ' fill="#ffffff" stroke-width="1"') +
+      L(-11, 0, -6, 0, 1) + L(6, 0, 11, 0, 1) + L(0, -11, 0, -6, 1) + L(0, 6, 0, 11, 1) };
+
+  S.site_catchbasin = { name: 'Catch Basin / Storm Inlet 24×24', short: 'Catch basin',
+    cat: 'siteplan', layer: 'furniture', w: 32, h: 32,
+    svg: R(-12, -12, 24, 24) + L(-12, -12, 12, 12, 0.5) + L(-12, 12, 12, -12, 0.5) };
+
+  S.site_cleanout = { name: 'Sewer Clean-out', short: 'Clean-out',
+    cat: 'siteplan', layer: 'furniture', w: 20, h: 20,
+    svg: C(0, 0, 5, ' fill="#ffffff" stroke-width="0.8"') + T(0, 2.4, 5.5, 'CO', { bold: true }) };
+
+  // ---- VARIOS DEL LOTE ----
+
+  S.site_mailbox = { name: 'Mailbox', short: 'Mailbox',
+    cat: 'siteplan', layer: 'furniture', w: 22, h: 18,
+    svg: '<path d="M-8,4 L-8,-2 A8,6 0 0 1 8,-2 L8,4 Z" fill="none" stroke-width="0.8"/>' +
+      L(0, 4, 0, 9, 0.9) };
+
+  S.site_gate = { name: 'Gate Operator / portón', short: 'Gate operator',
+    cat: 'siteplan', layer: 'electrical', bg: 'none', w: 26, h: 24,
+    svg: R(-7, -8, 14, 16, 1.5) + T(0, 3, 8, 'G', { bold: true }) +
+      '<path d="M7,-4 Q14,0 7,4" fill="none" stroke-width="0.5"/>' };
+
+  S.site_sign = { name: 'Site Sign / rótulo', short: 'Rótulo',
+    cat: 'siteplan', layer: 'furniture', w: 34, h: 26,
+    svg: R(-14, -9, 28, 14, 1) + L(-6, 5, -6, 11, 0.8) + L(6, 5, 6, 11, 0.8) };
+
   /* ============================ PLOMERÍA / EQUIPOS ============================ */
 
   S.toilet = { name: 'Toilet', cat: 'plumbing', layer: 'furniture', w: 22, h: 30,
@@ -1001,6 +1236,7 @@
     var d = S[k];
     if (d.lw != null) return;                      // el que ya trae el suyo, se respeta
     if (d.cat === 'riser') d.lw = 0.4;             // cajas chicas a medida real
+    else if (d.cat === 'siteplan') d.lw = 0.6;     // site plan: tamano real, trazo fino
     else if (d.layer === 'furniture') d.lw = 0.7;  // muebles y equipo grande
   });
 
