@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.H';
+  var APP_VERSION = 'v29.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -331,6 +331,36 @@
     } catch (e) { cb(null); }
   }
   function idbSet(k, v) { idbKV('readwrite', function (st) { if (st) try { st.put(v, k); } catch (e) {} }); }
+  /* PURGA DE PDF CRUDOS (auditoria 31/08): cada PDF importado se guarda entero
+     en IndexedDB (pdfbin_*) para el zoom nitido, y nunca se borraba — el
+     almacenamiento del navegador crecia con cada plano que Edgar probaba. Se
+     conservan solo los que alguna hoja del proyecto abierto sigue usando. */
+  function pdfIdsEnUso() {
+    var ids = {};
+    function mete(bg) { if (bg && bg.pdfId) ids[bg.pdfId] = 1; }
+    mete(state.bg); mete(state.bg2);
+    (state.sheets || []).forEach(function (sh) {
+      if (!sh || typeof sh.data !== 'string') return;
+      try { var d = JSON.parse(sh.data); mete(d.bg); mete(d.bg2); } catch (e) {}
+    });
+    return ids;
+  }
+  function purgaPdfBin(done) {
+    var enUso = pdfIdsEnUso(), borrados = 0;
+    idbKV('readwrite', function (st) {
+      if (!st || !st.getAllKeys) { if (done) done(0); return; }
+      try {
+        var rq = st.getAllKeys();
+        rq.onsuccess = function () {
+          (rq.result || []).forEach(function (k) {
+            if (typeof k === 'string' && k.indexOf('pdfbin_') === 0 && !enUso[k]) { try { st.delete(k); borrados++; } catch (e) {} }
+          });
+          if (done) done(borrados);
+        };
+        rq.onerror = function () { if (done) done(0); };
+      } catch (e) { if (done) done(0); }
+    });
+  }
   function idbGet(k, done) {
     var called = false;
     function fin(v) { if (!called) { called = true; done(v); } }
@@ -8626,6 +8656,7 @@
   })();
   $('#btnSave').addEventListener('click', function () {
     syncSheet(); limpiaMarcas();
+    try { purgaPdfBin(); } catch (e) {}
     var data = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
     saveFile((state.project.name || 'proyecto').replace(/[^\w\-. ]+/g, '') + '.mxp.json', data);
     setHint('Proyecto guardado (archivo descargado)');
@@ -10483,6 +10514,7 @@
     syncProjectInputs();
     renderSheetTabs(); updateBgLinesBtn();
     applyView(); refresh();
+    try { purgaPdfBin(); } catch (e) {}   // lo que el proyecto nuevo no usa, fuera
   }
   $('#btnOpen').addEventListener('click', function () { $('#fileOpen').click(); });
   $('#fileOpen').addEventListener('change', function () {
@@ -11720,6 +11752,7 @@
   window.__hitDbg = hitTest;            // gancho de pruebas: que agarra un clic
   window.__osnapDbg = osnapPt;          // gancho de pruebas: el iman de referencia
   window.__undoLenDbg = function () { return [undoStack.length, redoStack.length]; };
+  window.__purgaDbg = purgaPdfBin;
   window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   window.__planoJsonDbg = planoDesdeJSON;   // gancho de pruebas del importador IA
   // logo oficial de Max Power en la barra (viene de js/logo.js)
