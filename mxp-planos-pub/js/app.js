@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.E';
+  var APP_VERSION = 'v29.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -242,8 +242,8 @@
   window.__exportSvgDbg = function () {
     try {
       var c = cleanSvgClone({ x: -100, y: -100, w: 800, h: 600 });
-      return { html: c.outerHTML, guia: !!c.querySelector('#gGuia'),
-               paredes: (c.querySelector('#gWalls') || {}).childElementCount || 0 };
+      return { html: c.outerHTML, guia: !!c.querySelector('[id$="gGuia"]'),
+               paredes: (c.querySelector('[id$="gWalls"]') || {}).childElementCount || 0 };
     } catch (e) { return { err: e.message }; }
   };
   window.__loadSheetDbg = function (j) { try { loadSheetData(j); } catch (e) {} };
@@ -5753,7 +5753,7 @@
     if (Object.keys(wallLen).length) {
       rows += '<tr class="cat"><td colspan="2">Walls (linear feet)</td></tr>';
       Object.keys(wallLen).forEach(function (k) {
-        rows += '<tr><td>' + WALL_TYPES[k].name + '</td><td class="n">' + (wallLen[k] / 12).toFixed(1) + ' ft</td></tr>';
+        rows += '<tr><td>' + esc(WALL_TYPES[k] ? WALL_TYPES[k].name : k) + '</td><td class="n">' + (wallLen[k] / 12).toFixed(1) + ' ft</td></tr>';
       });
     }
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
@@ -5949,7 +5949,7 @@
     var wallLen = {};
     state.walls.forEach(function (w) { wallLen[w.type] = (wallLen[w.type] || 0) + wallGeom(w).len; });
     Object.keys(wallLen).forEach(function (k) {
-      rows.push(['Walls', WALL_TYPES[k].name, '', '', (wallLen[k] / 12).toFixed(2), fmtFtIn(wallLen[k]), '']);
+      rows.push(['Walls', WALL_TYPES[k] ? WALL_TYPES[k].name : k, '', '', (wallLen[k] / 12).toFixed(2), fmtFtIn(wallLen[k]), '']);
     });
     state.areas.forEach(function (a) {
       rows.push(['Surfaces', AREA_PATTERNS[a.pattern] ? AREA_PATTERNS[a.pattern].name : a.pattern, '', 1, '', '', (polyArea(a.pts) / 144).toFixed(1)]);
@@ -6031,7 +6031,7 @@
     Object.keys(byKey).forEach(function (k) { add(SYMBOLS[k].name, byKey[k], 'EA'); });
     Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA'); });
     Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
-    Object.keys(wl).forEach(function (k) { add(WALL_TYPES[k].name + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
+    Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
     areas.forEach(function (a) { add(a[0], a[1], 'SF'); });
     return out;
   }
@@ -6154,6 +6154,7 @@
       function (ok) {
         if (!ok) return;              // uiConfirm llama SIEMPRE: sin esto, Cancelar tambien borraba
         state.bg = null; state.bg2 = null;
+        pdfLive = {}; scheduleAutosave();   // (auditoria 31/08) sin esto el fondo volvia al recargar
         var cb = document.querySelector('#layersBody input[data-layer="background"]');
         if (cb) { cb.checked = true; layerVisible.background = true; G.bg.style.display = ''; }
         updateBgLinesBtn();
@@ -8397,10 +8398,21 @@
   // AUDITORÍA 08/28: _o, _fus y demás marcas de trabajo se guardaban dentro
   // del .mxp.json. Solo ensucian y pueden confundir a una versión futura.
   function limpiaMarcas() {
-    state.walls.forEach(function (w) {
-      delete w._o; delete w._fus; delete w._dead; delete w._corr;
+    function limpia(ws, os) {
+      (ws || []).forEach(function (w) { delete w._o; delete w._fus; delete w._dead; delete w._corr; });
+      (os || []).forEach(function (o) { delete o._fuera; });
+    }
+    limpia(state.walls, state.openings);
+    // (auditoria 31/08) el arreglo del 28/08 solo limpiaba el nivel de arriba:
+    // las marcas seguian viajando dentro de sheets[i].data
+    (state.sheets || []).forEach(function (sh) {
+      if (!sh || typeof sh.data !== 'string') return;
+      try {
+        var d = JSON.parse(sh.data);
+        limpia(d.walls, d.openings);
+        sh.data = JSON.stringify(d);
+      } catch (e) {}
     });
-    state.openings.forEach(function (o) { delete o._fuera; });
   }
   (function () {
     var bg = document.getElementById('btnGuiaDel');
@@ -10254,6 +10266,7 @@
     state.printScale = o.state.printScale || 'fit';
     $('#pjScale').value = state.printScale;
     ponEqName(!!o.state.eqNameOff);   // la casilla de los nombres viaja con el proyecto
+    var hs = $('#pjSheet'); if (hs && o.state.printSheet) hs.value = o.state.printSheet;   // (auditoria 31/08) se guardaba y no se restauraba
     // proyectos viejos (sin multi-hoja): se envuelven en una sola hoja
     if (!state.sheets || !state.sheets.length) {
       state.sheets = [{ no: state.project.sheetNo || 'E-1', title: state.project.sheetTitle || '', data: null }];
@@ -10327,14 +10340,30 @@
     var xs = [], ys = [];
     state.walls.forEach(function (w) { xs.push(w.x1, w.x2); ys.push(w.y1, w.y2); });
     state.symbols.forEach(function (s) {
-      var d = SYMBOLS[s.key], r = Math.max(d.w, d.h) * (s.scale || 1) / 2 + 10;
-      xs.push(s.x - r, s.x + r); ys.push(s.y - r, s.y + r);
+      var d = SYMBOLS[s.key]; if (!d) return;
+      var cs = symCorners(s);
+      if (cs) cs.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
+      else { var r = Math.max(d.w, d.h) * (s.scale || 1) / 2 + 10; xs.push(s.x - r, s.x + r); ys.push(s.y - r, s.y + r); }
     });
-    state.texts.forEach(function (t) { xs.push(t.x, t.x + 60); ys.push(t.y - 12, t.y + 6); });
-    state.dims.forEach(function (d) { xs.push(d.x1, d.x2); ys.push(d.y1, d.y2); });
+    // (auditoria 31/08, GRAVE) los textos contaban 60" de ancho fijo: un
+    // rotulo largo, de varios renglones o centrado se RECORTABA en el PDF/PNG
+    state.texts.forEach(function (t) {
+      var sz = t.size || 9, bb = bboxDe('text', t);
+      if (bb) { xs.push(bb.x, bb.x + bb.w); ys.push(bb.y, bb.y + bb.h); }
+      else { xs.push(t.x, t.x + textAncho(t, sz)); ys.push(t.y - textAlto(t, sz), t.y + 6); }
+    });
+    state.dims.forEach(function (d) {
+      var offD = d.off == null ? 14 : d.off, lnD = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1;
+      var nxD = -(d.y2 - d.y1) / lnD * offD, nyD = (d.x2 - d.x1) / lnD * offD;
+      xs.push(d.x1, d.x2, d.x1 + nxD, d.x2 + nxD); ys.push(d.y1, d.y2, d.y1 + nyD, d.y2 + nyD);   // tambien la linea de cota desplazada
+    });
     state.areas.forEach(function (a) { a.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); });
-    state.wires.forEach(function (w) { xs.push(w.x1, w.x2); ys.push(w.y1, w.y2); });
-    state.leaders.forEach(function (l) { xs.push(l.x, l.tx); ys.push(l.y, l.ty); });
+    state.wires.forEach(function (w) { var wp = wirePath(w); xs.push(w.x1, w.x2, wp.cx); ys.push(w.y1, w.y2, wp.cy); });
+    state.leaders.forEach(function (l) {
+      var lsz = l.size || 7, ltw = (l.text || '').length * lsz * 0.58 + 6;
+      var lx0 = l.x >= l.tx ? l.x : l.x - ltw;
+      xs.push(l.tx, lx0, lx0 + ltw); ys.push(l.ty, l.y - lsz, l.y + 6);
+    });
     if (state.bg) { xs.push(state.bg.x, state.bg.x + state.bg.w); ys.push(state.bg.y, state.bg.y + state.bg.h); }
     if (!xs.length) return { x: -60, y: -60, w: 720, h: 480 };
     var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
@@ -10409,7 +10438,10 @@
     // 'gGuia' entra aquí desde la auditoría del 08/29: la guía del survey se
     // estaba IMPRIMIENDO en el PNG y el PDF, con su rótulo en español encima.
     // Es una referencia de trabajo, no parte del plano que ve el inspector.
-    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia'].forEach(function (id) {
+    // 'bgHires' (auditoria 31/08): la teja nitida del PDF de fondo es una
+    // ayuda de PANTALLA que se pinta encima de la imagen del fondo; al PNG/PDF
+    // iban las dos al 0.7 una sobre otra y salia un rectangulo mas oscuro
+    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia', 'bgHires'].forEach(function (id) {
       var n = clone.querySelector('#' + id);
       if (n) n.parentNode.removeChild(n);
     });
@@ -10446,6 +10478,9 @@
         saveFile((state.project.name || 'plano') + '.png', blob);
       }, 'image/png');
     };
+    img.onerror = function () { setHint('❌ No se pudo rasterizar el PNG (el SVG no cargó). Prueba 🖨 PDF, que no pasa por imagen.'); };
+    var pngT = setTimeout(function () { if (/Exportando PNG/.test($('#hint').textContent)) setHint('⏳ El PNG está tardando — con un plano de fondo grande puede llevar varios segundos'); }, 6000);
+    img.addEventListener('load', function () { clearTimeout(pngT); });
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data);
     setHint('Exportando PNG…');
   });
@@ -10481,6 +10516,28 @@
     var scaleText = 'Graphic / N.T.S.';
     if (scaleVal !== 'fit' && PRINT_SCALES[scaleVal]) {
       var f = parseInt(scaleVal, 10);
+      /* (auditoria 31/08, GRAVE) a escala fija el dibujo se salia del papel y
+         el overflow:hidden lo RECORTABA en silencio. Se comprueba contra el
+         area util de la hoja (Letter menos margenes y caratula) y, si no
+         cabe, se baja a la mayor escala estandar que si cabe — y se dice. */
+      var vert = b.h > b.w * 1.02;
+      var utilW = vert ? 7.6 : 10.3, utilH = vert ? 9.4 : 6.2;   // pulgadas de papel disponibles
+      if (b.w / f > utilW || b.h / f > utilH) {
+        var fOk = null;
+        Object.keys(PRINT_SCALES).map(Number).sort(function (a2, b2) { return a2 - b2; }).forEach(function (fc) {
+          if (fOk == null && b.w / fc <= utilW && b.h / fc <= utilH) fOk = fc;
+        });
+        if (fOk) {
+          setHint('⚠️ A ' + PRINT_SCALES[f] + ' el plano no cabe en la hoja (' + (b.w / f).toFixed(1) + '×' + (b.h / f).toFixed(1) +
+            ' in): se imprime a ' + PRINT_SCALES[fOk] + ', la mayor que cabe. Para ' + PRINT_SCALES[f] + ' hace falta papel más grande.');
+          f = fOk; scaleVal = String(fOk);
+        } else {
+          setHint('⚠️ El plano no cabe a ninguna escala estándar en Letter: se imprime a escala gráfica (ajustado a la hoja).');
+          scaleVal = 'fit';
+        }
+      }
+    }
+    if (scaleVal !== 'fit' && PRINT_SCALES[scaleVal]) {
       clone.style.width = (b.w / f) + 'in';
       clone.style.height = (b.h / f) + 'in';
       clone.style.display = 'block';
@@ -10521,6 +10578,9 @@
       if (all) {
         // set completo: se carga cada hoja, se arma su página, y se vuelve a la actual
         syncSheet();
+        // (auditoria 31/08) cargar cada hoja vacia las pilas de deshacer: se
+        // guardan y se devuelven al terminar — imprimir no es editar
+        var undoG = undoStack.slice(), redoG = redoStack.slice();
         var orig = state.curSheet;
         state.sheets.forEach(function (sh, i) {
           state.curSheet = i;
@@ -10533,6 +10593,8 @@
         state.project.sheetNo = so.no; state.project.sheetTitle = so.title;
         syncProjectInputs();
         loadSheetData(so.data);
+        undoStack.length = 0; redoStack.length = 0;
+        undoG.forEach(function (x) { undoStack.push(x); }); redoG.forEach(function (x) { redoStack.push(x); });
       } else {
         buildPrintFrame(ps);
       }
@@ -10699,7 +10761,7 @@
   // la pila si al cerrar algo cambio.
   var psSnap0 = null;
   function psCerrar() {
-    if (psSnap0 && snapshot() !== psSnap0) pushUndo(psSnap0);
+    if (psSnap0 && snapshot() !== psSnap0) { pushUndo(psSnap0); scheduleAutosave(); }   // (auditoria 31/08) lo tecleado en E-2 se perdia al cerrar la pestana
     psSnap0 = null;
     $('#panelModal').hidden = true;
   }
@@ -10947,13 +11009,103 @@
   });
 
   /* ---------------- teclado ---------------- */
+  /* ================= ENTRADA DINÁMICA (AutoCAD) =================
+     (Edgar, 31/08: "como si tuviera AutoCAD".) Mientras dibujas — pared,
+     línea, polilínea, cable, cota — empiezas a TECLEAR una medida y sale una
+     cajita junto al cursor. Enter y el tramo se coloca EXACTO con ese largo,
+     en la dirección en la que tienes el ratón (o la del ortho). Es lo que en
+     AutoCAD se llama Dynamic Input: la mano da la dirección, el teclado la
+     medida. Acepta lo mismo que el resto de la app: 12'6"  12'-6 1/2"  54"
+     10 (pies). Y con ángulo, a la AutoCAD:  10'<90  (0° = derecha, 90° =
+     arriba). Escape cierra sin colocar nada. */
+  var dinBox = null;
+  function dinPuntoInicio() {
+    if (!drawing) return null;
+    if (drawing.mode === 'wallchain') return drawing.last;
+    if (drawing.mode === 'areachain' && drawing.pts && drawing.pts.length) return drawing.pts[drawing.pts.length - 1];
+    if (drawing.mode === 'twopoint') return drawing.a;
+    return null;
+  }
+  function worldToScreen(wx, wy) {
+    var r = svg.getBoundingClientRect();
+    return [r.left + wx * view.z + view.tx, r.top + wy * view.z + view.ty];
+  }
+  function dinAbre(tecla) {
+    var A = dinPuntoInicio(); if (!A) return false;
+    if (!dinBox) {
+      dinBox = document.createElement('div');
+      dinBox.id = 'dinBox';
+      dinBox.innerHTML = '<span>Largo</span><input id="dinIn" autocomplete="off" spellcheck="false" placeholder="12\'6&quot;  ·  10\'<90">';
+      document.body.appendChild(dinBox);
+      var inp = dinBox.querySelector('input');
+      inp.addEventListener('keydown', function (ev) {
+        ev.stopPropagation();
+        if (ev.key === 'Escape') { dinCierra(); return; }
+        if (ev.key === 'Enter') { ev.preventDefault(); dinAplica(inp.value); }
+      });
+      inp.addEventListener('blur', function () { setTimeout(function () { if (dinBox && document.activeElement !== inp) dinCierra(); }, 120); });
+    }
+    var sc = worldToScreen(lastMouseWorld[0], lastMouseWorld[1]);
+    dinBox.style.left = Math.min(window.innerWidth - 230, sc[0] + 18) + 'px';
+    dinBox.style.top = Math.min(window.innerHeight - 40, sc[1] + 18) + 'px';
+    dinBox.classList.add('on');
+    var i2 = dinBox.querySelector('input');
+    i2.value = tecla || '';
+    i2.focus();
+    try { i2.setSelectionRange(i2.value.length, i2.value.length); } catch (e) {}
+    setHint('⌨ Entrada dinámica: escribe el largo (12\'6") o largo<ángulo (10\'<90) y Enter · Esc cancela');
+    return true;
+  }
+  function dinCierra() { if (dinBox) { dinBox.classList.remove('on'); dinBox.querySelector('input').value = ''; } }
+  function dinAplica(txt) {
+    var A = dinPuntoInicio(); if (!A) { dinCierra(); return; }
+    var m = /^(.*?)(?:<\s*(-?[\d.]+)\s*)?$/.exec(String(txt || '').trim());
+    var L = parseDist(m ? m[1] : txt);
+    if (!L || L <= 0) { setHint('No entendí la medida "' + txt + '" — ejemplos: 12\'6"  ·  54"  ·  10 (pies)  ·  10\'<90'); return; }
+    var ux, uy;
+    if (m && m[2] != null && m[2] !== '') {
+      var ang = parseFloat(m[2]) * Math.PI / 180;          // CAD: 0 = derecha, 90 = arriba
+      ux = Math.cos(ang); uy = -Math.sin(ang);
+    } else {
+      var dx = lastMouseWorld[0] - A[0], dy = lastMouseWorld[1] - A[1], d = Math.hypot(dx, dy);
+      if (d < 1e-6) { ux = 1; uy = 0; }
+      else if (orthoOn || (drawing.mode === 'wallchain' && !drawing.libre)) {
+        // la pared y el ortho van a escuadra: la dirección se redondea al eje
+        if (Math.abs(dx) >= Math.abs(dy)) { ux = dx > 0 ? 1 : -1; uy = 0; } else { ux = 0; uy = dy > 0 ? 1 : -1; }
+      } else { ux = dx / d; uy = dy / d; }
+    }
+    var B = [+(A[0] + ux * L).toFixed(3), +(A[1] + uy * L).toFixed(3)];
+    dinCierra();
+    var evF = { shiftKey: false, altKey: false };
+    if (drawing.mode === 'wallchain') {
+      // la pared usa su propio imán de esquina; el punto ya viene exacto, y el
+      // candado ortho no debe torcerlo: se pasa como Shift para que lo respete
+      evF.shiftKey = (ux === 0 || uy === 0);
+      wallDown(B, evF);
+    } else if (drawing.mode === 'areachain') {
+      drawing.cursor = B;         // areaDown guarda el punto YA GUIADO (drawing.cursor), no el que se le pasa
+      areaDown(B);
+    } else if (drawing.mode === 'twopoint') {
+      twoPointDown(B, drawing.kind);
+    }
+    lastMouseWorld = B;
+    setHint('✓ Tramo de ' + fmtFtIn(L) + ' colocado — sigue con el ratón o teclea el siguiente');
+  }
+
   document.addEventListener('keydown', function (ev) {
     var inField = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
     // escribiendo en el chat, Ctrl+Z deshace LO ESCRITO, no el plano
     if (inField && document.activeElement.id === 'chatTxt') return;
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); ev.shiftKey ? redo() : undo(); return; }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { ev.preventDefault(); redo(); return; }
+    // (auditoria 31/08) Ctrl+P del navegador imprimia una hoja EN BLANCO: aqui
+    // imprimir es armar la hoja primero, asi que pasa por el boton
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'p') { ev.preventDefault(); var bp = $('#btnPrint'); if (bp) bp.click(); return; }
     if (inField) return;
+    // entrada dinámica: un dígito (o . ') con un trazo en curso abre la cajita
+    if (drawing && !ev.ctrlKey && !ev.metaKey && !ev.altKey && /^[0-9.']$/.test(ev.key) && dinPuntoInicio()) {
+      ev.preventDefault(); dinAbre(ev.key); return;
+    }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'c') { copySel(); return; }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'v' && clipboard) { ev.preventDefault(); pasteClip(lastMouseWorld); return; }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd') { ev.preventDefault(); copySel(); pasteClip(null, 24); return; }

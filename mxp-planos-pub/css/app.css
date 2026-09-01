@@ -296,16 +296,23 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 
 /* ===== Print ===== */
 @media print {
+  /* (auditoria 31/08, GRAVE) html/body llevan height:100% + overflow:hidden
+     para la app, y eso tambien regia al imprimir: el SET de hojas salia
+     recortado a la PRIMERA pagina. En papel el documento crece lo que haga
+     falta. */
+  html, body { height: auto !important; overflow: visible !important; }
   /* nada de la app entra en la hoja. Antes solo se escondia #app, y la
      burbuja del chat (que cuelga del body) se IMPRIMIA encima del plano */
   body > * { display: none !important; }
   #printSheet { display: block !important; position: static; }
+  /* Ctrl+P sin pasar por el boton: la hoja vacia no se imprime */
+  #printSheet:empty { display: none !important; }
   /* la orientación la pone el JS en #printPageCss según la forma del plano */
 }
 #printSheet { background: #fff; color: #14161a; font-family: Arial, sans-serif; }
 #printSheet .sheetFrame { border: 2px solid #14161a; padding: 4px; height: 186mm; display: flex; flex-direction: column; page-break-after: always; }
 /* la hoja de pie: una casa mas alta que ancha aprovecha el papel entero */
-#printSheet.vert .sheetFrame { height: 265mm; }
+#printSheet.vert .sheetFrame { height: 262mm; }   /* Letter portrait con 8mm de margen deja 263.4mm: 265 no cabia */
 #printSheet .sheetFrame:last-child { page-break-after: auto; }
 /* hoja limpia: solo el plano, sin recuadro ni caratula (Edgar 08/30) */
 #printSheet .sheetFrame.sinMarco { border: 0; padding: 0; }
@@ -526,3 +533,10 @@ body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
 #marcasTabla td.k { color: #777; font-size: 11px; }
 body.touch #marcasBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 55vh; }
 body.touch #marcasCab button { width: 34px; height: 34px; }
+
+/* ======= ENTRADA DINÁMICA (medida tecleada mientras se dibuja) ======= */
+#dinBox { position: fixed; z-index: 70; display: none; align-items: center; gap: 6px; padding: 5px 8px;
+  background: #1e2530; color: #fff; border-radius: 7px; box-shadow: 0 4px 16px rgba(0,0,0,.3); font-size: 12px; }
+#dinBox.on { display: flex; }
+#dinBox span { color: #f5b82e; font-weight: 700; letter-spacing: .3px; }
+#dinBox input { width: 150px; border: 1px solid #3a4452; background: #fff; color: #14161a; border-radius: 5px; padding: 3px 6px; font-size: 13px; font-family: inherit; }
