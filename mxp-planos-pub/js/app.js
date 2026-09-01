@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.C';
+  var APP_VERSION = 'v29.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -286,7 +286,9 @@
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
   }
+  var ultimoPushT = 0;   // cuando se metio la ultima entrada (para el Supr de "quita lo que acabo de dibujar")
   function pushUndo(snap) {
+    ultimoPushT = Date.now();
     undoStack.push(snap || snapshot());
     // AUDITORÍA 08/28: 80 instantáneas × 51 KB (casa entera) = ~4 MB en
     // memoria. Se recorta por PESO, no por número: en planos chicos siguen
@@ -354,8 +356,9 @@
     if (state.bg && o.bgMeta) { state.bg.x = o.bgMeta.x; state.bg.y = o.bgMeta.y; state.bg.w = o.bgMeta.w; state.bg.h = o.bgMeta.h; state.bg.opacity = o.bgMeta.opacity; }
     if (state.bg2 && o.bg2Meta) { state.bg2.x = o.bg2Meta.x; state.bg2.y = o.bg2Meta.y; state.bg2.w = o.bg2Meta.w; state.bg2.h = o.bg2Meta.h; state.bg2.opacity = o.bg2Meta.opacity; }
     limpiaHuerfanas();      // aberturas cuya pared ya no existe
-    sel = null;
+    sel = null; selGroup = null;   // (auditoria 31/08) el grupo no puede sobrevivir a un deshacer
     refresh();
+    scheduleAutosave();            // (auditoria 31/08) deshacer tambien es un cambio que hay que guardar
   }
   function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); applySnap(undoStack.pop()); setHint('Deshecho'); }
   function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); applySnap(redoStack.pop()); }
@@ -3180,8 +3183,11 @@
         var dx2 = e.x2 - e.x1, dy2 = e.y2 - e.y1, ln = Math.hypot(dx2, dy2) || 1;
         var nx = -dy2 / ln, ny = dx2 / ln, off = e.off == null ? 14 : e.off;
         var rd = distToSeg(p[0], p[1], e.x1 + nx * off, e.y1 + ny * off, e.x2 + nx * off, e.y2 + ny * off);
-        var rd2 = distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y2);   // también los puntos medidos
-        var dd2 = Math.min(rd.d, rd2.d);
+        // la linea de puntos medidos tambien vale, pero PENALIZADA: esta encima
+        // de la pared que mide, y si compitiera de tu a tu, tocar la pared
+        // seleccionaba la cota (auditoria 31/08, reproducido)
+        var rd2 = distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y2);
+        var dd2 = Math.min(rd.d, rd2.d + PX(4));
         if (dd2 <= PX(5)) pon('dim', e.id, dd2, 5);
       }
       for (i = 0; i < state.leaders.length; i++) {
@@ -3199,15 +3205,29 @@
     if (layerVisible.electrical) {
       for (i = 0; i < state.wires.length; i++) {
         e = state.wires[i];
-        var wp = wirePath(e), best = 1e9;
-        for (var k = 0; k <= 20; k++) {
-          var tt = k / 20, mt = 1 - tt;
-          var qx = mt * mt * e.x1 + 2 * mt * tt * wp.cx + tt * tt * e.x2;
-          var qy = mt * mt * e.y1 + 2 * mt * tt * wp.cy + tt * tt * e.y2;
-          var ddw = Math.hypot(p[0] - qx, p[1] - qy);
-          if (ddw < best) best = ddw;
+        // (auditoria 31/08) muestrear 20 puntos fijos dejaba huecos de varias
+        // pulgadas a zoom alto y la esquina de un tubo en L no se agarraba
+        // nunca. Recta y L se miden EXACTO contra sus segmentos; la curva se
+        // muestrea con tantos puntos como pide su largo EN PANTALLA.
+        var stW = e.style || 'dashed', wp = wirePath(e), best = 1e9;
+        if (ES_L[stW]) {
+          best = Math.min(distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y1).d, distToSeg(p[0], p[1], e.x2, e.y1, e.x2, e.y2).d);
+        } else if (stW === 'straight' || stW === 'straightdashed' || ES_TUBO[stW] != null) {
+          best = distToSeg(p[0], p[1], e.x1, e.y1, e.x2, e.y2).d;
+        } else {
+          var lenPx = Math.hypot(e.x2 - e.x1, e.y2 - e.y1) * view.z;
+          var nS = Math.max(20, Math.min(240, Math.ceil(lenPx / 4)));
+          for (var k = 0; k <= nS; k++) {
+            var tt = k / nS, mt = 1 - tt;
+            var qx = mt * mt * e.x1 + 2 * mt * tt * wp.cx + tt * tt * e.x2;
+            var qy = mt * mt * e.y1 + 2 * mt * tt * wp.cy + tt * tt * e.y2;
+            var ddw = Math.hypot(p[0] - qx, p[1] - qy);
+            if (ddw < best) best = ddw;
+          }
         }
-        if (best <= PX(4)) pon('wire', e.id, best, 5);
+        // la tuberia es gorda: se agarra en todo su ancho
+        var tolW = ES_TUBO[stW] != null ? Math.max(PX(4), 1.8 * (lwDe(e) / LW_BASE) + PX(2)) : PX(4);
+        if (best <= tolW) pon('wire', e.id, best, 5);
       }
     }
     // LÍNEAS Y SUPERFICIES. Una polilínea ABIERTA no tiene interior, así que
@@ -3233,7 +3253,13 @@
         }
         var lwA = (e.lw || ((LINE_STYLES[e.lineStyle] || {}).lw) || 0.9) / 2;
         if (dBor - lwA <= PX(4)) pon('area', e.id, Math.max(0, dBor - lwA), 5);
-        else if (!e.open && pointInPoly(p, e.pts)) pon('area', e.id, 0, 1);
+        else if (!e.open && pointInPoly(p, e.pts)) {
+          // (auditoria 31/08) entre varias superficies que contienen el punto
+          // gana la MAS CHICA (la isla encima del piso, no el piso): la
+          // prioridad baja un pelo con el area, asi el empate a d=0 lo decide
+          // el tamano y no el orden de dibujo
+          pon('area', e.id, 0, 1 - Math.min(0.9, Math.abs(polyArea(e.pts)) / 1e8));
+        }
       }
     }
     if (!cand.length) return null;
@@ -3678,7 +3704,16 @@
     if (sel && sel.kind === 'symbol') {
       var se = findSel();
       var sdef = se && SYMBOLS[se.key];
-      if (se && sdef && estirable(sdef)) {
+      // (auditoria 31/08) en una pieza chica en pantalla las cuatro asas se
+      // comian la pieza entera y solo se podia estirar, nunca mover. Si mide
+      // menos de ~44 px, las asas se ceden al movimiento: para estirarla,
+      // acercate.
+      var chica = false;
+      if (se && sdef) {
+        var kQ = symK(sdef), escQ = (se.scale || 1) * kQ;
+        chica = Math.min(sdef.w * escQ * (se.sx || 1), sdef.h * escQ * (se.sy || 1)) * view.z < 44;
+      }
+      if (se && sdef && estirable(sdef) && !chica) {
         var cs = symCorners(se);
         var cr3 = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
         for (var ci = 0; ci < 4; ci++) {
@@ -3726,13 +3761,21 @@
     var y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
     function inside(x, y) { return x >= x0 && x <= x1 && y >= y0 && y <= y1; }
     var g = [];
-    state.walls.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wall', id: w.id }); });
-    state.symbols.forEach(function (s) { if (inside(s.x, s.y)) g.push({ kind: 'symbol', id: s.id }); });
-    state.texts.forEach(function (t) { if (inside(t.x, t.y)) g.push({ kind: 'text', id: t.id }); });
-    state.dims.forEach(function (d) { if (inside(d.x1, d.y1) && inside(d.x2, d.y2)) g.push({ kind: 'dim', id: d.id }); });
-    state.wires.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wire', id: w.id }); });
-    state.leaders.forEach(function (l) { if (inside(l.x, l.y)) g.push({ kind: 'leader', id: l.id }); });
-    state.areas.forEach(function (ar) {
+    // lo que esta en una capa APAGADA no se selecciona: si no se ve, no se
+    // puede borrar con Supr sin querer (auditoria 31/08, reproducido)
+    var LV = layerVisible;
+    if (LV.architecture) state.walls.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wall', id: w.id }); });
+    state.symbols.forEach(function (s) {
+      var d = SYMBOLS[s.key], capa = d && d.layer === 'furniture' ? 'furniture' : 'electrical';
+      if (LV[capa] && inside(s.x, s.y)) g.push({ kind: 'symbol', id: s.id });
+    });
+    if (LV.annotation) {
+      state.texts.forEach(function (t) { if (inside(t.x, t.y)) g.push({ kind: 'text', id: t.id }); });
+      state.dims.forEach(function (d) { if (inside(d.x1, d.y1) && inside(d.x2, d.y2)) g.push({ kind: 'dim', id: d.id }); });
+      state.leaders.forEach(function (l) { if (inside(l.x, l.y)) g.push({ kind: 'leader', id: l.id }); });
+    }
+    if (LV.electrical) state.wires.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wire', id: w.id }); });
+    if (LV.areas) state.areas.forEach(function (ar) {
       if (ar.pts.every(function (q) { return inside(q[0], q[1]); })) g.push({ kind: 'area', id: ar.id });
     });
     return g;
@@ -4198,6 +4241,7 @@
   function openingDown(p, type) {
     var near = nearestWall(p);
     if (!near) { setHint('Acércate a una pared para colocar la ' + OPEN_NAMES[type].toLowerCase()); return; }
+    if (esEcoDeDobleClic('op:' + type, p[0], p[1])) return;
     // el ancho SIEMPRE sale de lo que se ve en la barra: si el selector marca
     // una medida, esa manda; 'auto' usa la de fábrica del tipo. Antes el
     // tamaño elegido en el menú se quedaba pegado invisible y todas las
@@ -4310,8 +4354,22 @@
   }
 
   /* --- colocar símbolos --- */
+  /* DOBLE CLIC = DOS PIEZAS ENCIMADAS (auditoria 31/08, reproducido): el
+     segundo clic del doble clic llegaba a placeDown/openingDown y ponia una
+     copia identica debajo de la primera. Invisible en el plano — y contaba
+     DOBLE en materiales y en el estimado. Si la misma pieza se coloca a menos
+     de 2" y en menos de medio segundo, es el eco del doble clic, no otra. */
+  var ultimaColoc = null;
+  function esEcoDeDobleClic(clave, x, y) {
+    var t = Date.now();
+    if (ultimaColoc && ultimaColoc.clave === clave && t - ultimaColoc.t < 500 &&
+        Math.hypot(x - ultimaColoc.x, y - ultimaColoc.y) < 2) return true;
+    ultimaColoc = { clave: clave, x: x, y: y, t: t };
+    return false;
+  }
   function placeDown(p) {
     if (!placingKey) return;
+    if (esEcoDeDobleClic('sym:' + placingKey, p[0], p[1])) return;
     pushUndo();
     var e = { id: uid(), key: placingKey, x: Math.round(p[0]), y: Math.round(p[1]), rot: placingRot, scale: 1 };
     state.symbols.push(e);
@@ -4462,6 +4520,14 @@
       if (!e) return;
       if (e.pts) e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
       else if (e.x1 != null) { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
+      else if (r.kind === 'symbol' && SYMBOLS[e.key]) {
+        // (auditoria 31/08) con solo el centro, la caja de una cama era un
+        // punto y el circulito de girar caia 34 px por encima del CENTRO —
+        // o sea, dentro del colchon: arrastrar la cama por arriba la giraba
+        var csB = symCorners(e);
+        if (csB) csB.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
+        else { xs.push(e.x); ys.push(e.y); }
+      }
       else if (e.x != null) { xs.push(e.x); ys.push(e.y); }
     });
     if (!xs.length) return null;
@@ -5336,15 +5402,17 @@
       var n = $('#' + id);
       if (n) n.addEventListener(evt, function () { fn(n); });
     }
+    var prOpacUndo = false;
     on('prOpac', 'input', function (n) {
       var v = parseInt(n.value, 10);
       if (!isFinite(v)) return;
       var et = findSel(); if (!et) return;
+      if (!prOpacUndo) { pushUndo(); prOpacUndo = true; }   // ANTES de mutar, una vez
       et.op = (v >= 100 ? null : v);       // 100 = sin campo, como siempre
       var lbl = $('#prOpacN'); if (lbl) lbl.textContent = v + '%';
       refresh(); renderSel();
     });
-    on('prOpac', 'change', function () { pushUndo(); });
+    on('prOpac', 'change', function () { prOpacUndo = false; });
     on('prDelete', 'click', deleteSelected);
     on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
     on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
@@ -5414,8 +5482,18 @@
       var c = JSON.parse(JSON.stringify(e)); c.id = uid(); c.x += 24; c.y += 24;
       state.symbols.push(c); sel = { kind: 'symbol', id: c.id }; refresh();
     });
-    on('prText', 'input', function (n) { e.text = n.value; refresh(); });
-    on('prText', 'change', function (n) { pushUndo(); e.text = n.value; refresh(); });
+    // (auditoria 31/08) al teclear, refresh() reconstruia el panel entero y el
+    // textarea perdia el foco en la 1a letra — las demas letras caian como
+    // atajos de teclado. Ahora mientras se escribe solo se redibuja la capa
+    // de texto; el panel se reconstruye al terminar. Y el pushUndo va ANTES
+    // de la primera letra, una sola vez, para que Ctrl+Z devuelva el texto
+    // anterior (antes se hacia despues de mutar: deshacer no hacia nada).
+    var prTextUndo = false;
+    on('prText', 'input', function (n) {
+      if (!prTextUndo) { pushUndo(); prTextUndo = true; }
+      e.text = n.value; renderAnnot(); renderSel();
+    });
+    on('prText', 'change', function () { prTextUndo = false; refresh(); });
     on('prTextFont', 'change', function (n) { pushUndo(); e.font = n.value; refresh(); });
     function txtSize(v) {
       var et = findSel(); if (!et) return;
@@ -10126,6 +10204,24 @@
   }
 
   function restoreProject(o) {
+    /* ABRIR ES UN DOCUMENTO NUEVO (auditoria 31/08, reproducido): Ctrl+Z
+       despues de abrir metia las paredes del proyecto anterior dentro de las
+       hojas del nuevo, y el autosave lo guardaba asi. Ademas Object.assign
+       solo pisa lo que el archivo TRAE: un proyecto viejo sin 'sheets' o sin
+       'bg' heredaba las pestanas y el PDF del anterior. Y pdfLive (el PDF en
+       alta resolucion, solo en memoria) se quedaba del proyecto de antes y se
+       dibujaba encima del fondo del nuevo. Todo eso se limpia aqui. */
+    undoStack.length = 0; redoStack.length = 0;
+    pdfLive = {};
+    sel = null; selGroup = null; drawing = null; G.prev.innerHTML = '';
+    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos'].forEach(function (k) {
+      state[k] = Array.isArray(o.state[k]) ? o.state[k] : [];
+    });
+    state.bg = o.state.bg || null;
+    state.bg2 = o.state.bg2 || null;
+    state.sheets = Array.isArray(o.state.sheets) ? o.state.sheets : null;
+    state.curSheet = o.state.curSheet || 0;
+    state.project = Object.assign({ name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }, o.state.project || {});
     Object.assign(state, o.state);
     state.areas = o.state.areas || [];
     state.wires = o.state.wires || [];
@@ -10163,7 +10259,7 @@
       try {
         var o = JSON.parse(rd.result);
         if (o.app === 'mxp-planos') {
-          pushUndo();
+          // sin pushUndo: abrir es un documento nuevo y la pila se vacia dentro
           restoreProject(o);
           setHint('Proyecto abierto: ' + (state.project.name || f.name));
           return;
@@ -10853,11 +10949,18 @@
         else if (sel) { ev.preventDefault(); deleteSelected(); }
         else if (tool !== 'select' && tool !== 'pan') {
           // recien dibujaste una pared/medida/etc y sigues en la
-          // herramienta: Delete la quita al instante (deshace lo ultimo)
+          // herramienta: Delete la quita al instante (deshace lo ultimo).
+          // (auditoria 31/08) pero SOLO si lo ultimo fue hace poco: si no,
+          // deshacia cualquier cosa — un cambio de propiedades de hace un
+          // rato — sin que se viera que.
           ev.preventDefault();
-          if (drawing) { drawing = null; G.prev.innerHTML = ''; }
-          undo();
-          setHint('🗑 Último elemento eliminado (deshacer) — sigue dibujando o Esc para Select');
+          if (drawing) { drawing = null; G.prev.innerHTML = ''; setHint('Trazo cancelado'); break; }
+          if (Date.now() - ultimoPushT < 8000) {
+            undo();
+            setHint('🗑 Último elemento eliminado (deshacer) — sigue dibujando o Esc para Select');
+          } else {
+            setHint('Nada seleccionado — toca un elemento con Select (V) para borrarlo, o Ctrl+Z para deshacer');
+          }
         }
         break;
       case 'r': case 'R':
