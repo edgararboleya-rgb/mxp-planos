@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.D';
+  var APP_VERSION = 'v29.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2952,8 +2952,15 @@
         '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
     }
     if (kind === 'text') {
-      var sz = e.size || 9, tw = (e.text.length * sz) * 0.58 + 6;
-      return '<rect class="sel" x="' + (e.x - 3) + '" y="' + (e.y - sz) + '" width="' + tw + '" height="' + (sz + 6) + '"/>';
+      // (auditoria 31/08) salia corrido: ignoraba alineacion, renglones, giro
+      // y burbuja/hexagono. Ahora usa la misma caja que el hit-test.
+      var sz = e.size || 9, rotT = e.rot ? ' transform="rotate(' + e.rot + ' ' + e.x + ' ' + e.y + ')"' : '';
+      if (e.style === 'circle' || e.style === 'hex') {
+        var cjS = textCaja(e, sz);
+        return '<rect class="sel" x="' + (e.x - cjS.w / 2) + '" y="' + (e.y - cjS.h / 2) + '" width="' + cjS.w + '" height="' + cjS.h + '"' + rotT + '/>';
+      }
+      var twS = textAncho(e, sz), txS = textIzq(e, sz);
+      return '<rect class="sel" x="' + (txS - 3) + '" y="' + (e.y - sz) + '" width="' + (twS + 6) + '" height="' + (textAlto(e, sz) + 4) + '"' + rotT + '/>';
     }
     if (kind === 'dim' || kind === 'wire') {
       return '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
@@ -3632,7 +3639,15 @@
     return pool ? pool.find(function (e) { return e.id === ref.id; }) : null;
   }
   function inGroup(h) {
-    return selGroup && h && selGroup.some(function (r) { return r.kind === h.kind && r.id === h.id; });
+    if (!selGroup || !h) return false;
+    if (selGroup.some(function (r) { return r.kind === h.kind && r.id === h.id; })) return true;
+    // (auditoria 31/08) la puerta de una pared del grupo TAMBIEN es del grupo:
+    // arrastrarla movia solo la puerta y rompia el grupo
+    if (h.kind === 'opening') {
+      var opG = state.openings.find(function (o) { return o.id === h.id; });
+      return !!(opG && selGroup.some(function (r) { return r.kind === 'wall' && r.id === opG.wallId; }));
+    }
+    return false;
   }
   function selectDown(p, ev) {
     // el circulito de giro manda: se comprueba ANTES de cualquier otra cosa
@@ -3793,8 +3808,11 @@
       return;
     }
     if (drag.mode === 'groupmove') {
-      drag.moved = true;
       var gdx = p[0] - drag.start[0], gdy = p[1] - drag.start[1];
+      // (auditoria 31/08) zona muerta: un clic con 1 px de temblor movia el
+      // grupo 1" y metia un paso de deshacer
+      if (!drag.moved && Math.hypot(gdx, gdy) * view.z < 3) return;
+      drag.moved = true;
       if (finoOn(ev)) { gdx *= FINO; gdy *= FINO; setHint('🐢 Fino (Alt): el grupo se mueve poquito a poquito'); }
       if (wantOrtho(ev)) { if (Math.abs(gdx) >= Math.abs(gdy)) gdy = 0; else gdx = 0; }
       applyGroupDelta(drag.items, gdx, gdy);
@@ -3826,11 +3844,13 @@
       return;
     }
     if (drag.mode === 'rotate') {
-      drag.moved = true;
       var a1 = Math.atan2(p[1] - drag.cy, p[0] - drag.cx) * 180 / Math.PI;
       var deg = a1 - drag.a0;
       while (deg > 180) deg -= 360;
       while (deg < -180) deg += 360;
+      // (auditoria 31/08) zona muerta: tocar el asa sin girar no cuenta
+      if (!drag.moved && Math.abs(deg) < 0.75) return;
+      drag.moved = true;
       // a donde queda el angulo dominante de la pieza si giro esto
       // 🐢 GIRO FINO con Alt (Edgar, 08/30: "que lo pueda girar suave, como
       // cuando alargamos una linea con Alt"): el angulo avanza a un 15% de lo
@@ -6104,7 +6124,7 @@
     });
   });
   $('#bgOpacity').addEventListener('input', function () {
-    if (state.bg) { state.bg.opacity = this.value / 100; renderBg(); }
+    if (state.bg) { state.bg.opacity = this.value / 100; renderBg(); scheduleAutosave(); }
   });
 
   // extrae solo la tinta del fondo: lo blanco se vuelve transparente, quedan las líneas
@@ -8018,10 +8038,10 @@
   /* ---------------- proyecto ---------------- */
   $('#pjPrec').addEventListener('change', function () {
     state.precision = parseInt(this.value, 10) || 4;
-    refresh();
+    refresh(); scheduleAutosave();
   });
   $('#pjScale').addEventListener('change', function () {
-    state.printScale = this.value;
+    state.printScale = this.value; scheduleAutosave();
   });
   var PJ_FIELDS = { pjName: 'name', pjClient: 'client', pjAddress: 'address', pjJob: 'job', pjSheetNo: 'sheetNo', pjSheetTitle: 'sheetTitle', pjDrawn: 'drawn' };
   Object.keys(PJ_FIELDS).forEach(function (id) {
@@ -10674,16 +10694,28 @@
       'CALCULATED DEMAND: <b>' + fmtVa(d.demand) + ' VA</b> → <b class="amp">' + d.amps.toFixed(1) + ' A @ 240V, 1Ø</b>';
   }
 
+  // (auditoria 31/08) abrir el Panel Schedule metia una entrada de deshacer
+  // aunque no se tocara nada. Ahora se toma la foto al abrir y solo entra en
+  // la pila si al cerrar algo cambio.
+  var psSnap0 = null;
+  function psCerrar() {
+    if (psSnap0 && snapshot() !== psSnap0) pushUndo(psSnap0);
+    psSnap0 = null;
+    $('#panelModal').hidden = true;
+  }
   $('#btnPanel').addEventListener('click', function () {
-    pushUndo();
-    buildPanelModal();
+    buildPanelModal();          // crea el panel por defecto si no habia: eso no cuenta como cambio
+    psSnap0 = snapshot();
     $('#panelModal').hidden = false;
   });
-  $('#psClose').addEventListener('click', function () { $('#panelModal').hidden = true; });
+  $('#psClose').addEventListener('click', psCerrar);
   // tocar el fondo oscuro también cierra (clave en iPad, sin tecla Escape)
   $$('.modal').forEach(function (m) {
     if (m.id === 'askModal') return;
-    m.addEventListener('click', function (ev) { if (ev.target === m) m.hidden = true; });
+    m.addEventListener('click', function (ev) {
+      if (ev.target !== m) return;
+      if (m.id === 'panelModal') psCerrar(); else m.hidden = true;
+    });
   });
   $('#psAddLoad').addEventListener('click', function () {
     curPanel().loads.push({ desc: '', va: 0, hvac: false });
@@ -11329,6 +11361,7 @@
   window.__snapDbg = snapWallPt;
   window.__hitDbg = hitTest;            // gancho de pruebas: que agarra un clic
   window.__osnapDbg = osnapPt;          // gancho de pruebas: el iman de referencia
+  window.__undoLenDbg = function () { return [undoStack.length, redoStack.length]; };
   window.__gruposDbg = function (W) { try { return gruposDir(W); } catch (e) { return []; } };
   window.__planoJsonDbg = planoDesdeJSON;   // gancho de pruebas del importador IA
   // logo oficial de Max Power en la barra (viene de js/logo.js)
