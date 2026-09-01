@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.A';
+  var APP_VERSION = 'v29.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -450,7 +450,7 @@
     state.dims.forEach(function (d) { cand(d.x1, d.y1, 'end'); cand(d.x2, d.y2, 'end'); });
     return best;
   }
-  var SNAP_TOOLS = { measure: 1, dim: 1, calibrate: 1, wire: 1, leader: 1, pline: 1, area: 1, rect: 1, ellipse: 1, cloud: 1 };
+  var SNAP_TOOLS = { measure: 1, dim: 1, calibrate: 1, wire: 1, leader: 1, pline: 1, line: 1, area: 1, rect: 1, ellipse: 1, cloud: 1 };
   function osnapMarker(sn) {
     if (!sn) return '';
     var r = 4.5 / view.z + 1;
@@ -1123,6 +1123,7 @@
       '<optgroup label="🗺 SITE PLAN">' + si + '</optgroup>';
   }
   var curLineStyle = 'solid';
+  var curLineCap = 'none';    // la herramienta Línea: ➤ Flecha pone punta al final
   // forma de la herramienta Rect: rectangulo o poligono regular (poly3, poly5...)
   var curShapeKind = 'rect';
   var curDoorType = 'door', curWinType = 'window', curDoorW = 0;   // 0 = ancho por defecto del tipo
@@ -2184,13 +2185,42 @@
     return null;
   }
   function glifoK(a) { var k = +a.glifoK; return k > 0 ? k : 1; }
-  // el trazo de una linea con rotulo se estira con el rotulo: el hueco existe
-  // PARA que quepa la letra, asi que si la letra crece, el hueco crece
+  /* EL PATRON SE AJUSTA AL LARGO DE LA LINEA. Visto en pantalla (31/08): una
+     UGE de 16 ft con el patron fijo 150/84 salia PARTIDA — 150" de trazo, un
+     hueco vacio de 40" sin letra, y la flecha flotando al final. Un patron
+     fijo solo cierra bien cuando el largo es multiplo del periodo, y en la
+     obra nunca lo es. Como lo dibuja un surveyor: la linea EMPIEZA y TERMINA
+     con tramo solido, y las letras se reparten por dentro. Con n letras hay
+     n huecos y n+1 tramos, asi que el tramo se calcula: (L - n*hueco)/(n+1).
+     El hueco no se toca — existe para que quepa la letra. */
+  function patronGlifo(a, est) {
+    if (!est.glifo || est.paso || !est.dash) return null;
+    var k = glifoK(a);
+    var d2 = String(est.dash).split(/\s+/).map(parseFloat);
+    var largo = (d2[0] || 150) * k, hueco = (d2[1] || 60) * k;
+    var L = largoTramos(a.pts, !a.open).tot;
+    if (!(L > 0)) return null;
+    var minTramo = 18 * k, n;
+    if (a.open) {
+      // sin sitio ni para un hueco con dos orillas: solida y sin rotulo
+      if (L < hueco + 2 * minTramo) return { n: 0 };
+      n = Math.max(1, Math.round((L - largo) / (largo + hueco)));
+      while (n > 1 && (L - n * hueco) / (n + 1) < minTramo) n--;
+      var tramo = (L - n * hueco) / (n + 1);
+      return { n: n, tramo: tramo, hueco: hueco, prim: tramo + hueco / 2, paso: tramo + hueco };
+    }
+    // cerrado: n periodos exactos y el patron da la vuelta sin costura
+    n = Math.max(1, Math.round(L / (largo + hueco)));
+    while (n > 1 && L / n - hueco < minTramo) n--;
+    var tramoC = L / n - hueco;
+    if (tramoC < minTramo) return { n: 0 };
+    return { n: n, tramo: tramoC, hueco: hueco, prim: tramoC + hueco / 2, paso: tramoC + hueco };
+  }
   function dashDe(a, est) {
     if (!est.glifo || est.paso || !est.dash) return est.dash;
-    var k = glifoK(a);
-    if (k === 1) return est.dash;
-    return String(est.dash).split(/\s+/).map(function (v) { return (parseFloat(v) * k).toFixed(1); }).join(' ');
+    var pg = patronGlifo(a, est);
+    if (!pg || !pg.n) return '';                       // corta: solida
+    return pg.tramo.toFixed(2) + ' ' + pg.hueco.toFixed(2);
   }
   function glifosLinea(a, est, col, lw) {
     var g = est.glifo;
@@ -2198,17 +2228,17 @@
     var tr = largoTramos(a.pts, !a.open);
     if (!tr.segs.length) return '';
     var kg = glifoK(a);
-    var paso, prim;
+    var paso, prim, nMax = Infinity;
     if (est.paso) {                       // formas (cerca): reparto parejo
       paso = est.paso * kg; prim = paso / 2;
-    } else {                              // letras: en el centro del hueco
-      var d2 = String(est.dash).split(/\s+/).map(parseFloat);
-      var largo = (d2[0] || 150) * kg, hueco = (d2[1] || 60) * kg;
-      paso = largo + hueco; prim = largo + hueco / 2;
+    } else {                              // letras: en el centro de cada hueco
+      var pg = patronGlifo(a, est);
+      if (!pg || !pg.n) return '';
+      paso = pg.paso; prim = pg.prim; nMax = pg.n;
     }
     if (!(paso > 1)) return '';
-    var out = '';
-    for (var d = prim; d <= tr.tot - 1; d += paso) {
+    var out = '', cnt = 0;
+    for (var d = prim; d <= tr.tot - 1 && cnt < nMax; d += paso, cnt++) {
       var P = puntoEn(tr, d);
       if (!P) break;
       if (g === 'x' || g === 'o' || g === 'silt') {
@@ -3234,6 +3264,7 @@
     rect: 'RECTÁNGULO: clic en una esquina y clic en la opuesta · SHIFT = cuadrado · el patrón (tile, madera…) se elige en Propiedades',
     ellipse: 'ELIPSE: clic y clic en las esquinas del cuadro · SHIFT = círculo · el patrón se elige en Propiedades',
     pline: 'POLILÍNEA: clic en cada punto · doble clic o Enter para terminar · SHIFT = tramos rectos',
+    line: 'LÍNEA: clic en el inicio y clic en el final · SHIFT = recta a 0/45/90 · el tipo de línea y la punta se eligen en el ▾ o en Propiedades',
     cloud: 'NUBE DE REVISIÓN: clic en una esquina y clic en la opuesta · combínala con Callout para la nota',
     wire: 'CABLEADO / TUBERÍA: elige el material arriba en Propiedades (EMT, PVC, underground, recta o en L) y luego clic en el primer equipo y clic en el segundo',
     leader: 'NOTA: clic donde apunta la flecha · clic donde va el texto · escribe la nota (ej: GFI, Fridge Outlet)',
@@ -3295,6 +3326,9 @@
       return;
     }
     if (ev.button === 2) return;
+    // cinturon ademas de los tirantes del CSS: un clic en el lienzo jamas
+    // debe arrancar una seleccion de texto del navegador
+    if (ev.pointerType === 'mouse' && ev.cancelable) ev.preventDefault();
     var p = screenToWorld(ev.clientX, ev.clientY);
     // doble TOQUE en pantalla táctil = doble clic (editar medida/texto)
     if (ev.pointerType === 'touch') {
@@ -3433,6 +3467,7 @@
       case 'rect': case 'ellipse': return shapeDown(p, tool, ev);
       case 'cloud': return shapeDown(p, 'cloud', ev);
       case 'pline': return areaDown(p);
+      case 'line': return twoPointDown(p, 'line');
       case 'door': return openingDown(p, curDoorType);
       case 'window': return openingDown(p, curWinType);
       case 'measure':
@@ -3533,6 +3568,17 @@
         G.prev.innerHTML = '<g class="preview">' + wireMarkup({ id: 'prev', x1: drawing.a[0], y1: drawing.a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1 }) + '</g>';
       } else if (drawing.kind === 'leader') {
         G.prev.innerHTML = '<g class="preview">' + leaderMarkup({ id: 'prev', tx: drawing.a[0], ty: drawing.a[1], x: p[0], y: p[1], text: 'nota…' }) + '</g>';
+      } else if (drawing.kind === 'line') {
+        // la misma pieza que va a quedar, con su trazo y su punta
+        var lnP = { id: 'prev', open: true, pts: [[drawing.a[0], drawing.a[1]], [p[0], p[1]]], lw: 0.9 };
+        if (curLineStyle !== 'solid') lnP.lineStyle = curLineStyle;
+        if (curLineCap && curLineCap !== 'none') lnP.capE = curLineCap;
+        var estP = LINE_STYLES[lnP.lineStyle] || LINE_STYLES.solid, dP = dashDe(lnP, estP);
+        G.prev.innerHTML = '<g class="preview"><path d="' + areaPath(plineRecortada(lnP)) + '" fill="none" stroke="#14161a" stroke-width="' +
+          (lnP.lw || estP.lw || 0.9) + '"' + (dP ? ' stroke-dasharray="' + dP + '"' : '') + '/>' +
+          (estP.glifo ? glifosLinea(lnP, estP, '#14161a', lnP.lw || estP.lw || 0.9) : '') + plineCaps(lnP) +
+          '<text x="' + p[0] + '" y="' + (p[1] - 6) + '" font-size="7" fill="#1c5fa8" text-anchor="middle">' +
+          fmtFtIn(Math.hypot(p[0] - drawing.a[0], p[1] - drawing.a[1])) + '</text></g>';
       } else {
         G.prev.innerHTML = '<g class="preview">' + dimMarkup(drawing.a[0], drawing.a[1], p[0], p[1], 14, drawing.kind === 'dim' ? 'dim' : 'meas') + '</g>';
       }
@@ -4214,6 +4260,20 @@
         sel = { kind: 'leader', id: ld.id };
         refresh();
       });
+    } else if (kind === 'line') {
+      /* LÍNEA RECTA (Edgar, 31/08: "no tengo creación de líneas regulares,
+         una línea recta que no sea un polyline, como en Bluebeam"). Por
+         dentro ES una polilínea de dos puntos — así hereda todo lo que ya
+         tiene la polilínea: tipo de línea, color, grosor, puntas, las
+         líneas de site plan. Lo que cambia es la MANO: dos clics y listo,
+         sin doble clic ni Enter para terminar. */
+      pushUndo();
+      var ln = { id: uid(), open: true, pts: [[a[0], a[1]], [p[0], p[1]]], pattern: 'none', lw: 0.9 };
+      if (curLineStyle !== 'solid') ln.lineStyle = curLineStyle;
+      if (curLineCap && curLineCap !== 'none') ln.capE = curLineCap;
+      state.areas.push(ln);
+      sel = { kind: 'area', id: ln.id };
+      refresh();
     } else if (kind === 'dim') {
       pushUndo();
       state.dims.push({ id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], off: 14 });
@@ -5558,11 +5618,19 @@
     }
     // superficies en pies cuadrados
     var areaSum = {};
-    state.areas.forEach(function (a) { areaSum[a.pattern] = (areaSum[a.pattern] || 0) + polyArea(a.pts); });
+    // una POLILINEA abierta no es una superficie: no tiene area que sumar.
+    // (Y un patron desconocido — proyecto viejo, linea sin patron — no puede
+    // tumbar el conteo entero: se ensena por su clave.)
+    state.areas.forEach(function (a) {
+      if (a.open) return;
+      var pk = a.pattern || 'none';
+      areaSum[pk] = (areaSum[pk] || 0) + polyArea(a.pts);
+    });
     if (Object.keys(areaSum).length) {
       rows += '<tr class="cat"><td colspan="2">Surfaces / Roofs</td></tr>';
       Object.keys(areaSum).forEach(function (k) {
-        rows += '<tr><td>' + AREA_PATTERNS[k].name + '</td><td class="n">' + (areaSum[k] / 144).toFixed(1) + ' sq ft</td></tr>';
+        var nomP = AREA_PATTERNS[k] ? AREA_PATTERNS[k].name : k;
+        rows += '<tr><td>' + esc(nomP) + '</td><td class="n">' + (areaSum[k] / 144).toFixed(1) + ' sq ft</td></tr>';
       });
     }
     // cableado: agrupado por etiqueta (o por estilo si no tiene)
@@ -10771,7 +10839,13 @@
       ['window', 'slider'].forEach(function (k) {
         html += '<div class="tmItem' + (k === curWinType ? ' cur' : '') + '" data-k="' + k + '"><span>' + esc(OPEN_NAMES[k]) + ' (' + fmtFtIn(OPEN_DEFAULT[k]) + ')</span></div>';
       });
-    } else if (kind === 'pline') {
+    } else if (kind === 'pline' || kind === 'line') {
+      if (kind === 'line') {
+        html += '<div class="tmHead">Punta al final</div>';
+        [['none', '— Sin punta (línea)'], ['arrow', '➤ Flecha llena'], ['arrowSlim', '➤ Flecha fina'], ['arrowOpen', '↗ Flecha abierta'], ['dot', '● Punto'], ['circle', '○ Círculo'], ['diamond', '◆ Rombo']].forEach(function (c) {
+          html += '<div class="tmItem' + (c[0] === curLineCap ? ' cur' : '') + '" data-k="cap:' + c[0] + '"><span>' + c[1] + '</span></div>';
+        });
+      }
       // el menu de la Polilinea tambien separado: planta arriba, site abajo
       html += '<div class="tmHead">Tipo de línea</div>';
       Object.keys(LINE_STYLES).forEach(function (k6) {
@@ -10852,10 +10926,16 @@
           curWinType = k;
           setTool('window');
           setHint(OPEN_NAMES[k] + ' — haz clic sobre una pared para colocarla');
-        } else if (kind === 'pline') {
-          curLineStyle = k;
-          setTool('pline');
-          setHint('Línea: ' + LINE_STYLES[k].name + ' — marca los puntos (doble clic o Enter termina)');
+        } else if (kind === 'pline' || kind === 'line') {
+          if (k.indexOf('cap:') === 0) {
+            curLineCap = k.slice(4);
+            setTool('line');
+            setHint('Línea con punta ' + (curLineCap === 'none' ? 'ninguna' : curLineCap) + ' — clic en el inicio y clic en el final');
+          } else {
+            curLineStyle = k;
+            setTool(kind);
+            setHint('Línea: ' + LINE_STYLES[k].name + (kind === 'line' ? ' — clic en el inicio y clic en el final' : ' — marca los puntos (doble clic o Enter termina)'));
+          }
         } else if (kind === 'measure') {
           if (k === 'length') { setTool('measure'); }
           else if (k === 'marea') {
