@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- CSP (auditoría seguridad 03/09): GitHub Pages no permite cabeceras; esta meta corta la exfiltración si algo llegara a ejecutar script. pdf.js necesita worker-src blob: e img-src data:/blob:. El cerebro debe vivir en *.workers.dev (o agregar aquí su dominio). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://*.workers.dev; media-src 'self' blob:; base-uri 'none'; object-src 'none'; form-action 'none'">
 <title>MXP Planos — Diseño Eléctrico y Arquitectónico</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231e2530'/%3E%3Ctext x='16' y='22' font-size='14' font-family='Arial' font-weight='bold' fill='%23f5b82e' text-anchor='middle'%3EMX%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
@@ -64,6 +66,9 @@
       <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
       <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
       <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
+      <button class="tool" data-tool="pen" title="Lápiz a mano alzada (P) — Apple Pencil o dedo">✒️<label>Pen</label></button>
+      <button class="tool" data-tool="hi" title="Resaltador (H) — resalta sin tapar">🖍<label>Highlight</label></button>
+      <button class="tool" data-tool="erase" title="Borrador de tinta: pasa por encima de un trazo">🧽<label>Eraser</label></button>
       <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
     </div>
 
@@ -233,6 +238,7 @@
           </div>
           <input id="pjSheetTitle" placeholder="Título de hoja (POWER RISER DIAGRAM)">
           <input id="pjDrawn" placeholder="Dibujado por" value="">
+          <button id="btnPurgar" style="margin-top:8px;padding:5px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px;width:100%" title="Limpia el autosave, los PDF importados, la sesión del estimador y el token del cerebro de ESTE aparato (iPad compartido o prestado)">🧹 Borrar todo lo guardado en este aparato</button>
           <div class="row"><label>Precision</label>
             <select id="pjPrec" style="flex:1">
               <option value="8">1/8"</option>
@@ -281,6 +287,7 @@
       <select id="marcasTipo">
         <option value="">Todo</option>
         <option value="wall">Paredes</option>
+        <option value="ink">Tinta (lápiz y resaltador)</option>
         <option value="opening">Puertas y ventanas</option>
         <option value="symbol">Símbolos</option>
         <option value="text">Textos</option>
@@ -319,6 +326,7 @@
       <label>Main <input id="psMain" style="width:90px"></label>
       <label>Montaje <input id="psMount" style="width:140px"></label>
       <label>Espacios <input id="psSpaces" type="number" min="2" max="84" step="2" style="width:56px"></label>
+      <button id="psFromPlan" class="small" title="Lee el atributo Circuito de cada símbolo del plano (A-12, 14…) y escribe en cada circuito cuántos receptáculos y luminarias cuelgan de él, con su VA (180 VA por receptáculo, 100 VA por luminaria)">🔌 Traer del plano</button>
       <label>AIC <input id="psAic" style="width:110px"></label>
     </div>
     <div class="psGrid"><table id="psTable"></table></div>

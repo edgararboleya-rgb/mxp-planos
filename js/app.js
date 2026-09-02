@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.M';
+  var APP_VERSION = 'v29.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -60,7 +60,7 @@
       t = String(t).trim();
       if (!t) return 0;
       var fm = t.match(/^(?:(\d+(?:\.\d+)?)[\s-]+)?(\d+)\s*\/\s*(\d+)$/);
-      if (fm) return (fm[1] ? parseFloat(fm[1]) : 0) + parseInt(fm[2], 10) / parseInt(fm[3], 10);
+      if (fm) { var den = parseInt(fm[3], 10); if (!den) return null; var fr = (fm[1] ? parseFloat(fm[1]) : 0) + parseInt(fm[2], 10) / den; return isFinite(fr) ? fr : null; }
       if (!/^\d+(?:\.\d+)?$/.test(t)) return null;
       return parseFloat(t);
     }
@@ -81,9 +81,13 @@
   function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
   /* --------- diálogos propios (el visor de artifacts bloquea prompt/confirm/alert) --------- */
-  var askCb = null;
+  var askCb = null, askCola = [];
   function uiDialog(title, opts, cb) {
     opts = opts || {};
+    // (auditoría robustez 03/09) dos diálogos seguidos se pisaban: el segundo
+    // borraba el primero y su callback no corría nunca (el recibo de la
+    // importación quedaba tapado por los tips NEC). Ahora se encolan.
+    if (!document.getElementById('askModal').hidden) { askCola.push([title, opts, cb]); return; }
     askCb = cb || function () { };
     document.getElementById('askTitle').textContent = title;
     var inp = document.getElementById('askInput');
@@ -104,6 +108,7 @@
     document.getElementById('askModal').hidden = true;
     var cb = askCb; askCb = null;
     if (cb) cb(result);
+    if (askCola.length && document.getElementById('askModal').hidden) { var sig = askCola.shift(); uiDialog(sig[0], sig[1], sig[2]); }
   }
   function uiPrompt(title, def, cb) {
     uiDialog(title, { input: true, def: def }, function (ok) {
@@ -224,6 +229,7 @@
     huecos: [],    // {x,y} — donde Edgar BORRÓ pared a propósito: la soldadura no rellena ahí
     wires: [],     // {id,x1,y1,x2,y2,style,side,bulge}
     leaders: [],   // {id,tx,ty,x,y,text,size}
+    inks: [],      // {id,pts:[[x,y]…],modo:'pen'|'hi',color,lw,op} — tinta del Apple Pencil (fase 5.4)
     bg: null,      // {url,x,y,w,h,opacity}
     bg2: null,     // overlay de comparación (plano rojo encima del azul)
     panels: [],    // panel schedules E-2
@@ -289,6 +295,7 @@
       wires: state.wires, leaders: state.leaders, panels: state.panels,
       guia: state.guia,
       huecos: state.huecos,
+      inks: state.inks,
       bgMeta: state.bg ? { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h, opacity: state.bg.opacity } : null,
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
@@ -310,16 +317,28 @@
   }
   // guardado automático en el navegador: nada se pierde si se cierra la ventana
   var autosaveTimer = null;
-  function scheduleAutosave() { clearTimeout(autosaveTimer); autosaveTimer = setTimeout(doAutosave, 1500); }
+  var restaurando = false;        // mientras se lee el autosave al arrancar, NO se guarda encima
+  var autosaveAvisado = false;
+  function scheduleAutosave() { if (restaurando) return; clearTimeout(autosaveTimer); autosaveTimer = setTimeout(doAutosave, 1500); }
   function doAutosave() {
+    if (restaurando) return;
     try {
       syncSheet();
       var payload = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
       // IndexedDB primero: localStorage se queda corto (~5MB) con varios planos
       // de fondo y fallaba en silencio — se perdían las medidas al salir
-      idbSet('autosave', payload);
-      try { localStorage.setItem('mxp_autosave', payload); }
-      catch (e) { try { localStorage.removeItem('mxp_autosave'); } catch (e2) {} }
+      var lsOk = true;
+      if (payload.length < 4000000) {
+        try { localStorage.setItem('mxp_autosave', payload); }
+        catch (e) { lsOk = false; try { localStorage.removeItem('mxp_autosave'); } catch (e2) {} }
+      } else lsOk = false;   // > 4 MB: ni lo intenta (lanzaba y se tragaba el error en cada autosave)
+      idbSet('autosave', payload, function (ok) {
+        // (auditoría robustez 03/09) si NI IndexedDB NI localStorage guardan
+        // (Safari privado, almacenamiento restringido) el usuario creía que
+        // todo se guardaba solo y perdía el plano al recargar
+        if (!ok && !lsOk && !autosaveAvisado) { autosaveAvisado = true; uiAlert('⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa 💾 Guardar para bajar el archivo antes de cerrar.'); }
+        if (ok || lsOk) autosaveAvisado = false;
+      });
     } catch (e) {}
   }
   function idbKV(mode, cb) {
@@ -337,7 +356,15 @@
       rq.onerror = function () { cb(null); };
     } catch (e) { cb(null); }
   }
-  function idbSet(k, v) { idbKV('readwrite', function (st) { if (st) try { st.put(v, k); } catch (e) {} }); }
+  function idbSet(k, v, done) {
+    var fin = function (ok) { if (done) { var d = done; done = null; d(ok); } };
+    idbKV('readwrite', function (st) {
+      if (!st) return fin(false);
+      try { var rq = st.put(v, k); rq.onsuccess = function () { fin(true); }; rq.onerror = function () { fin(false); }; }
+      catch (e) { fin(false); }
+    });
+    setTimeout(function () { fin(false); }, 8000);
+  }
   /* PURGA DE PDF CRUDOS (auditoria 31/08): cada PDF importado se guarda entero
      en IndexedDB (pdfbin_*) para el zoom nitido, y nunca se borraba — el
      almacenamiento del navegador crecia con cada plano que Edgar probaba. Se
@@ -380,13 +407,14 @@
       } catch (e) { fin(null); }
     });
     // un PDF de 30MB en un iPad puede tardar varios segundos la primera vez
-    setTimeout(function () { fin(null); }, 12000);
+    setTimeout(function () { fin(null); }, 6000);
   }
   function applySnap(snap) {
     var o = JSON.parse(snap);
     state.walls = o.walls; state.openings = o.openings; state.symbols = o.symbols;
     state.texts = o.texts; state.dims = o.dims; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
+    state.inks = o.inks || [];
     state.panels = o.panels || [];
     state.guia = o.guia || [];
     state.huecos = o.huecos || [];
@@ -410,10 +438,18 @@
     var len = Math.hypot(dx, dy) || 1e-6;
     return { ux: dx / len, uy: dy / len, nx: -dy / len, ny: dx / len, len: len };
   }
+  // índice aberturas→pared: se arma una vez por pasada de render (antes cada
+  // pared filtraba TODAS las aberturas: 1000 paredes × 500 aberturas)
+  var opsIdx = null;
   function wallOpenings(w) {
-    return state.openings.filter(function (o) { return o.wallId === w.id; })
-      .sort(function (a, b) { return a.pos - b.pos; });
+    if (!opsIdx || opsIdx.arr !== state.openings || opsIdx.n !== state.openings.length) {
+      opsIdx = { arr: state.openings, n: state.openings.length, m: {} };
+      state.openings.forEach(function (o) { (opsIdx.m[o.wallId] = opsIdx.m[o.wallId] || []).push(o); });
+      Object.keys(opsIdx.m).forEach(function (k) { opsIdx.m[k].sort(function (a, b) { return a.pos - b.pos; }); });
+    }
+    return opsIdx.m[w.id] || [];
   }
+  function invalidaOps() { opsIdx = null; }
   function ptAlong(w, g, d) { return [w.x1 + g.ux * d, w.y1 + g.uy * d]; }
   function polyArea(pts) {
     var s = 0;
@@ -438,8 +474,17 @@
   }
 
   /* ---------------- conversión de coordenadas ---------------- */
+  /* RENDIMIENTO (auditoría 03/09): getBoundingClientRect en cada pointermove
+     obligaba al navegador a hacer el layout de todo lo que el innerHTML
+     anterior dejó sucio (58 % del coste del arrastre con 2000 símbolos). El
+     rect del lienzo se mide una vez por gesto y al cambiar la ventana. */
+  var svgRect = null;
+  function svgBox() { if (!svgRect) svgRect = svg.getBoundingClientRect(); return svgRect; }
+  window.addEventListener('resize', function () { svgRect = null; });
+  window.addEventListener('orientationchange', function () { svgRect = null; });
+  window.addEventListener('scroll', function () { svgRect = null; }, true);
   function screenToWorld(sx, sy) {
-    var r = svg.getBoundingClientRect();
+    var r = svgBox();
     return [(sx - r.left - view.tx) / view.z, (sy - r.top - view.ty) / view.z];
   }
   // % de zoom al estilo Bluebeam: 100% = el PAPEL a tamaño real en pantalla
@@ -1408,12 +1453,21 @@
       // de furring, que se interrumpe aunque la rama sea de otro material
       cuts[w.id] = { plus: [], minus: [], dryPlus: [], dryMinus: [] };
     });
+    // hash espacial por celda de TOL: buscar el nodo de una punta es O(1) en
+    // vez de recorrer todos (auditoría 03/09: 51 % del renderWalls de 1000
+    // paredes era este bucle)
+    var celdas = {};
     function nodeFor(x, y) {
-      for (var i = 0; i < nodes.length; i++) {
-        if (Math.hypot(nodes[i].x - x, nodes[i].y - y) < TOL) return nodes[i];
+      var cx = Math.round(x / TOL), cy = Math.round(y / TOL);
+      for (var ix = -1; ix <= 1; ix++) for (var iy = -1; iy <= 1; iy++) {
+        var lista = celdas[(cx + ix) + ',' + (cy + iy)];
+        if (!lista) continue;
+        for (var i = 0; i < lista.length; i++) if (Math.hypot(lista[i].x - x, lista[i].y - y) < TOL) return lista[i];
       }
       var n = { x: x, y: y, ends: [] };
-      nodes.push(n); return n;
+      nodes.push(n);
+      var kc = cx + ',' + cy; (celdas[kc] = celdas[kc] || []).push(n);
+      return n;
     }
     state.walls.forEach(function (w) {
       nodeFor(w.x1, w.y1).ends.push({ w: w, atStart: true });
@@ -1746,6 +1800,7 @@
   }
 
   function renderWalls() {
+    invalidaOps();   // las aberturas pudieron cambiar de pared desde el último render
     var jc = computeJoins();
     var out = '';
     // RAYADO DE MAMPOSTERÍA QUE SIGUE A LA PARED (Edgar, 08/30: "el dibujo
@@ -2381,7 +2436,7 @@
     if ((!a.capS || a.capS === 'none') && (!a.capE || a.capE === 'none')) return '';
     var tg = plineTang(a);
     if (!tg) return '';
-    var n = a.pts.length, lw = a.lw || 0.9, col = a.color || '#14161a';
+    var n = a.pts.length, lw = numSeguro(a.lw, 0) || 0.9, col = colorSeguro(a.color);
     return capMarkup(a.pts[0], tg.s, a.capS, lw, col) +
       capMarkup(a.pts[n - 1], tg.e, a.capE, lw, col);
   }
@@ -2552,7 +2607,7 @@
       var est = LINE_STYLES[a.lineStyle] || (pdef && pdef.dash && !a.open ? LINE_STYLES[pdef.dash] : null) || LINE_STYLES.solid;
       var dEst = dashDe(a, est);
       var dash = dEst ? ' stroke-dasharray="' + dEst + '"' : '';
-      var col = a.color || '#14161a', lw = a.lw || est.lw || 0.9;
+      var col = colorSeguro(a.color), lw = numSeguro(a.lw, 0) || est.lw || 0.9;
       // el borde de la piscina va DEBAJO: el agua se dibuja dentro de el
       var cop = copingDe(a);
       if (cop > 0) {
@@ -2686,7 +2741,7 @@
     var k = symK(SYMBOLS[s.key]);
     var sx = (s.scale || 1) * (s.sx || 1) * k;
     var sy = (s.scale || 1) * (s.sy || 1) * k;
-    return 'translate(' + s.x + ' ' + s.y + ') rotate(' + (s.rot || 0) + ') scale(' + sx + ' ' + sy + ')';
+    return 'translate(' + numSeguro(s.x, 0) + ' ' + numSeguro(s.y, 0) + ') rotate(' + numSeguro(s.rot, 0) + ') scale(' + numSeguro(sx, 1) + ' ' + numSeguro(sy, 1) + ')';
   }
   // esquinas del símbolo en coordenadas de mundo (para las asas de estirar)
   function symCorners(e) {
@@ -2960,7 +3015,8 @@
         '<path class="wire-conduit-inner" data-id="' + w.id + '" d="' + d + '"' + da + swI + '/>' + wireCaps(w);
     }
     var dashed = (st === 'dashed' || st === 'straightdashed' || st === 'orthodashed');
-    var sw = w.lw ? ' style="stroke-width:' + w.lw + '"' : '';
+    var lwW = numSeguro(w.lw, 0);
+    var sw = lwW > 0 ? ' style="stroke-width:' + lwW + '"' : '';
     return '<path class="wire ' + (dashed ? 'dashed' : '') + (extraCls || '') +
       '" data-id="' + w.id + '" d="' + d + '"' + sw + '/>' + wireCaps(w);
   }
@@ -2990,6 +3046,32 @@
     return '<text class="wireLbl" data-id="' + w.id + '" x="0" y="0" transform="translate(' + mx.toFixed(2) + ' ' + my.toFixed(2) + ') rotate(' + ang.toFixed(1) + ')"' +
       ' font-size="5.5" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="#14161a" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(w.label) + '</text>';
   }
+  /* ATRIBUTOS DEL SÍMBOLO (fase 5.1, brecha #1 de AutoCAD: bloques con
+     atributos). Circuito (A-12), altura de montaje (+48") y nota (GFCI, WP,
+     DEDICATED) viajan pegados al símbolo: se mueven y giran con él, salen en
+     la Lista de marcas y se leen al armar el Panel Schedule. Antes eso eran
+     textos sueltos que se desalineaban al mover el receptáculo. El rótulo va
+     FUERA del grupo girado para que siempre se lea derecho, arriba-derecha. */
+  function attrsTexto(s) {
+    var a = s.attrs || {}, out = [];
+    if (a.ckt) out.push(String(a.ckt));
+    if (a.h) out.push('+' + String(a.h).replace(/^\+/, ''));
+    if (a.note) out.push(String(a.note));
+    return out;
+  }
+  function attrsSym(s, def) {
+    var lineas = attrsTexto(s);
+    if (!lineas.length) return '';
+    var k = symK(def) * (s.scale || 1), an = def.w * k * (s.sx || 1), al = def.h * k * (s.sy || 1);
+    var r = Math.max(an, al) / 2;
+    var x = s.x + r * 0.72 + 1.5, y = s.y - r * 0.72 - 1;
+    var fs = 4.6, out = '<g class="symAttrs" data-id="' + s.id + '" style="pointer-events:none">';
+    lineas.forEach(function (t, i) {
+      out += '<text x="' + x.toFixed(2) + '" y="' + (y + i * fs * 1.25).toFixed(2) + '" font-size="' + fs + '"' + (i === 0 ? ' font-weight="bold"' : '') +
+        ' fill="#1c5fa8" stroke="none" font-family="Arial, sans-serif">' + esc(t) + '</text>';
+    });
+    return out + '</g>';
+  }
   function renderSymbols() {
     var elec = '', furn = '';
     state.wires.forEach(function (w) {
@@ -3001,7 +3083,7 @@
       var def = SYMBOLS[s.key]; if (!def) return;
       var sw = def.lw ? ' style="stroke-width:' + def.lw + '"' : '';
       var frag = '<g class="sym" data-id="' + s.id + '" transform="' + symTransform(s) + '"' + sw + rayaSym(s) + opAttr(s) + '>' +
-        fondoSym(s, def) + def.svg + '</g>';
+        fondoSym(s, def) + def.svg + '</g>' + attrsSym(s, def);
       if (def.layer === 'electrical') elec += frag; else furn += frag;
     });
     G.elec.innerHTML = elec;
@@ -3026,12 +3108,25 @@
   // va como STYLE, no como atributo: la hoja de estilos fija fill y
   // font-family para .lbl, y el CSS le gana siempre a un atributo suelto —
   // por eso el color y la fuente no se veian aunque estuvieran puestos
+  /* SEGURIDAD (auditoría 03/09, GRAVE): esc() protege el CONTENIDO de texto,
+     pero color, grosor y la URL del fondo se interpolaban crudos dentro de
+     atributos SVG que van por innerHTML. Un .mxp.json que le manden a Edgar
+     podía cerrar el atributo y meter <image onerror=…> (probado: ejecutaba).
+     Un color solo puede ser #hex o un nombre CSS; un número solo un número;
+     el fondo solo data:image/… o blob:. Todo lo demás se descarta. */
+  function colorSeguro(c, def) {
+    var v = String(c == null ? '' : c).trim();
+    if (/^#[0-9a-fA-F]{3,8}$/.test(v) || /^[a-zA-Z]{3,24}$/.test(v) || /^rgba?\([\d\s.,%]+\)$/.test(v)) return v;
+    return def || '#14161a';
+  }
+  function numSeguro(v, def) { var n = Number(v); return isFinite(n) ? n : def; }
+  function urlFondoSegura(u) { return (typeof u === 'string' && /^(data:image\/|blob:)/i.test(u)) ? u : null; }
   function textAttrs(t) {
     var f = TEXT_FONTS[t.font] || null, st = '';
     if (f) st += 'font-family:' + f.ff + ';';
     if (t.bold) st += 'font-weight:700;';
     if (t.italic) st += 'font-style:italic;';
-    if (t.color) st += 'fill:' + t.color + ';';
+    if (t.color) st += 'fill:' + colorSeguro(t.color) + ';';
     return st ? ' style="' + st + '"' : '';
   }
   // los renglones de un <text>: el primero en la Y del objeto, los demas debajo
@@ -3132,8 +3227,84 @@
     return s + '</g>';
   }
 
+  /* ✒️ TINTA (fase 5.4, brecha #2 de Bluebeam: Pen/Highlight con Apple
+     Pencil). Lo que Edgar hace en GoodNotes: rayar a mano alzada el recorrido
+     de un homerun, encerrar lo que hay que mover, resaltar en amarillo los
+     circuitos ya jalados. Los trazos son marcas normales: color, grosor,
+     opacidad, se seleccionan, se mueven con el grupo, se listan, se imprimen y
+     salen en el PDF. El resaltador mezcla (multiply): resalta sin tapar. */
+  var lastInk = { pen: { color: '#c62828', lw: 1.4 }, hi: { color: '#f9a825', lw: 9 } };
+  function inkDown(p, modo, ev) {
+    drag = { mode: 'ink', modo: modo, pts: [[+p[0].toFixed(2), +p[1].toFixed(2)]], snap: snapshot(), moved: false, pres: [] };
+    if (ev && ev.pressure) drag.pres.push(ev.pressure);
+  }
+  function inkMove(p, ev) {
+    var d = drag, last = d.pts[d.pts.length - 1];
+    if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 1.2 / view.z) return;   // temblor: no suma puntos
+    d.pts.push([+p[0].toFixed(2), +p[1].toFixed(2)]);
+    if (ev && ev.pressure) d.pres.push(ev.pressure);
+    d.moved = true;
+    G.prev.innerHTML = '<g class="preview">' + inkMarkup({ id: 'prev', pts: d.pts, modo: d.modo, color: lastInk[d.modo].color, lw: lastInk[d.modo].lw }) + '</g>';
+  }
+  function inkEnd() {
+    var d = drag; G.prev.innerHTML = '';
+    if (!d.moved || d.pts.length < 2) return;
+    var pts = simplificaTrazo(d.pts, 0.6 / view.z);
+    if (pts.length < 2) return;
+    pushUndo(d.snap);
+    var e = { id: uid(), pts: pts, modo: d.modo, color: lastInk[d.modo].color, lw: lastInk[d.modo].lw };
+    // presión media del Pencil: el trazo sale más gordo si se apretó (0.5 = normal)
+    if (d.pres.length) { var pm = d.pres.reduce(function (a, b) { return a + b; }, 0) / d.pres.length; if (pm > 0.05 && Math.abs(pm - 0.5) > 0.08) e.k = +(0.6 + pm * 0.8).toFixed(2); }
+    state.inks.push(e);
+    renderAnnot(); refreshCounts();
+    if (typeof renderMarcas === 'function') renderMarcas();
+  }
+  // Douglas-Peucker: los ~300 puntos de un trazo bajan a 20-40 sin que cambie
+  // la forma; el archivo no engorda y el hit-test vuela
+  function simplificaTrazo(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    var keep = new Array(pts.length); keep[0] = keep[pts.length - 1] = true;
+    var stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      var seg = stack.pop(), a = seg[0], b = seg[1], mx = 0, mi = -1;
+      for (var i = a + 1; i < b; i++) {
+        var dd = distToSeg(pts[i][0], pts[i][1], pts[a][0], pts[a][1], pts[b][0], pts[b][1]).d;
+        if (dd > mx) { mx = dd; mi = i; }
+      }
+      if (mx > tol && mi > 0) { keep[mi] = true; stack.push([a, mi], [mi, b]); }
+    }
+    return pts.filter(function (q, i) { return keep[i]; });
+  }
+  function inkLw(e) { return (e.lw || (e.modo === 'hi' ? 9 : 1.4)) * (e.k || 1); }
+  function inkMarkup(e, extra) {
+    if (!e.pts || e.pts.length < 2) return '';
+    var d = 'M' + e.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L');
+    var hi = e.modo === 'hi';
+    var op = e.op != null ? Math.max(0.03, e.op / 100) : (hi ? 0.45 : 1);
+    return '<path class="ink ' + (hi ? 'ink-hi' : 'ink-pen') + (extra || '') + '" data-id="' + e.id + '" d="' + d + '" fill="none" stroke="' + colorSeguro(e.color, hi ? '#f9a825' : '#c62828') +
+      '" stroke-width="' + inkLw(e).toFixed(2) + '" stroke-linecap="round" stroke-linejoin="round" opacity="' + op + '"' + (hi ? ' style="mix-blend-mode:multiply"' : '') + '/>';
+  }
+  function eraseDown(p) {
+    drag = { mode: 'erase', snap: snapshot(), borrados: 0, moved: true };
+    eraseAt(p);
+  }
+  function eraseAt(p) {
+    var tol = PX(7), antes = state.inks.length;
+    state.inks = state.inks.filter(function (e) { return distTrazo(p, e) > tol + inkLw(e) / 2; });
+    if (state.inks.length !== antes) { drag.borrados += antes - state.inks.length; renderAnnot(); }
+  }
+  function distTrazo(p, e) {
+    var best = 1e9;
+    for (var i = 0; i + 1 < e.pts.length; i++) {
+      var dd = distToSeg(p[0], p[1], e.pts[i][0], e.pts[i][1], e.pts[i + 1][0], e.pts[i + 1][1]).d;
+      if (dd < best) best = dd;
+    }
+    return best;
+  }
   function renderAnnot() {
     var s = '';
+    // la tinta va debajo de las cotas y los textos (resalta sin taparlos)
+    state.inks.forEach(function (k) { s += inkMarkup(k); });
     state.dims.forEach(function (d) {
       var mk = dimMarkup(d.x1, d.y1, d.x2, d.y2, d.off, d.meas ? 'dim meas' : 'dim');
       var oD = opAttr(d);
@@ -3187,16 +3358,37 @@
   function renderBg() {
     var out = '';
     if (state.bg) {
-      out += '<image href="' + state.bg.url + '" x="' + state.bg.x + '" y="' + state.bg.y +
+      out += '<image href="' + esc(urlFondoSegura(state.bg.url) || '') + '" x="' + numSeguro(state.bg.x, 0) + '" y="' + numSeguro(state.bg.y, 0) +
         '" width="' + state.bg.w + '" height="' + state.bg.h + '" opacity="' + (state.bg.opacity == null ? 0.7 : state.bg.opacity) +
         '" preserveAspectRatio="none"/>';
     }
     if (state.bg2) {
-      out += '<image href="' + state.bg2.url + '" x="' + state.bg2.x + '" y="' + state.bg2.y +
+      out += '<image href="' + esc(urlFondoSegura(state.bg2.url) || '') + '" x="' + numSeguro(state.bg2.x, 0) + '" y="' + numSeguro(state.bg2.y, 0) +
         '" width="' + state.bg2.w + '" height="' + state.bg2.h + '" opacity="' + (state.bg2.opacity == null ? 0.7 : state.bg2.opacity) +
         '" preserveAspectRatio="none"/>';
     }
-    G.bg.innerHTML = out;
+    // (auditoría 03/09) re-inyectar el data-URL de 1.5 MB por innerHTML en
+    // cada refresh costaba 31 ms fijos: si la imagen es la misma, solo se
+    // tocan los atributos
+    if (out === renderBg.ultimo) { /* sin cambios */ }
+    else {
+      var imgs = G.bg.querySelectorAll('image');
+      var hrefs = [state.bg && urlFondoSegura(state.bg.url), state.bg2 && urlFondoSegura(state.bg2.url)].filter(Boolean);
+      var mismos = imgs.length === hrefs.length;
+      for (var iB = 0; mismos && iB < imgs.length; iB++) if (imgs[iB].getAttribute('href') !== hrefs[iB]) mismos = false;
+      if (mismos && imgs.length) {
+        var bgs = [state.bg, state.bg2].filter(Boolean);
+        bgs.forEach(function (b, k) {
+          var im = imgs[k];
+          im.setAttribute('x', numSeguro(b.x, 0)); im.setAttribute('y', numSeguro(b.y, 0));
+          im.setAttribute('width', b.w); im.setAttribute('height', b.h);
+          im.setAttribute('opacity', b.opacity == null ? 0.7 : b.opacity);
+        });
+      } else {
+        G.bg.innerHTML = out;
+      }
+      renderBg.ultimo = out;
+    }
     scheduleHires();
   }
 
@@ -3217,7 +3409,7 @@
     idbGet(key, function (bytes) {
       if (!bytes) { delete pdfBinLoading[key]; return; }   // reintenta en el próximo zoom
       try { pdfjsLib.GlobalWorkerOptions.workerSrc = window.MXP_PDF_WORKER_URL || 'js/vendor/pdf.worker.min.js'; } catch (e) {}
-      pdfjsLib.getDocument({ data: bytes.slice(0) }).promise.then(function (doc) {
+      pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise.then(function (doc) {
         // el mismo archivo sirve a todas las hojas que salieron de él
         state.sheets.forEach(function (sh, i) {
           var o;
@@ -3311,6 +3503,7 @@
       return '<rect class="sel" x="' + (txS - 3) + '" y="' + (e.y - sz) + '" width="' + (twS + 6) + '" height="' + (textAlto(e, sz) + 4) + '"' + rotT + '/>';
     }
     if (kind === 'wire') return '<path class="sel" d="' + wirePath(e).d + '"/>';
+    if (kind === 'ink') return '<path class="sel" d="M' + e.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + '" style="stroke-width:' + (inkLw(e) + 4 / view.z) + '"/>';
     if (kind === 'dim') {
       return '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
     }
@@ -3404,6 +3597,8 @@
             s += '<rect class="handle" data-m="' + mi + '" x="' + (MM[0] - mhr) + '" y="' + (MM[1] - mhr) +
               '" width="' + (mhr * 2) + '" height="' + (mhr * 2) + '" transform="rotate(45 ' + MM[0] + ' ' + MM[1] + ')"/>';
           }
+        } else if (sel.kind === 'ink') {
+          s += selShapeMarkup('ink', e);
         } else if (sel.kind === 'wire') {
           s += '<path class="sel" d="' + wirePath(e).d + '"/>';
           // asas de PUNTA (auditoría cables 03/09): antes solo se podía mover el
@@ -3428,8 +3623,7 @@
 
   function findSel() {
     if (!sel) return null;
-    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders }[sel.kind];
-    return pool ? pool.find(function (e) { return e.id === sel.id; }) : null;
+    return entityOf(sel);   // un solo mapa de colecciones (antes había dos y la tinta faltaba en uno)
   }
 
   function renderGuia() {
@@ -3520,6 +3714,11 @@
       }
     }
     if (layerVisible.annotation) {
+      for (i = 0; i < state.inks.length; i++) {
+        e = state.inks[i];
+        var dI = distTrazo(p, e) - inkLw(e) / 2;
+        if (dI <= PX(4)) pon('ink', e.id, Math.max(0, dI), 5);
+      }
       for (i = 0; i < state.texts.length; i++) {
         e = state.texts[i];
         var sz = e.size || 9;
@@ -3712,6 +3911,7 @@
   var drag = null;      // arrastre de selección
 
   svg.addEventListener('pointerdown', function (ev) {
+    svgRect = null;   // se mide una vez por gesto
     svg.setPointerCapture(ev.pointerId);
     // iOS a veces se traga el pointerup durante un pellizco y queda un "dedo
     // fantasma": cada toque siguiente contaría como pellizco y la app parece
@@ -3812,12 +4012,23 @@
     var p = screenToWorld(ev.clientX, ev.clientY);
     lastMouseWorld = p;
     $('#coords').textContent = fmtFtIn(p[0]) + ' , ' + fmtFtIn(p[1]) + '   ·   zoom ' + zoomPct() + '%';
-    if (drag) { onDragMove(p, ev); return; }
+    if (drag) {
+      // los pointermove llegan a 120 Hz en el iPad: se guarda el último y se
+      // dibuja UNA vez por frame (rAF), no una por evento
+      dragPend = { p: p, ev: ev };
+      if (!dragRaf) dragRaf = requestAnimationFrame(function () { dragRaf = 0; var q = dragPend; dragPend = null; if (drag && q) onDragMove(q.p, q.ev); });
+      return;
+    }
     onToolMove(p, ev);
   });
 
+  var dragPend = null, dragRaf = 0;
   function endPointer(ev) {
     flushTap();   // toque rápido (<90 ms): se ejecuta al levantar el dedo
+    // el último movimiento pendiente se aplica antes de soltar
+    if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+    if (drag && dragPend) { var qP = dragPend; dragPend = null; onDragMove(qP.p, qP.ev); }
+    dragPend = null;
     ptrs.delete(ev.pointerId);
     if (ptrs.size < 2) pinch = null;
     if (drag) { onDragEnd(); }
@@ -3894,6 +4105,9 @@
     } else if (drawing && drawing.mode === 'twopoint') {
       p = autoStraight(p, ev);
     }
+    if (drawing && drawing.mode === 'mover') return moverDown(rawP);
+    if (tool === 'pen' || tool === 'hi') return inkDown(rawP, tool, ev);
+    if (tool === 'erase') return eraseDown(rawP);
     switch (tool) {
       case 'select': return selectDown(p, ev);
       case 'wall': return wallDown(p, ev);
@@ -3926,6 +4140,7 @@
   }
 
   function onToolMove(p, ev) {
+    if (drawing && drawing.mode === 'mover') { moverPreview(p); return; }
     var snapMark = '';
     if (SNAP_TOOLS[tool]) {
       var so = applyOsnap(p);
@@ -4040,7 +4255,7 @@
 
   /* --- selección y arrastre --- */
   function entityOf(ref) {
-    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders }[ref.kind];
+    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders, ink: state.inks }[ref.kind];
     return pool ? pool.find(function (e) { return e.id === ref.id; }) : null;
   }
   function inGroup(h) {
@@ -4188,7 +4403,7 @@
         e.x = o.x + dx; e.y = o.y + dy;
       } else if (k === 'leader') {
         e.x = o.x + dx; e.y = o.y + dy; e.tx = o.tx + dx; e.ty = o.ty + dy;
-      } else if (k === 'area') {
+      } else if (k === 'area' || k === 'ink') {
         e.pts = o.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
       }
     });
@@ -4211,6 +4426,8 @@
       state.texts.forEach(function (t) { if (inside(t.x, t.y)) g.push({ kind: 'text', id: t.id }); });
       state.dims.forEach(function (d) { if (inside(d.x1, d.y1) && inside(d.x2, d.y2)) g.push({ kind: 'dim', id: d.id }); });
       state.leaders.forEach(function (l) { if (inside(l.x, l.y)) g.push({ kind: 'leader', id: l.id }); });
+      // la tinta entra al grupo si TODO el trazo cae dentro del marco
+      state.inks.forEach(function (k) { if (k.pts.every(function (q) { return inside(q[0], q[1]); })) g.push({ kind: 'ink', id: k.id }); });
     }
     if (LV.electrical) state.wires.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wire', id: w.id }); });
     if (LV.areas) state.areas.forEach(function (ar) {
@@ -4332,6 +4549,8 @@
       else if (wantOrtho(ev)) setHint('∟ Shift: pared recta · ' + eLen);
       renderWalls(); renderSel(); return;
     }
+    if (drag.mode === 'ink') { inkMove(p, ev); return; }
+    if (drag.mode === 'erase') { eraseAt(p); return; }
     if (drag.mode === 'wireEnd') {
       // la punta se imanta al borde/centro del equipo igual que al dibujar
       var so2 = applyOsnap(p), nq = so2 && so2.p ? so2.p : p;
@@ -4480,9 +4699,20 @@
       if (wantOrtho(ev)) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
       drag.moved = true;
       var e = drag.e, o = drag.orig;
-      if (drag.kind === 'symbol' || drag.kind === 'text') {
+      if (drag.kind === 'symbol') {
         e.x = Math.round(o.x + dx); e.y = Math.round(o.y + dy);
-        renderSymbols(); renderAnnot(); renderSel();
+        // solo se mueve SU <g> (antes se reconstruía la capa entera de
+        // símbolos en cada evento: 42 ms/move con 2000 símbolos)
+        var gS = G.elec.querySelector('g.sym[data-id="' + e.id + '"]') || G.furn.querySelector('g.sym[data-id="' + e.id + '"]');
+        if (gS) {
+          gS.setAttribute('transform', symTransform(e));
+          var gA = G.elec.querySelector('.symAttrs[data-id="' + e.id + '"]') || G.furn.querySelector('.symAttrs[data-id="' + e.id + '"]');
+          if (gA) gA.setAttribute('transform', 'translate(' + (e.x - o.x) + ' ' + (e.y - o.y) + ')');
+        } else renderSymbols();
+        renderSel();
+      } else if (drag.kind === 'text') {
+        e.x = Math.round(o.x + dx); e.y = Math.round(o.y + dy);
+        renderAnnot(); renderSel();
       } else if (drag.kind === 'wall') {
         e.x1 = Math.round(o.x1 + dx); e.y1 = Math.round(o.y1 + dy);
         e.x2 = Math.round(o.x2 + dx); e.y2 = Math.round(o.y2 + dy);
@@ -4501,10 +4731,11 @@
         e.x1 = o.x1 + mdx; e.y1 = o.y1 + mdy;
         e.x2 = o.x2 + mdx; e.y2 = o.y2 + mdy;
         renderAnnot(); renderSel();
-      } else if (drag.kind === 'area') {
+      } else if (drag.kind === 'area' || drag.kind === 'ink') {
         var rx = Math.round(dx), ry = Math.round(dy);
         e.pts = o.pts.map(function (q) { return [q[0] + rx, q[1] + ry]; });
-        renderAreas(); renderSel();
+        if (drag.kind === 'ink') renderAnnot(); else renderAreas();
+        renderSel();
       } else if (drag.kind === 'wire') {
         e.x1 = o.x1 + dx; e.y1 = o.y1 + dy; e.x2 = o.x2 + dx; e.y2 = o.y2 + dy;
         renderSymbols(); renderSel();
@@ -4516,6 +4747,8 @@
   }
 
   function onDragEnd() {
+    if (drag.mode === 'ink') { inkEnd(); drag = null; return; }
+    if (drag.mode === 'erase') { if (drag.borrados) { pushUndo(drag.snap); refresh(); setHint('🧽 ' + drag.borrados + ' trazo(s) borrados · Ctrl+Z los devuelve'); } drag = null; return; }
     if (drag.mode === 'marquee') {
       G.prev.innerHTML = '';
       if (drag.cur && Math.hypot(drag.cur[0] - drag.start[0], drag.cur[1] - drag.start[1]) > marcoMin()) {
@@ -4567,6 +4800,7 @@
       }
       if (cambioE) { pushUndo(drag.snap); drag = null; refresh(); return; }
     }
+    if (drag.mode === 'move' && drag.kind === 'symbol' && drag.moved) renderSymbols();   // la capa completa, una vez, al soltar
     if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'wireEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
@@ -4965,7 +5199,8 @@
       });
     });
   }
-  $('#symSearch').addEventListener('input', buildPalette);
+  var palTimer = 0;   // (auditoría 03/09) 231 botones SVG por tecla: se espera a que pare de teclear
+  $('#symSearch').addEventListener('input', function () { clearTimeout(palTimer); palTimer = setTimeout(buildPalette, 120); });
   $$('#catTabs .cat').forEach(function (b) {
     b.addEventListener('click', function () {
       activeCat = b.dataset.cat;
@@ -5368,6 +5603,8 @@
       '<button id="prEspV" style="flex:1 1 45%" title="Espejo izquierda ↔ derecha (eje vertical por el centro de la selección)">⇋ Espejo</button>' +
       '<button id="prEspH" style="flex:1 1 45%" title="Espejo arriba ↕ abajo (eje horizontal)">⇅ Espejo</button>' +
       '<button id="prRepetir" style="flex:1 1 45%" title="Repetir la selección N veces a una distancia (array de AutoCAD): 4 @ 6\'">⧉ Repetir…</button>' +
+      '<button id="prMoverDesde" style="flex:1 1 45%" title="MOVE de AutoCAD: clic en un punto base (con imán: la esquina del panel) y clic en el destino (la esquina del nicho), o teclea 6\'<0">⤢ Mover desde…</button>' +
+      '<button id="prCopiarDesde" style="flex:1 1 45%" title="COPY de AutoCAD: punto base y destino; cada clic deja otra copia hasta Esc">⧉ Copiar desde…</button>' +
       (esArea ? '<button id="prOffset" style="flex:1 1 45%" title="Contorno o línea paralela a una distancia (offset de AutoCAD): el setback a 25\' del lindero">↔ Offset…</button>' : '') +
       '</div>';
   }
@@ -5377,6 +5614,61 @@
     if (bH) bH.addEventListener('click', function () { espejoRefs(refsDeSel(), false); });
     if (bR) bR.addEventListener('click', pideRepetir);
     if (bO) bO.addEventListener('click', pideOffset);
+    var bM = $('#prMoverDesde'), bC = $('#prCopiarDesde');
+    if (bM) bM.addEventListener('click', function () { empezarMover(refsDeSel(), 'move'); });
+    if (bC) bC.addEventListener('click', function () { empezarMover(refsDeSel(), 'copy'); });
+  }
+
+  /* ⤢ MOVER / ⧉ COPIAR CON PUNTO BASE (fase 5.3, brecha #3 de AutoCAD).
+     Arrastrar con el dedo es impreciso; el par base→destino con imán es lo
+     que hace exacto a un CAD: la esquina del panel a la esquina del nicho, el
+     receptáculo a 12" de la esquina tecleando 12"<0. COPY queda en modo
+     múltiple: cada clic deja otra copia hasta Esc. Un solo Ctrl+Z por paso. */
+  function empezarMover(refs, modo) {
+    if (!refs || !refs.length) { setHint('Selecciona primero lo que quieres ' + (modo === 'copy' ? 'copiar' : 'mover')); return; }
+    if (tool !== 'select') setTool('select');
+    drawing = { mode: 'mover', modo: modo, refs: refs.slice(), base: null, copias: 0 };
+    G.prev.innerHTML = '';
+    setHint((modo === 'copy' ? '⧉ COPIAR' : '⤢ MOVER') + ': clic en el punto BASE (con imán: esquina, centro, punta) · Esc cancela');
+  }
+  function moverDown(p) {
+    var so = applyOsnap(p); if (so && so.sn) p = so.p;
+    var d = drawing;
+    if (!d.base) {
+      d.base = [p[0], p[1]];
+      setHint((d.modo === 'copy' ? '⧉' : '⤢') + ' Base fijada — clic en el DESTINO, o teclea la distancia (6\'<0 = 6 pies a la derecha) · Esc cancela');
+      return;
+    }
+    var dx = +(p[0] - d.base[0]).toFixed(2), dy = +(p[1] - d.base[1]).toFixed(2);
+    if (Math.hypot(dx, dy) < 0.01) { setHint('El destino es el mismo punto base: elige otro'); return; }
+    if (d.modo === 'move') {
+      pushUndo();
+      var items = d.refs.map(function (r) { var e = entityOf(r); return e ? { ref: r, e: e, orig: JSON.parse(JSON.stringify(e)) } : null; }).filter(Boolean);
+      applyGroupDelta(items, dx, dy);
+      drawing = null; G.prev.innerHTML = '';
+      refresh();
+      setHint('⤢ Movido ' + fmtFtIn(Math.hypot(dx, dy)) + ' · Ctrl+Z deshace');
+      return;
+    }
+    // COPIA: se pega con el desplazamiento exacto y se queda esperando otro destino
+    var selAntes = { sel: sel, grupo: selGroup };
+    selGroup = d.refs.length > 1 ? d.refs.slice() : null; sel = d.refs.length === 1 ? d.refs[0] : null;
+    copySel();
+    pasteClip(null, [dx, dy]);
+    d.copias++;
+    // la selección vuelve al ORIGINAL para que la próxima copia salga de ahí
+    sel = selAntes.sel; selGroup = selAntes.grupo; renderSel(); showProps();
+    setHint('⧉ Copia ' + d.copias + ' a ' + fmtFtIn(Math.hypot(dx, dy)) + ' · clic para otra copia desde la misma base · Esc termina');
+  }
+  function moverPreview(p) {
+    var d = drawing; if (!d || !d.base) return;
+    var so = applyOsnap(p); if (so && so.sn) p = so.p;
+    var L = Math.hypot(p[0] - d.base[0], p[1] - d.base[1]);
+    var ang = Math.round(Math.atan2(-(p[1] - d.base[1]), p[0] - d.base[0]) * 180 / Math.PI);
+    var mid = [(p[0] + d.base[0]) / 2, (p[1] + d.base[1]) / 2], fs = 8 / view.z + 2;
+    G.prev.innerHTML = '<g class="preview"><line x1="' + d.base[0] + '" y1="' + d.base[1] + '" x2="' + p[0] + '" y2="' + p[1] + '" stroke="#1c5fa8" stroke-width="' + (1 / view.z) + '" stroke-dasharray="' + (4 / view.z) + ' ' + (3 / view.z) + '"/>' +
+      '<circle cx="' + d.base[0] + '" cy="' + d.base[1] + '" r="' + (4 / view.z) + '" fill="none" stroke="#1c5fa8" stroke-width="' + (1 / view.z) + '"/>' +
+      '<text x="' + mid[0] + '" y="' + (mid[1] - 6 / view.z) + '" font-size="' + fs + '" text-anchor="middle" fill="#1c5fa8" stroke="none" font-family="Arial, sans-serif">' + esc(fmtFtIn(L) + ' ∠' + ang + '°') + '</text></g>';
   }
 
   function rotateGroup(deg) {
@@ -5899,6 +6191,19 @@
       if (c0e) c0e.addEventListener('change', function () { lastWireCapE = c0e.value; });
       return;
     }
+    if (!e && (tool === 'pen' || tool === 'hi' || tool === 'erase')) {
+      body.className = 'pbody';
+      if (tool === 'erase') { body.innerHTML = '<div><b>🧽 BORRADOR DE TINTA</b></div><div class="muted small">Pasa el dedo o el lápiz por encima de un trazo para borrarlo. Solo borra tinta: las paredes, símbolos y textos no se tocan.</div>'; return; }
+      var li = lastInk[tool];
+      body.innerHTML = '<div><b>' + (tool === 'hi' ? '🖍 RESALTADOR' : '✒️ LÁPIZ') + '</b></div>' +
+        '<div class="row"><label>Color</label><div id="prInk0Colores" style="display:flex;gap:4px;flex-wrap:wrap">' +
+        COLOR_PRESETS.map(function (c9) { return '<span class="sw' + (li.color === c9[0] ? ' cur' : '') + '" data-c="' + c9[0] + '" title="' + c9[1] + '" style="background:' + c9[0] + '"></span>'; }).join('') + '</div></div>' +
+        '<div class="row"><label>Grosor</label><input id="prInk0Lw" type="number" step="0.2" min="0.3" max="30" value="' + li.lw + '"></div>' +
+        '<div class="muted small">' + (tool === 'hi' ? 'Resalta sin tapar (mezcla con lo de abajo). ' : 'A mano alzada, con la presión del Apple Pencil. ') + 'Los trazos se seleccionan, se mueven, se listan en 📋 y salen en el PDF. Con el dedo también dibuja; pellizca para zoom.</div>';
+      $$('#prInk0Colores .sw').forEach(function (swI) { swI.addEventListener('click', function () { li.color = swI.dataset.c; showProps(); }); });
+      var l0i = $('#prInk0Lw'); if (l0i) l0i.addEventListener('change', function () { var v = parseFloat(l0i.value); if (isFinite(v)) li.lw = Math.max(0.3, Math.min(30, v)); });
+      return;
+    }
     if (!e) { body.className = 'pbody muted'; body.textContent = 'Nada seleccionado'; return; }
     body.className = 'pbody';
     var html = '';
@@ -5957,6 +6262,12 @@
       var fdAct = (e.bg == null) ? (def2 && def2.layer === 'furniture' && def2.bg !== 'none') : !!e.bg;
       html += '<div class="row"><label style="flex:1">Fondo opaco</label><input id="prSymBg" type="checkbox"' +
         (fdAct ? ' checked' : '') + ' title="Tapa el patrón del mostrador o del piso que queda debajo"></div>';
+      // atributos (fase 5.1): circuito, altura, nota — viajan con el símbolo
+      var at = e.attrs || {};
+      html += '<div class="muted small" style="margin-top:6px"><b>Atributos</b> (salen junto al símbolo y en la Lista de marcas)</div>';
+      html += '<div class="row"><label>Circuito</label><input id="prAttrCkt" placeholder="ej: A-12" value="' + esc(at.ckt || '') + '"></div>';
+      html += '<div class="row"><label>Altura</label><input id="prAttrH" placeholder="ej: 48&quot; AFF" value="' + esc(at.h || '') + '"></div>';
+      html += '<div class="row"><label>Nota</label><input id="prAttrNote" placeholder="ej: GFCI · WP · DEDICATED" value="' + esc(at.note || '') + '"></div>';
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'text') {
@@ -6018,6 +6329,16 @@
       html += filasPuntas(e, 'prWireCap');
       if (esCurvo) html += '<button id="prWireFlip">↕ Cambiar lado del arco</button>';
       html += '<button id="prWireToWall">▬ Convertir en pared</button>';
+      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+    } else if (sel.kind === 'ink') {
+      html += '<div><b>' + (e.modo === 'hi' ? '🖍 Resaltado' : '✒️ Trazo a mano') + '</b> · ' + fmtFtIn(polyPerim(e.pts, true)) + ' · ' + e.pts.length + ' puntos</div>';
+      html += '<div class="row"><label>Color</label><div id="prInkColores" style="display:flex;gap:4px;flex-wrap:wrap">' +
+        COLOR_PRESETS.map(function (c9) {
+          return '<span class="sw' + ((e.color || '') === c9[0] ? ' cur' : '') + '" data-c="' + c9[0] + '" title="' + c9[1] + '" style="background:' + c9[0] + '"></span>';
+        }).join('') + '</div></div>';
+      html += '<div class="row"><label>Grosor</label><input id="prInkLw" type="number" step="0.2" min="0.3" max="30" value="' + (e.lw || (e.modo === 'hi' ? 9 : 1.4)) + '"></div>';
+      html += '<div class="row"><label>Opacidad %</label><input id="prInkOp" type="number" min="5" max="100" value="' + (e.op != null ? e.op : (e.modo === 'hi' ? 45 : 100)) + '"></div>';
+      html += '<div class="row"><button id="prInkModo">' + (e.modo === 'hi' ? '✒️ Pasar a lápiz' : '🖍 Pasar a resaltador') + '</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'leader') {
       html += '<div class="row"><label>Texto</label><input id="prLeadText" value="' + esc(e.text) + '"></div>';
@@ -6225,6 +6546,23 @@
       pushUndo(); et.bg = n.checked ? 1 : 0; refresh();
     });
     on('prRot', 'change', function (n) { pushUndo(); e.rot = parseFloat(n.value) || 0; refresh(); });
+    $$('#prInkColores .sw').forEach(function (swI) {
+      swI.addEventListener('click', function () { pushUndo(); e.color = swI.dataset.c; lastInk[e.modo || 'pen'].color = e.color; refresh(); showProps(); });
+    });
+    on('prInkLw', 'change', function (n) { var v = parseFloat(n.value); if (!isFinite(v)) return; pushUndo(); e.lw = Math.max(0.3, Math.min(30, v)); lastInk[e.modo || 'pen'].lw = e.lw; refresh(); });
+    on('prInkOp', 'change', function (n) { var v = parseFloat(n.value); if (!isFinite(v)) return; pushUndo(); e.op = Math.max(5, Math.min(100, Math.round(v))); refresh(); });
+    on('prInkModo', 'click', function () { pushUndo(); e.modo = e.modo === 'hi' ? 'pen' : 'hi'; delete e.lw; delete e.op; e.color = lastInk[e.modo].color; refresh(); showProps(); });
+    function attrSet(campo, v) {
+      pushUndo();
+      e.attrs = e.attrs || {};
+      v = String(v || '').trim();
+      if (v) e.attrs[campo] = v; else delete e.attrs[campo];
+      if (!Object.keys(e.attrs).length) delete e.attrs;
+      renderSymbols(); renderSel(); renderMarcas && renderMarcas();
+    }
+    on('prAttrCkt', 'change', function (n) { attrSet('ckt', n.value.toUpperCase()); });
+    on('prAttrH', 'change', function (n) { attrSet('h', n.value); });
+    on('prAttrNote', 'change', function (n) { attrSet('note', n.value.toUpperCase()); });
     on('prRot45', 'click', function () { pushUndo(); e.rot = ((e.rot || 0) + 45) % 360; refresh(); });
     on('prScale', 'change', function (n) { pushUndo(); e.scale = Math.max(0.2, parseFloat(n.value) || 1); refresh(); });
     on('prSymW', 'change', function (n) {
@@ -6446,7 +6784,7 @@
       state.walls = state.walls.filter(function (w) { return w.id !== e.id; });
       state.openings = state.openings.filter(function (o) { return o.wallId !== e.id; });
     } else {
-      var pool = { opening: 'openings', symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders' }[sel.kind];
+      var pool = { opening: 'openings', symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks' }[sel.kind];
       state[pool] = state[pool].filter(function (x) { return x.id !== e.id; });
     }
     sel = null;
@@ -6610,7 +6948,7 @@
      Es un panel FLOTANTE, no un modal: se queda abierto mientras recorres el
      plano fila por fila. Se arrastra por la barra y se redimensiona por la
      esquina, igual que el chat. */
-  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo' };
+  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo', ink: 'Tinta' };
   function filasMarcas() {
     var out = [];
     state.walls.forEach(function (w) {
@@ -6623,10 +6961,15 @@
     state.symbols.forEach(function (sy) {
       var d = SYMBOLS[sy.key]; if (!d) return;
       var an = d.w * (sy.scale || 1) * (sy.sx || 1) * symK(d), al = d.h * (sy.scale || 1) * (sy.sy || 1) * symK(d);
-      out.push({ kind: 'symbol', tipo: 'symbol', id: sy.id, nombre: d.name, det: SYMBOL_CATS[d.cat] || d.cat, medida: (d.layer === 'furniture' || d.cat === 'riser' || d.cat === 'site' || d.cat === 'siteplan') ? fmtFtIn(an) + ' × ' + fmtFtIn(al) : '', num: 1 });
+      var atx = attrsTexto(sy);
+      out.push({ kind: 'symbol', tipo: 'symbol', id: sy.id, nombre: d.name, det: (SYMBOL_CATS[d.cat] || d.cat) + (atx.length ? ' · ' + atx.join(' ') : ''), medida: (d.layer === 'furniture' || d.cat === 'riser' || d.cat === 'site' || d.cat === 'siteplan') ? fmtFtIn(an) + ' × ' + fmtFtIn(al) : '', num: 1 });
     });
     state.texts.forEach(function (t) {
       out.push({ kind: 'text', tipo: 'text', id: t.id, nombre: String(t.text || '').replace(/\n/g, ' / '), det: t.style === 'circle' ? 'burbuja' : t.style === 'hex' ? 'hexágono' : '', medida: '', num: 0 });
+    });
+    state.inks.forEach(function (k) {
+      var Lk = polyPerim(k.pts, true);
+      out.push({ kind: 'ink', tipo: 'ink', id: k.id, nombre: k.modo === 'hi' ? 'Resaltado' : 'Trazo a mano', det: (COLOR_PRESETS.filter(function (c) { return c[0] === k.color; })[0] || ['', k.color || ''])[1], medida: fmtFtIn(Lk), num: Lk });
     });
     state.leaders.forEach(function (l) {
       out.push({ kind: 'leader', tipo: 'leader', id: l.id, nombre: l.text || '', det: 'callout', medida: '', num: 0 });
@@ -8993,28 +9336,67 @@
       walls: state.walls, openings: state.openings, symbols: state.symbols,
       texts: state.texts, dims: state.dims, areas: state.areas,
       wires: state.wires, leaders: state.leaders, bg: state.bg, bg2: state.bg2,
-      guia: state.guia, huecos: state.huecos,
+      guia: state.guia, huecos: state.huecos, inks: state.inks,
       view: { tx: view.tx, ty: view.ty, z: view.z }
     });
   }
   function syncSheet() {
     var sh = state.sheets && state.sheets[state.curSheet];
-    if (!sh) return;
+    if (!sh) {
+      // (auditoría robustez 03/09) curSheet fuera de rango descartaba el dibujo:
+      // se crea la hoja en vez de tirar el trabajo
+      if (state.sheets && hayContenido()) { state.sheets.push({ no: state.project.sheetNo || ('H' + (state.sheets.length + 1)), title: state.project.sheetTitle || '', data: null }); state.curSheet = state.sheets.length - 1; sh = state.sheets[state.curSheet]; }
+      else return;
+    }
+    if (sh._corrupto) { if (!hayContenido()) return; delete sh._corrupto; }
     sh.no = state.project.sheetNo || sh.no;
     sh.title = state.project.sheetTitle || sh.title;
     sh.data = sheetData();
   }
+  /* SANEAR lo que entra por archivo: números que sean números, colores que
+     sean colores, fondos que sean imágenes del aparato. Un solo embudo para
+     abrir proyecto, cambiar de hoja y autosave. */
+  function saneaState() {
+    var N = numSeguro;
+    function pts(arr) { return Array.isArray(arr) ? arr.filter(function (q) { return Array.isArray(q) && q.length >= 2; }).map(function (q) { return [N(q[0], 0), N(q[1], 0)]; }) : []; }
+    function col(o) { if (o.color != null) o.color = colorSeguro(o.color); }
+    function nums(o, campos) { campos.forEach(function (k) { if (o[k] != null) { var v = N(o[k], null); if (v == null) delete o[k]; else o[k] = v; } }); }
+    state.walls = (state.walls || []).filter(function (w) { return w && typeof w === 'object'; });
+    state.walls.forEach(function (w) { nums(w, ['x1', 'y1', 'x2', 'y2', 't', 'op']); });
+    (state.openings || []).forEach(function (o) { nums(o, ['pos', 'w', 'swing', 'hinge', 'op']); });
+    (state.symbols || []).forEach(function (o) { nums(o, ['x', 'y', 'rot', 'scale', 'sx', 'sy', 'op']); });
+    (state.texts || []).forEach(function (o) { nums(o, ['x', 'y', 'size', 'rot', 'op']); col(o); if (o.text != null) o.text = String(o.text); });
+    (state.dims || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'off', 'op']); });
+    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK']); col(o); if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
+    (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
+    (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op']); if (o.text != null) o.text = String(o.text); });
+    (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
+    ['bg', 'bg2'].forEach(function (k) {
+      var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
+      if (!urlFondoSegura(b.url)) { state[k] = null; return; }
+      nums(b, ['x', 'y', 'w', 'h', 'opacity']);
+    });
+  }
+  function sinProto(o) {
+    if (o && typeof o === 'object') { ['__proto__', 'constructor', 'prototype'].forEach(function (k) { if (Object.prototype.hasOwnProperty.call(o, k)) delete o[k]; }); }
+    return o;
+  }
   function loadSheetData(json) {
     var o = {};
-    try { o = json ? JSON.parse(json) : {}; } catch (e) {}
+    loadSheetData.fallo = false;
+    try { o = json ? JSON.parse(json) : {}; } catch (e) { loadSheetData.fallo = true; o = {}; }
+    if (!o || typeof o !== 'object') { loadSheetData.fallo = true; o = {}; }
+    sinProto(o); sinProto(o.view);
     state.walls = o.walls || []; state.openings = o.openings || [];
     state.symbols = o.symbols || []; state.texts = o.texts || [];
     state.dims = o.dims || []; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
+    state.inks = o.inks || [];
     state.bg = o.bg || null;
     state.bg2 = o.bg2 || null;
     state.guia = o.guia || []; state.huecos = o.huecos || [];
-    if (o.view) Object.assign(view, o.view);
+    saneaState();
+    if (o.view) { Object.assign(view, o.view); view.z = numSeguro(view.z, 1) || 1; view.tx = numSeguro(view.tx, 0); view.ty = numSeguro(view.ty, 0); }
     sel = null; selGroup = null; measure = null; drawing = null;
     undoStack.length = 0; redoStack.length = 0;
     applyView(); refresh(); updateBgLinesBtn(); updateOvUI();
@@ -9025,6 +9407,12 @@
     state.project.sheetNo = sh.no; state.project.sheetTitle = sh.title;
     syncProjectInputs();
     loadSheetData(sh.data);
+    if (loadSheetData.fallo) {
+      // (auditoría robustez 03/09) antes la hoja salía vacía en silencio y al
+      // volver a cambiar de hoja syncSheet la pisaba: pérdida definitiva
+      if (!sh._corrupto) { sh._corrupto = true; sh.dataRoto = sh.data; }
+      uiAlert('La hoja ' + (sh.no || (i + 1)) + ' tiene datos dañados: se muestra vacía y NO se va a sobreescribir hasta que dibujes algo en ella.\n\nSi quieres rescatarla, 💾 Guardar el proyecto conserva el contenido dañado tal cual.');
+    }
     renderSheetTabs();
     scheduleAutosave();
   }
@@ -9044,6 +9432,8 @@
     var el = $('#sheetTabs');
     if (!el) return;
     var html = '';
+    state.sheets = (state.sheets || []).filter(function (sh) { return sh && typeof sh === 'object'; });
+    if (!state.sheets.length) state.sheets.push({ no: 'E-1', title: '', data: null });
     state.sheets.forEach(function (sh, i) {
       html += '<button class="stab' + (i === state.curSheet ? ' active' : '') + '" data-i="' + i + '" title="Doble clic: renombrar la hoja">' +
         esc(sh.no || ('H' + (i + 1))) +
@@ -9115,6 +9505,9 @@
   /* ---------------- archivo: fondo, abrir, guardar ---------------- */
   // descarga un archivo: usa el sistema del visor de artifacts si existe, si no un <a download>
   function saveFile(filename, data) {
+    // (auditoría seguridad 03/09) el nombre del proyecto se sanea SIEMPRE, no
+    // solo en el .mxp.json: sin / \\ : * ? " < > | ni caracteres de control
+    filename = String(filename || 'archivo').replace(/[\x00-\x1f\/\\:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'archivo';
     function fallback() {
       var a = document.createElement('a');
       var blob = data instanceof Blob ? data : new Blob([data]);
@@ -9146,6 +9539,8 @@
     rd.onload = function () {
       var img = new Image();
       img.onload = function () { insertBackground(rd.result, img.width, img.height); };
+      img.onerror = function () { uiAlert('No se pudo leer esa imagen (formato no soportado o archivo dañado).\n\nPrueba con JPG o PNG, o una captura de pantalla del plano.'); setHint(''); };
+      rd.onerror = function () { uiAlert('No se pudo leer el archivo de la imagen.'); setHint(''); };
       img.src = rd.result;
     };
     rd.readAsDataURL(f);
@@ -9201,6 +9596,7 @@
       function tryOpen(password) {
         var data = rd.result.slice(0);
         var opts = password ? { data: data, password: password } : { data: data };
+        opts.isEvalSupported = false;   // CVE-2024-4367: una fuente maliciosa en un PDF ajeno ejecutaba JS
         pdfjsLib.getDocument(opts).promise.then(function (doc) {
           if (!deliver && !pdfKey && !password) {
             pdfKey = 'pdfbin_' + uid();
@@ -9343,7 +9739,8 @@
     syncSheet(); limpiaMarcas();
     try { purgaPdfBin(); } catch (e) {}
     var data = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
-    saveFile((state.project.name || 'proyecto').replace(/[^\w\-. ]+/g, '') + '.mxp.json', data);
+    var baseN = (state.project.name || '').replace(/[^\w\-. ]+/g, '').trim().slice(0, 80) || 'proyecto';
+    saveFile(baseN + '.mxp.json', data);
     setHint('Proyecto guardado (archivo descargado)');
   });
 
@@ -11184,7 +11581,41 @@
     return totals;
   }
 
+  var COLECCIONES = ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks'];
+  /* VALIDAR ANTES DE TOCAR (auditoría robustez 03/09): un archivo con
+     walls:"hola" o sheets:[null] destruía el proyecto abierto, dejaba la app
+     muerta y el autosave lo perpetuaba tras F5. Devuelve un texto de error o
+     null si el proyecto es usable; además normaliza lo que se pueda salvar. */
+  function validaProyecto(o) {
+    if (!o || typeof o !== 'object' || !o.state || typeof o.state !== 'object') return 'no trae estado';
+    var st = o.state, malos = [];
+    COLECCIONES.forEach(function (k) {
+      if (st[k] == null) return;
+      if (!Array.isArray(st[k])) { malos.push(k); return; }
+      st[k] = st[k].filter(function (e) { return e && typeof e === 'object'; });
+    });
+    if (malos.length) return 'las colecciones ' + malos.join(', ') + ' no son listas';
+    if (st.sheets != null) {
+      if (!Array.isArray(st.sheets)) return 'sheets no es una lista';
+      st.sheets = st.sheets.filter(function (sh) { return sh && typeof sh === 'object'; }).map(function (sh) {
+        if (sh.data != null && typeof sh.data !== 'string') { try { sh.data = JSON.stringify(sh.data); } catch (e) { sh.data = null; sh._corrupto = true; } }
+        return sh;
+      });
+    }
+    if (st.project != null && typeof st.project !== 'object') st.project = {};
+    if (st.bg != null && (typeof st.bg !== 'object' || !st.bg.url)) st.bg = null;
+    if (st.bg2 != null && (typeof st.bg2 !== 'object' || !st.bg2.url)) st.bg2 = null;
+    var cs = st.curSheet;
+    if (!(Number.isInteger(cs) && cs >= 0 && (!st.sheets || cs < st.sheets.length))) st.curSheet = 0;
+    if ([8, 4, 2, 1].indexOf(+st.precision) < 0) st.precision = 4;
+    return null;
+  }
+  function hayContenido() {
+    return COLECCIONES.some(function (k) { return k !== 'panels' && k !== 'huecos' && Array.isArray(state[k]) && state[k].length > 0; }) || !!state.bg;
+  }
   function restoreProject(o) {
+    var errV = validaProyecto(o);
+    if (errV) throw new Error('Proyecto dañado: ' + errV);
     /* ABRIR ES UN DOCUMENTO NUEVO (auditoria 31/08, reproducido): Ctrl+Z
        despues de abrir metia las paredes del proyecto anterior dentro de las
        hojas del nuevo, y el autosave lo guardaba asi. Ademas Object.assign
@@ -11195,7 +11626,7 @@
     undoStack.length = 0; redoStack.length = 0;
     pdfLive = {};
     sel = null; selGroup = null; drawing = null; G.prev.innerHTML = '';
-    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos'].forEach(function (k) {
+    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks'].forEach(function (k) {
       state[k] = Array.isArray(o.state[k]) ? o.state[k] : [];
     });
     state.bg = o.state.bg || null;
@@ -11203,10 +11634,20 @@
     state.sheets = Array.isArray(o.state.sheets) ? o.state.sheets : null;
     state.curSheet = o.state.curSheet || 0;
     state.project = Object.assign({ name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }, o.state.project || {});
-    Object.assign(state, o.state);
+    sinProto(o.state); sinProto(o.view);
+    // solo lo ESCALAR y los ajustes (precision, printScale, eqNameOff,
+    // circDefaults…): las colecciones ya se copiaron validadas arriba y un
+    // Object.assign genérico las volvía a pisar con lo que trajera el archivo
+    Object.keys(o.state).forEach(function (k) {
+      if (COLECCIONES.indexOf(k) >= 0 || k === 'bg' || k === 'bg2' || k === 'sheets' || k === 'project') return;
+      if (Array.isArray(o.state[k])) return;
+      state[k] = o.state[k];
+    });
     state.areas = o.state.areas || [];
     state.wires = o.state.wires || [];
     state.leaders = o.state.leaders || [];
+    state.inks = o.state.inks || [];
+    saneaState();
     state.panels = o.state.panels || [];
     state.guia = o.state.guia || [];
     state.huecos = o.state.huecos || [];
@@ -11221,8 +11662,8 @@
       state.sheets = [{ no: state.project.sheetNo || 'E-1', title: state.project.sheetTitle || '', data: null }];
       state.curSheet = 0;
     }
-    if (state.curSheet == null || state.curSheet >= state.sheets.length) state.curSheet = 0;
-    if (o.view) Object.assign(view, o.view);
+    if (!(Number.isInteger(state.curSheet) && state.curSheet >= 0 && state.curSheet < state.sheets.length)) state.curSheet = 0;
+    if (o.view && typeof o.view === 'object') { Object.assign(view, o.view); view.z = numSeguro(view.z, 1) || 1; view.tx = numSeguro(view.tx, 0); view.ty = numSeguro(view.ty, 0); }
     syncProjectInputs();
     renderSheetTabs(); updateBgLinesBtn();
     applyView(); refresh();
@@ -11242,8 +11683,19 @@
       try {
         var o = JSON.parse(rd.result);
         if (o.app === 'mxp-planos') {
-          // sin pushUndo: abrir es un documento nuevo y la pila se vacia dentro
-          restoreProject(o);
+          var errP = validaProyecto(o);
+          if (errP) { uiAlert('Ese archivo está dañado (' + errP + ').\n\nEl proyecto que tenías abierto sigue intacto.'); return; }
+          // red de seguridad: si algo revienta a medias, vuelve lo de antes
+          var previo = null;
+          try { syncSheet(); previo = JSON.parse(JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view })); } catch (eP) {}
+          try {
+            // sin pushUndo: abrir es un documento nuevo y la pila se vacia dentro
+            restoreProject(o);
+          } catch (eR) {
+            if (previo) { try { restoreProject(previo); } catch (e4) {} }
+            uiAlert('No se pudo abrir ese proyecto (' + (eR && eR.message || 'error') + ').\n\nEl proyecto anterior se dejó como estaba.');
+            return;
+          }
           setHint('Proyecto abierto: ' + (state.project.name || f.name));
           return;
         }
@@ -11294,6 +11746,8 @@
       var cs = symCorners(s);
       if (cs) cs.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
       else { var r = Math.max(d.w, d.h) * (s.scale || 1) / 2 + 10; xs.push(s.x - r, s.x + r); ys.push(s.y - r, s.y + r); }
+      var atl = attrsTexto(s);
+      if (atl.length) { var rA = Math.max(d.w, d.h) * symK(d) * (s.scale || 1) / 2; var mxL = 0; atl.forEach(function (t) { mxL = Math.max(mxL, t.length); }); xs.push(s.x + rA * 0.72 + 2 + mxL * 4.6 * 0.62); ys.push(s.y - rA * 0.72 - 6, s.y - rA * 0.72 + atl.length * 6); }
     });
     // (auditoria 31/08, GRAVE) los textos contaban 60" de ancho fijo: un
     // rotulo largo, de varios renglones o centrado se RECORTABA en el PDF/PNG
@@ -11307,6 +11761,7 @@
       var nxD = -(d.y2 - d.y1) / lnD * offD, nyD = (d.x2 - d.x1) / lnD * offD;
       xs.push(d.x1, d.x2, d.x1 + nxD, d.x2 + nxD); ys.push(d.y1, d.y2, d.y1 + nyD, d.y2 + nyD);   // tambien la linea de cota desplazada
     });
+    state.inks.forEach(function (k) { k.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); });
     state.areas.forEach(function (a) {
       a.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
       // el ápice de cada lado curvo sobresale de los vértices (se recortaba en el PDF)
@@ -11744,6 +12199,42 @@
     var parts = m.split(':');
     $('#' + parts[0]).addEventListener('input', function () { curPanel()[parts[1]] = this.value; });
   });
+  /* 🔌 TRAER DEL PLANO (fase 5.1): los atributos Circuito de los símbolos
+     (A-12, 14, MSP-3…) se agrupan y cada circuito del panel recibe cuántos
+     receptáculos y luminarias cuelgan de él con su VA (180 VA por receptáculo
+     NEC 220.14(I); 100 VA por luminaria como criterio de la casa — Edgar lo
+     corrige en la tabla). La descripción escrita a mano no se pisa. */
+  function traerDelPlano() {
+    var p = curPanel(), grupos = {}, sinCkt = 0;
+    var pref = (p.name || '').trim().toUpperCase();
+    state.symbols.forEach(function (sy) {
+      var d = SYMBOLS[sy.key]; if (!d || !sy.attrs || !sy.attrs.ckt) return;
+      var m = String(sy.attrs.ckt).toUpperCase().match(/^(?:([A-Z][A-Z0-9]*)\s*[-–:]\s*)?(\d{1,3})$/);
+      if (!m) { sinCkt++; return; }
+      if (m[1] && pref && m[1] !== pref) return;   // es de otro panel
+      var n = +m[2]; if (!n) return;
+      var g = grupos[n] = grupos[n] || { rec: 0, luz: 0, otro: 0, va: 0 };
+      var k = sy.key, nm = d.name.toLowerCase();
+      if (d.cat === 'lighting' || /light|lamp|pendant|chandelier|sconce|troffer|fan/.test(nm)) { g.luz++; g.va += 100; }
+      else if (/recep|outlet|usb/.test(nm) || /^recep/.test(k)) { g.rec++; g.va += 180; }
+      else { g.otro++; }
+    });
+    var escritos = 0;
+    Object.keys(grupos).forEach(function (n) {
+      var g = grupos[n], partes = [];
+      if (g.rec) partes.push(g.rec + ' RECEP');
+      if (g.luz) partes.push(g.luz + ' LTS');
+      if (g.otro) partes.push(g.otro + ' DEV');
+      var c = p.circuits[n] = p.circuits[n] || {};
+      if (!c.desc || /RECEP|LTS|DEV/.test(c.desc)) c.desc = partes.join(' · ');
+      if (g.va) c.va = String(g.va);
+      if (+n > (p.spaces || 30)) p.spaces = Math.ceil(+n / 2) * 2;
+      escritos++;
+    });
+    buildPanelModal();
+    setHint(escritos ? ('🔌 ' + escritos + ' circuito(s) leídos del plano' + (sinCkt ? ' · ' + sinCkt + ' símbolo(s) con circuito que no entendí (usa A-12 o 12)' : '')) : 'Ningún símbolo tiene el atributo Circuito todavía (Propiedades del símbolo → Circuito)');
+  }
+  if ($('#psFromPlan')) $('#psFromPlan').addEventListener('click', function () { pushUndo(); traerDelPlano(); });
   $('#psSpaces').addEventListener('change', function () {
     var v = Math.max(2, Math.min(84, parseInt(this.value, 10) || 30));
     curPanel().spaces = v % 2 ? v + 1 : v;
@@ -11981,6 +12472,7 @@
     if (drawing.mode === 'wallchain') return drawing.last;
     if (drawing.mode === 'areachain' && drawing.pts && drawing.pts.length) return drawing.pts[drawing.pts.length - 1];
     if (drawing.mode === 'twopoint') return drawing.a;
+    if (drawing.mode === 'mover' && drawing.base) return drawing.base;
     return null;
   }
   function worldToScreen(wx, wy) {
@@ -12044,10 +12536,52 @@
       areaDown(B);
     } else if (drawing.mode === 'twopoint') {
       twoPointDown(B, drawing.kind);
+    } else if (drawing.mode === 'mover') {
+      moverDown(B);
     }
     lastMouseWorld = B;
     setHint('✓ Tramo de ' + fmtFtIn(L) + ' colocado — sigue con el ratón o teclea el siguiente');
   }
+
+  /* ERRORES VISIBLES (auditoría robustez 03/09): sin consola en el iPad, una
+     excepción dejaba la app 'muerta' sin decir nada. Barra roja con el
+     mensaje y un botón para bajar el estado actual como archivo. */
+  var errBar = null, errUlt = 0;
+  function muestraError(msg) {
+    var ahora = Date.now(); if (ahora - errUlt < 3000) return; errUlt = ahora;
+    try { localStorage.setItem('mxp_ultimo_error', JSON.stringify({ t: new Date().toISOString(), msg: String(msg).slice(0, 400), v: APP_VERSION })); } catch (e) {}
+    if (!errBar) {
+      errBar = document.createElement('div');
+      errBar.id = 'errBar';
+      errBar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;background:#b71c1c;color:#fff;font:13px/1.35 system-ui,sans-serif;padding:8px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+      document.body.appendChild(errBar);
+    }
+    errBar.innerHTML = '<span style="flex:1">⚠️ Algo falló: <b>' + esc(String(msg).slice(0, 160)) + '</b>. Tu trabajo sigue guardado; si la app no responde, recarga la página.</span>' +
+      '<button id="errBajar" style="padding:5px 10px;border:0;border-radius:6px;background:#fff;color:#b71c1c;font-weight:700;cursor:pointer">💾 Bajar copia del plano</button>' +
+      '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">✕</button>';
+    errBar.querySelector('#errCerrar').addEventListener('click', function () { errBar.remove(); errBar = null; });
+    errBar.querySelector('#errBajar').addEventListener('click', function () {
+      try { syncSheet(); saveFile('rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json', JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view })); } catch (e) {}
+    });
+  }
+  window.addEventListener('error', function (ev) { muestraError(ev && ev.message || 'error'); });
+  window.addEventListener('unhandledrejection', function (ev) { var r = ev && ev.reason; muestraError(r && r.message || r || 'promesa rechazada'); });
+
+  /* 🧹 BORRAR TODO EN ESTE APARATO (auditoría seguridad 03/09): en un iPad
+     compartido o perdido quedaban en claro el autosave con cliente y dirección,
+     los PDF crudos, la sesión de Supabase y el token del cerebro, sin manera
+     de limpiarlo de golpe. */
+  if ($('#btnPurgar')) $('#btnPurgar').addEventListener('click', function () {
+    uiConfirm('¿Borrar TODO lo guardado en este aparato?\n\nSe van: el plano en memoria (autosave), los PDF importados, la sesión del estimador y el token del cerebro. Lo que ya descargaste o mandaste por AirDrop no se toca.\n\nEsto no se puede deshacer.', function (ok) {
+      if (!ok) return;
+      try { localStorage.clear(); } catch (e) {}
+      try { sessionStorage.clear(); } catch (e) {}
+      try { indexedDB.deleteDatabase('mxp-planos'); } catch (e) {}
+      var fin = function () { location.reload(); };
+      if (window.caches && caches.keys) caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }).then(fin, fin);
+      else fin();
+    });
+  });
 
   document.addEventListener('keydown', function (ev) {
     var inField = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -12076,6 +12610,8 @@
     switch (ev.key) {
       case 'Escape':
         // primero cierra cualquier modal abierto (Panel Schedule, Lot…)
+        var askM = document.getElementById('askModal');
+        if (askM && !askM.hidden) { askClose(false); break; }   // (robustez 03/09) el foco pudo salir del input
         var openMod = $$('.modal').find(function (m) { return !m.hidden && m.id !== 'askModal'; });
         if (openMod) { openMod.hidden = true; break; }
         // pedido de Edgar: Escape SIEMPRE cancela lo que este a medias y
@@ -12125,6 +12661,7 @@
       case 'm': case 'M': setTool('measure'); break;
       case 'c': case 'C': setTool('dim'); break;
       case 't': case 'T': setTool('text'); break;
+      case 'p': case 'P': setTool('pen'); break;   // (H es la mano/pan: el resaltador va por el botón)
       case 'k': case 'K': setTool('calibrate'); break;
       case 'Enter':
         if (drawing && drawing.mode === 'wallchain') finishWallChain();
@@ -12497,15 +13034,38 @@
   setTool('select');
   // restaurar el trabajo guardado automáticamente: IndexedDB primero (aguanta
   // planos pesados), localStorage como respaldo de versiones viejas
+  restaurando = true;
+  setHint('⏳ Cargando tu trabajo guardado…');
   idbGet('autosave', function (payload) {
-    var restored = false;
+    var restored = false, roto = null;
+    restaurando = false;
     try {
       var as = payload || localStorage.getItem('mxp_autosave');
       if (as) {
-        var ao = JSON.parse(as);
-        if (ao && ao.app === 'mxp-planos' && ao.state) { restoreProject(ao); restored = true; }
+        var ao = null;
+        try { ao = JSON.parse(as); } catch (eJ) { roto = as; }
+        if (ao && ao.app === 'mxp-planos' && ao.state) {
+          var err = validaProyecto(ao);
+          if (err) { roto = as; }
+          else if (hayContenido()) {
+            // (auditoría robustez 03/09) el usuario dibujó mientras IndexedDB
+            // respondía: no se le pisa sin preguntar
+            var aoKeep = ao;
+            uiConfirm('Hay un trabajo guardado de la sesión anterior y ya dibujaste algo aquí.\n\nOK = abrir el trabajo guardado (lo de ahora se pierde)\nCancelar = seguir con lo de ahora', function (ok) { if (ok) { restoreProject(aoKeep); renderSheetTabs(); setHint('🔄 Trabajo restaurado'); } else scheduleAutosave(); });
+          } else { restoreProject(ao); restored = true; }
+        }
       }
-    } catch (e) {}
+    } catch (e) { roto = roto || (payload || localStorage.getItem('mxp_autosave')); }
+    if (roto) {
+      // (auditoría robustez 03/09) antes se descartaba en silencio: ahora se
+      // ofrece bajarlo como texto (un JSON truncado suele conservar casi todo)
+      var rotoTxt = roto;
+      uiConfirm('Había un trabajo guardado que no se pudo leer (dañado o incompleto).\n\nOK = descargarlo como texto para rescatarlo después\nCancelar = descartarlo', function (ok) {
+        if (ok) saveFile('autosave-danado-' + new Date().toISOString().slice(0, 10) + '.txt', rotoTxt);
+        try { localStorage.removeItem('mxp_autosave'); } catch (e3) {}
+        idbSet('autosave', '');
+      });
+    }
     // precalentar el PDF guardado: el zoom nítido queda listo sin esperar al primer zoom
     try { if (restored && state.bg && state.bg.pdfId) loadPdfLive(state.bg); } catch (e) {}
     renderSheetTabs();

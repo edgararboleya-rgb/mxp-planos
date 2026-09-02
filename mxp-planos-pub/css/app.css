@@ -547,3 +547,8 @@ body.touch #marcasCab button { width: 34px; height: 34px; }
 #dinBox.on { display: flex; }
 #dinBox span { color: #f5b82e; font-weight: 700; letter-spacing: .3px; }
 #dinBox input { width: 150px; border: 1px solid #3a4452; background: #fff; color: #14161a; border-radius: 5px; padding: 3px 6px; font-size: 13px; font-family: inherit; }
+
+/* ✒️ tinta (fase 5.4) */
+svg.tool-pen, svg.tool-hi { cursor: crosshair; }
+svg.tool-erase { cursor: cell; }
+#canvas path.ink { pointer-events: none; }
