@@ -55,6 +55,8 @@ body {
    pantalla en portátil (medido: x=1496 con ventana de 1290) — invisibles, y
    con ellos el arreglo del tamaño de puerta. Ahora van al frente y pegados. */
 #grpAjustes { position: sticky; left: 0; z-index: 3; background: var(--mp-deep); border-left: none; padding-left: 0; }
+/* en iPad el grupo pegajoso tapaba las herramientas al deslizar la barra (auditoría 31/08) */
+body.touch #grpAjustes { position: static; }
 #grpAjustes select { max-width: 168px; }
 .tgroup.right { margin-left: auto; }
 
@@ -416,7 +418,6 @@ body.touch #toolMenu .tmItem { padding: 11px 12px; font-size: 15px; }
 body.touch .pbody button, body.touch #layersBody button { padding: 9px 10px !important; font-size: 13px !important; }
 body.touch #statusbar { height: 32px; font-size: 13px; }
 body.touch .sw { width: 28px; height: 28px; }
-body.touch .handle { r: 9; }
 body.touch #main { position: relative; }
 
 /* ═══ AUDITORÍA 08/28 · toques con el dedo en el iPad ═══
@@ -432,6 +433,11 @@ body.touch #catTabs button { padding: 8px 12px; font-size: 12.5px; }
 body.touch .sub button { padding: 9px 10px !important; font-size: 12px !important; }
 body.touch #btnEst, body.touch #btnCsv { padding: 8px 12px !important; font-size: 12px !important; }
 body.touch #btnPal, body.touch #stAdd { min-width: 40px; }
+/* blancos de dedo: casillas de capas, estrellas de favoritos, × de hojas */
+body.touch #layersBody label.lay { min-height: 40px; display: flex; align-items: center; gap: 10px; }
+body.touch #layersBody input[type=checkbox] { width: 22px; height: 22px; }
+body.touch .symBtn .favstar { padding: 6px 8px; margin: -6px -8px; }
+body.touch #sheetTabs .stab .sx { padding: 6px 8px; font-size: 16px; }
 
 /* ══════════ 💬 CHAT FLOTANTE ══════════
    Pedido de Edgar: poder preguntar sin salir del plano. Va FUERA del lienzo,

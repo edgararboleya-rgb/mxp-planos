@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.J';
+  var APP_VERSION = 'v29.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -155,6 +155,12 @@
     // con palitos regulares = los postes de aluminio del screen enclosure
     screen: { name: 'Screen Enclosure / Malla 2"', t: 2, screen: true }
   };
+  // familia de material (para soldar): los block entre sí, los drywall entre
+  // sí, el screen solo con screen
+  function famTipo(ty) {
+    if (ty === 'screen') return 'screen';
+    return String(ty).indexOf('block') === 0 ? 'block' : 'drywall';
+  }
   var OPEN_DEFAULT = { door: 36, double: 60, bifold: 48, pocket: 32, window: 36, slider: 72, bypass: 60, opening: 48, garage: 192 };
   var OPEN_NAMES = { door: 'Door', double: 'Double Door', bifold: 'Bifold Door', pocket: 'Pocket Door', window: 'Window', slider: 'Sliding Glass Door', bypass: 'Bypass Closet Door', opening: 'Opening', garage: 'Garage / OH Door' };
 
@@ -3124,7 +3130,7 @@
             ' L' + (e.x2 + g.nx * t) + ',' + (e.y2 + g.ny * t) +
             ' L' + (e.x2 - g.nx * t) + ',' + (e.y2 - g.ny * t) +
             ' L' + (e.x1 - g.nx * t) + ',' + (e.y1 - g.ny * t) + ' Z"/>';
-          var hr = 5 / view.z + 2;
+          var hr = (isTouch ? 11 : 5) / view.z + 2;
           s += '<circle class="handle" data-h="1" cx="' + e.x1 + '" cy="' + e.y1 + '" r="' + hr + '"/>';
           s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + hr + '"/>';
         } else if (sel.kind === 'symbol') {
@@ -3478,12 +3484,20 @@
     // fantasma": cada toque siguiente contaría como pellizco y la app parece
     // muerta (solo zoom). Purgar punteros viejos sin movimiento lo cura.
     var nowT = Date.now();
-    ptrs.forEach(function (v, k) { if (nowT - (v.t || 0) > 2500) ptrs.delete(k); });
+    // (un dedo quieto sosteniendo un arrastre NO es fantasma: solo se purga
+    // sin arrastre y tras 6 s — auditoría iPad 31/08)
+    if (!drag) ptrs.forEach(function (v, k) { if (nowT - (v.t || 0) > 6000) ptrs.delete(k); });
     ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY, t: nowT });
     if (ptrs.size === 2) {
+      // el primer dedo del pellizco todavía no hizo nada (estaba en espera)
+      if (tapPendiente) { clearTimeout(tapPendiente.timer); tapPendiente = null; }
       var a = Array.from(ptrs.values());
       pinch = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), mx: (a[0].x + a[1].x) / 2, my: (a[0].y + a[1].y) / 2, view: { tx: view.tx, ty: view.ty, z: view.z } };
-      drawing = drawing && drawing.mode === 'wallchain' ? drawing : null;
+      // la polilínea/pared a medio trazar sobrevive al zoom (antes se perdían
+      // todos los vértices al pellizcar)
+      if (drawing && drawing.mode !== 'wallchain' && drawing.mode !== 'areachain') drawing = null;
+      // un arrastre a medias se CIERRA (queda en el historial), no se abandona
+      if (drag) onDragEnd();
       drag = null; G.prev.innerHTML = '';
       return;
     }
@@ -3496,6 +3510,8 @@
     // cinturon ademas de los tirantes del CSS: un clic en el lienzo jamas
     // debe arrancar una seleccion de texto del navegador
     if (ev.pointerType === 'mouse' && ev.cancelable) ev.preventDefault();
+    // con una gaveta (símbolos/propiedades) abierta el toque solo la cierra
+    if (gavetaAbierta && gavetaAbierta()) return;
     var p = screenToWorld(ev.clientX, ev.clientY);
     // doble TOQUE en pantalla táctil = doble clic (editar medida/texto)
     if (ev.pointerType === 'touch') {
@@ -3522,12 +3538,29 @@
         lastTap = { t: now, x: ev.clientX, y: ev.clientY };
       }
     }
+    // TÁCTIL: el primer dedo espera 90 ms antes de actuar. Si en ese lapso
+    // baja el segundo dedo era un PELLIZCO, no un toque — antes cada zoom
+    // dejaba un símbolo o una pared plantada (auditoría iPad 31/08)
+    if (ev.pointerType === 'touch' && ptrs.size === 1) {
+      tapPendiente = { p: p, ev: ev, x: ev.clientX, y: ev.clientY, timer: setTimeout(flushTap, 90) };
+      return;
+    }
     onToolDown(p, ev);
   });
   var lastTap = null;
+  var tapPendiente = null;
+  var gavetaAbierta = null;   // la pone el modo iPad
+  function flushTap() {
+    if (!tapPendiente) return;
+    var tp = tapPendiente; tapPendiente = null;
+    clearTimeout(tp.timer);
+    onToolDown(tp.p, tp.ev);
+  }
 
   svg.addEventListener('pointermove', function (ev) {
     if (ptrs.has(ev.pointerId)) ptrs.set(ev.pointerId, { x: ev.clientX, y: ev.clientY, t: Date.now() });
+    // el dedo en espera se movió de verdad: era un toque/arrastre, se ejecuta ya
+    if (tapPendiente && !pinch && Math.hypot(ev.clientX - tapPendiente.x, ev.clientY - tapPendiente.y) > 6) flushTap();
     if (pinch && ptrs.size === 2) {
       var a = Array.from(ptrs.values());
       var d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
@@ -3551,6 +3584,7 @@
   });
 
   function endPointer(ev) {
+    flushTap();   // toque rápido (<90 ms): se ejecuta al levantar el dedo
     ptrs.delete(ev.pointerId);
     if (ptrs.size < 2) pinch = null;
     if (drag) { onDragEnd(); }
@@ -3562,7 +3596,7 @@
   // gesto, igual se limpia — y al volver a la app no quedan dedos fantasma
   window.addEventListener('pointerup', function (ev) { ptrs.delete(ev.pointerId); if (ptrs.size < 2) pinch = null; });
   window.addEventListener('pointercancel', function (ev) { ptrs.delete(ev.pointerId); if (ptrs.size < 2) pinch = null; });
-  document.addEventListener('visibilitychange', function () { ptrs.clear(); pinch = null; drag = null; });
+  document.addEventListener('visibilitychange', function () { ptrs.clear(); pinch = null; drag = null; if (tapPendiente) { clearTimeout(tapPendiente.timer); tapPendiente = null; } });
   svg.addEventListener('contextmenu', function (ev) {
     ev.preventDefault();
     if (drawing && drawing.mode === 'wallchain') finishWallChain();
@@ -3805,9 +3839,14 @@
     if (sel && sel.kind === 'wall') {
       var w = findSel();
       if (w) {
-        var hr = 8 / view.z + 3;
-        if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < hr) { drag = { mode: 'endpoint', wall: w, end: 1, start: p, ox: w.x1, oy: w.y1, snap: snapshot(), moved: false }; return; }
-        if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < hr) { drag = { mode: 'endpoint', wall: w, end: 2, start: p, ox: w.x2, oy: w.y2, snap: snapshot(), moved: false }; return; }
+        // con el dedo el asa es más gorda (17 px) — auditoría iPad 31/08
+        var hr = (isTouch ? 17 : 8) / view.z + 3;
+        // las aberturas se recuerdan por su punto en el MUNDO: al mover la
+        // punta 1 (el origen de 'pos') la puerta no salta de sitio
+        var gW = wallGeom(w);
+        var opsW = wallOpenings(w).map(function (o) { return { o: o, pt: ptAlong(w, gW, o.pos) }; });
+        if (Math.hypot(p[0] - w.x1, p[1] - w.y1) < hr) { drag = { mode: 'endpoint', wall: w, end: 1, start: p, ox: w.x1, oy: w.y1, snap: snapshot(), moved: false, opsW: opsW }; return; }
+        if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < hr) { drag = { mode: 'endpoint', wall: w, end: 2, start: p, ox: w.x2, oy: w.y2, snap: snapshot(), moved: false, opsW: opsW }; return; }
       }
     }
     // asas de extremos de una medida/cota seleccionada
@@ -4036,6 +4075,12 @@
       if (drag.end === 1) { drag.wall.x1 = np[0]; drag.wall.y1 = np[1]; }
       else { drag.wall.x2 = np[0]; drag.wall.y2 = np[1]; }
       drag.moved = true;
+      if (drag.opsW) {
+        var g2 = wallGeom(drag.wall);
+        drag.opsW.forEach(function (q) {
+          q.o.pos = Math.round((q.pt[0] - drag.wall.x1) * g2.ux + (q.pt[1] - drag.wall.y1) * g2.uy);
+        });
+      }
       var eLen = fmtFtIn(Math.hypot(drag.wall.x2 - drag.wall.x1, drag.wall.y2 - drag.wall.y1));
       if (finoOn(ev)) setHint('🐢 Fino (Alt) · largo ' + eLen + (wantOrtho(ev) ? ' · ∟ recto' : ''));
       else if (wantOrtho(ev)) setHint('∟ Shift: pared recta · ' + eLen);
@@ -4245,6 +4290,28 @@
       refreshCounts();
     }
     if (drag.mode === 'areaVtx') G.prev.innerHTML = '';
+    if (drag.mode === 'endpoint' && drag.moved) {
+      var wE = drag.wall, gE = wallGeom(wE), cambioE = false;
+      if (gE.len < 2) {
+        // una pared de 0" no es una pared (auditoría 31/08: quedaba invisible
+        // y seguía contando en el takeoff)
+        state.walls = state.walls.filter(function (x) { return x !== wE; });
+        state.openings = state.openings.filter(function (o) { return o.wallId !== wE.id; });
+        sel = null; cambioE = true;
+        setHint('Pared de largo cero: se quitó');
+      } else {
+        var fueraE = 0;
+        state.openings = state.openings.filter(function (o) {
+          if (o.wallId !== wE.id) return true;
+          if (o.w > gE.len + 0.5) { fueraE++; return false; }
+          var np2 = Math.round(Math.max(o.w / 2, Math.min(gE.len - o.w / 2, o.pos)));
+          if (np2 !== o.pos) { o.pos = np2; cambioE = true; }
+          return true;
+        });
+        if (fueraE) { cambioE = true; setHint(fueraE + ' abertura(s) ya no cabían en la pared acortada: se quitaron'); }
+      }
+      if (cambioE) { pushUndo(drag.snap); drag = null; refresh(); return; }
+    }
     if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
@@ -4263,7 +4330,10 @@
     var np = snapWallPt(p);
     if (!drawing) { drawing = { mode: 'wallchain', last: np, cursor: np }; return; }
     var b = wantOrtho(ev) ? orthoLock(drawing.last, np) : orthoSnap(drawing.last, np);
-    if (Math.hypot(b[0] - drawing.last[0], b[1] - drawing.last[1]) > 2) {
+    // con el dedo un tramo de menos de 12 px de pantalla es un temblor del
+    // doble toque, no una pared (auditoría iPad 31/08: cabitos de 1-3")
+    var minSeg = (ev && ev.pointerType === 'touch') ? 12 / view.z : 2;
+    if (Math.hypot(b[0] - drawing.last[0], b[1] - drawing.last[1]) > minSeg) {
       pushUndo();
       var wt = $('#wallType').value;
       var wNueva = { id: uid(), x1: drawing.last[0], y1: drawing.last[1], x2: b[0], y2: b[1], type: wt, t: WALL_TYPES[wt].t };
@@ -4377,9 +4447,10 @@
     drawing = null; G.prev.innerHTML = '';
     // quita los puntos duplicados del final: el doble clic mete DOS pointerdown
     // encima del ultimo vertice (auditoria 31/08: quedaba un vertice repetido)
+    var minV = isTouch ? 12 / view.z : 2;
     while (pts.length > 1) {
       var a = pts[pts.length - 1], b = pts[pts.length - 2];
-      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 2) pts.pop(); else break;
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < minV) pts.pop(); else break;
     }
     if (pts.length < (isLine ? 2 : 3)) {
       setHint(isLine ? 'Se necesitan al menos 2 puntos' : 'Se necesitan al menos 3 esquinas para cerrar la superficie');
@@ -5780,7 +5851,9 @@
     on('prEndSel', 'click', function () { straightenRefs([sel]); });
     on('prWallType', 'change', function (n) {
       if (!WALL_TYPES[n.value]) return;
-      pushUndo(); e.type = n.value; e.t = WALL_TYPES[n.value].t; refresh();
+      // marcada como MANUAL: Soldar ya no se la re-tipa (auditoría 31/08:
+      // el screen del lanai volvía a block y el 12" a 8")
+      pushUndo(); e.type = n.value; e.t = WALL_TYPES[n.value].t; e.manual = 1; refresh();
     });
     on('prWallLen', 'change', function (n) {
       var v = parseDist(n.value);
@@ -8390,7 +8463,12 @@
     var rooms = soloSel ? [] : detectRoomPolys(state.walls);
     if (rooms.length) {
       var ext = rooms[0]._ext;
+      // solo se re-tipa la pared GENÉRICA (block 8" / drywall 4½") que Edgar
+      // no tocó a mano. Screen, media pared, furring, 12" o forrado se quedan
+      // como están (auditoría 31/08: el soldado repintaba el lanai de block).
+      var GENERICAS = { block: 1, drywall: 1 };
       state.walls.forEach(function (w) {
+        if (w.manual || !GENERICAS[w.type]) return;
         if (ext.has(w)) { w.type = 'block'; w.t = 8; }
         else { w.type = 'drywall'; w.t = 4.5; }
       });
@@ -9101,6 +9179,8 @@
       for (j = i + 1; j < walls.length; j++) {
         var b = walls[j];
         if (!b || b._dead || a._o !== b._o) continue;
+        // un screen pegado a un block NO es la misma pared (auditoría 31/08)
+        if (famTipo(a.type) !== famTipo(b.type)) continue;
         var H = a._o === 'H';
         var axA = H ? a.y1 : a.x1, axB = H ? b.y1 : b.x1;
         if (Math.abs(axA - axB) > GAP) continue;
@@ -9281,12 +9361,24 @@
           }
         });
         if (best) {
+          // el extremo corre por el EJE de su propia pared hasta la cruzada:
+          // una pared recta no cambia; una diagonal conserva su ángulo
+          // (auditoría 31/08: la diagonal del garaje se torcía 4°)
+          var oe = e === '1' ? '2' : '1';
+          var ox = w['x' + oe], oy = w['y' + oe];
+          var dxw = px - ox, dyw = py - oy;
           if (best._o === 'H') {
+            var nx = px;
+            if (Math.abs(dyw) > 1e-6 && Math.abs(dxw) > 1e-6) nx = ox + dxw * (best.y1 - oy) / dyw;
+            if (Math.abs(nx - px) > tol) nx = px;   // casi paralela: no dispara
             w['y' + e] = best.y1;
-            w['x' + e] = Math.max(Math.min(best.x1, best.x2), Math.min(Math.max(best.x1, best.x2), px));
+            w['x' + e] = Math.max(Math.min(best.x1, best.x2), Math.min(Math.max(best.x1, best.x2), nx));
           } else {
+            var ny = py;
+            if (Math.abs(dxw) > 1e-6 && Math.abs(dyw) > 1e-6) ny = oy + dyw * (best.x1 - ox) / dxw;
+            if (Math.abs(ny - py) > tol) ny = py;
             w['x' + e] = best.x1;
-            w['y' + e] = Math.max(Math.min(best.y1, best.y2), Math.min(Math.max(best.y1, best.y2), py));
+            w['y' + e] = Math.max(Math.min(best.y1, best.y2), Math.min(Math.max(best.y1, best.y2), ny));
           }
         }
       });
@@ -9351,7 +9443,19 @@
         var bx = b['x' + par[1]], by = b['y' + par[1]];
         var d = Math.hypot(ax - bx, ay - by);
         if (d < 0.5 || d > T) return;
+        // al punto donde se CRUZAN los dos ejes: ninguna de las dos se
+        // inclina (el punto medio torcía las paredes cortas — auditoría 31/08).
+        // Si son colineales (sin cruce) sí va al medio.
+        var oa = par[0] === '1' ? '2' : '1', ob = par[1] === '1' ? '2' : '1';
+        var aux = ax - a['x' + oa], auy = ay - a['y' + oa];
+        var bux = bx - b['x' + ob], buy = by - b['y' + ob];
+        var den = aux * buy - auy * bux;
         var mx3 = Math.round((ax + bx) / 2), my3 = Math.round((ay + by) / 2);
+        if (Math.abs(den) > 1e-6) {
+          var tq = ((bx - ax) * buy - (by - ay) * bux) / den;
+          var ix = ax + aux * tq, iy = ay + auy * tq;
+          if (Math.hypot(ix - ax, iy - ay) <= T * 1.5 && Math.hypot(ix - bx, iy - by) <= T * 1.5) { mx3 = Math.round(ix); my3 = Math.round(iy); }
+        }
         a['x' + par[0]] = mx3; a['y' + par[0]] = my3;
         b['x' + par[1]] = mx3; b['y' + par[1]] = my3;
       });
@@ -9605,6 +9709,7 @@
         for (j = i + 1; j < walls.length; j++) {
           var b = walls[j];
           if (!b || b._dead || a._o !== b._o) continue;
+          if (famTipo(a.type) !== famTipo(b.type)) continue;
           var H = a._o === 'H';
           var axA = H ? a.y1 : a.x1, axB = H ? b.y1 : b.x1;
           if (Math.abs(axA - axB) > AXTOL) continue;
@@ -11938,9 +12043,11 @@
       }
     });
     // tocar el plano cierra las gavetas
-    svg.addEventListener('pointerdown', function () {
-      if (palOpen || propsOpen) { palOpen = false; propsOpen = false; syncDrawers(); }
-    });
+    gavetaAbierta = function () {
+      if (!(palOpen || propsOpen)) return false;
+      palOpen = false; propsOpen = false; syncDrawers();
+      return true;
+    };
     setTimeout(function () {
       setHint('📱 Modo iPad: 🧰 abre los símbolos · ⚙ abre propiedades · pellizca para zoom · un dedo dibuja');
     }, 400);
