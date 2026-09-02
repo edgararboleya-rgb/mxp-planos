@@ -73,28 +73,28 @@
   S.sw_single = { name: 'Single-Pole Switch', short: 'Switch S', cat: 'electrical', layer: 'electrical', w: 12, h: 16,
     svg: T(0, 5, 14, 'S', { italic: true, bold: true }) };
 
-  S.sw_3way = { name: '3-Way Switch', short: 'Switch S3', cat: 'electrical', layer: 'electrical', w: anchoSub('3'), h: 14, by: -0.75,
+  S.sw_3way = { name: '3-Way Switch', short: 'Switch S3', cat: 'electrical', layer: 'electrical', w: anchoSub('3'), h: 17, by: -3,
     svg: swSub('3') };
 
-  S.sw_4way = { name: '4-Way Switch', short: 'Switch S4', cat: 'electrical', layer: 'electrical', w: anchoSub('4'), h: 14, by: -0.75,
+  S.sw_4way = { name: '4-Way Switch', short: 'Switch S4', cat: 'electrical', layer: 'electrical', w: anchoSub('4'), h: 17, by: -3,
     svg: swSub('4') };
 
-  S.sw_dimmer = { name: 'Dimmer Switch', short: 'Dimmer', cat: 'electrical', layer: 'electrical', w: anchoSub('DM'), h: 14, by: -0.75,
+  S.sw_dimmer = { name: 'Dimmer Switch', short: 'Dimmer', cat: 'electrical', layer: 'electrical', w: anchoSub('DM'), h: 17, by: -3,
     svg: swSub('DM') };
 
-  S.sw_double = { name: 'Double-Pole Switch S2', short: 'Switch S2', cat: 'electrical', layer: 'electrical', w: anchoSub('2'), h: 14, by: -0.75,
+  S.sw_double = { name: 'Double-Pole Switch S2', short: 'Switch S2', cat: 'electrical', layer: 'electrical', w: anchoSub('2'), h: 17, by: -3,
     svg: swSub('2') };
 
-  S.sw_pilot = { name: 'Switch w/ Pilot Light SP', short: 'Switch SP', cat: 'electrical', layer: 'electrical', w: anchoSub('P'), h: 14, by: -0.75,
+  S.sw_pilot = { name: 'Switch w/ Pilot Light SP', short: 'Switch SP', cat: 'electrical', layer: 'electrical', w: anchoSub('P'), h: 17, by: -3,
     svg: swSub('P') };
 
-  S.sw_keyed = { name: 'Keyed Switch SK', short: 'Switch SK', cat: 'electrical', layer: 'electrical', w: anchoSub('K'), h: 14, by: -0.75,
+  S.sw_keyed = { name: 'Keyed Switch SK', short: 'Switch SK', cat: 'electrical', layer: 'electrical', w: anchoSub('K'), h: 17, by: -3,
     svg: swSub('K') };
 
-  S.sw_wp2 = { name: 'Weatherproof Switch SWP', short: 'Switch SWP', cat: 'electrical', layer: 'electrical', w: anchoSub('WP'), h: 14, by: -0.75,
+  S.sw_wp2 = { name: 'Weatherproof Switch SWP', short: 'Switch SWP', cat: 'electrical', layer: 'electrical', w: anchoSub('WP'), h: 17, by: -3,
     svg: swSub('WP') };
 
-  S.sw_motion = { name: 'Motion Sensor Switch SM', short: 'Switch SM', cat: 'electrical', layer: 'electrical', w: anchoSub('M'), h: 14, by: -0.75,
+  S.sw_motion = { name: 'Motion Sensor Switch SM', short: 'Switch SM', cat: 'electrical', layer: 'electrical', w: anchoSub('M'), h: 17, by: -3,
     svg: swSub('M') };
 
   S.chime = { name: 'Chime', short: 'Chime CH', cat: 'electrical', layer: 'electrical', w: 14, h: 14,
@@ -1250,23 +1250,24 @@
      (y=-2.5, tamaño 5.5/5/4.5), y la caja del símbolo se ajusta al conjunto:
      un S3 mide ~13" de ancho en vez de 18. Lo usan los sw_* de arriba y los
      Lutron: función declarada, así que vale aunque se llame antes. */
+  /* Segunda vuelta (Edgar): "arriba, no al lado; arriba es arriba". El sufijo
+     va CENTRADO ENCIMA de la S, así el símbolo no es más ancho que la S sola
+     y una fila de switches pegados ocupa lo mismo que una fila de S. */
   function geoSub(sub) {
     var n = String(sub).length;
     var tam = n <= 1 ? 5.5 : (n <= 2 ? 5 : 4.5);
-    var xS = 0, xSub = 5.2, wsub = n * tam * 0.62;   // 5.2: libra la punta alta de la S itálica
-    var izq = xS - 4.6, der = xSub + wsub;
-    var d = -(izq + der) / 2;
-    return { xS: +(xS + d).toFixed(2), xSub: +(xSub + d).toFixed(2), tam: tam, w: Math.ceil(der - izq) + 2 };
+    var wsub = n * tam * 0.62;
+    return { xS: 0, xSub: 0.6, tam: tam, w: Math.max(11, Math.ceil(wsub) + 2) };   // 0.6: la S itálica carga a la derecha
   }
   function swSub(sub) {
     var g = geoSub(sub);
     return T(g.xS, 5, 14, 'S', { italic: true, bold: true }) +
-      T(g.xSub, -2.5, g.tam, sub, { anchor: 'start' });
+      T(g.xSub, -6, g.tam, sub, { anchor: 'middle' });
   }
   function anchoSub(sub) { return geoSub(sub).w; }
   function swLutron(clave, nombre, corto, sub) {
     S[clave] = { name: nombre, short: corto, cat: 'lutron', layer: 'electrical',
-      w: anchoSub(sub), h: 14, by: -0.75, svg: swSub(sub) };
+      w: anchoSub(sub), h: 17, by: -3, svg: swSub(sub) };
   }
 
   swLutron('lut_kp2', 'Lutron Keypad 2 botones', 'Lutron KP2', 'KP2');
