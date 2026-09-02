@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.I';
+  var APP_VERSION = 'v29.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -483,7 +483,7 @@
     state.dims.forEach(function (d) { cand(d.x1, d.y1, 'end'); cand(d.x2, d.y2, 'end'); });
     return best;
   }
-  var SNAP_TOOLS = { measure: 1, dim: 1, calibrate: 1, wire: 1, leader: 1, pline: 1, line: 1, area: 1, rect: 1, ellipse: 1, cloud: 1 };
+  var SNAP_TOOLS = { measure: 1, dim: 1, calibrate: 1, wire: 1, leader: 1, pline: 1, line: 1, homerun: 1, area: 1, rect: 1, ellipse: 1, cloud: 1 };
   function osnapMarker(sn) {
     if (!sn) return '';
     var r = 4.5 / view.z + 1;
@@ -1128,6 +1128,9 @@
     gas:  { site: 1, name: 'G — Gas', dash: '150 44', glifo: 'G', lw: 0.7 },
     sd:   { site: 1, name: 'SD — Storm Drain (pluvial)', dash: '150 62', glifo: 'SD', lw: 0.9 },
 
+    /* -- el circuito del panel al cuarto (herramienta ⚡ Homerun) -- */
+    homerun:   { name: '⚡ HOMERUN — circuito del panel al cuarto', dash: '', lw: 1.1, homerun: 1 },
+
     /* -- cercas y control de erosión -- */
     cerca:     { site: 1, name: 'FENCE — cerca (—x—x—)', dash: '', glifo: 'x', paso: 96, lw: 0.6 },
     cercaLink: { site: 1, name: 'CHAIN LINK — malla (—o—o—)', dash: '', glifo: 'o', paso: 96, lw: 0.6 },
@@ -1141,6 +1144,76 @@
      Y como cada quien dibuja el lote a la escala que le toca, el rotulo se
      puede subir o bajar por linea con `glifoK`, y el HUECO del trazo se
      estira con el — si no, la letra se montaria sobre la raya. */
+  /* ================= CIRCUITOS / HOMERUNS (Edgar, 31/08) =================
+     "Cuando son new construction yo tengo que ir obligado a Bluebeam: busco el
+     panel, y por cada circuito trazo una línea por donde van a ir los cables
+     — Romex 12/2, circuito 23, del panel al master, 20 A, un polo, con un
+     drop de 10 a 15 pies por lo que baja el cable del techo. Eso me da el
+     takeoff de cuánto cable gasto, y ese takeoff pasa al estimador."
+     Los nombres de cable son los que YA entiende el estimador
+     (docs/ALIAS-TAKEOFF.sql: '12/2' → '12/2   ROMEX', FT → MLF). Los MC y
+     EMT no tienen alias todavía: saldrán "sin mapear" hasta que se agreguen. */
+  var CABLES = [
+    ['14/2', 'NM-B 14/2 (Romex)'], ['14/3', 'NM-B 14/3'],
+    ['12/2', 'NM-B 12/2 (Romex)'], ['12/3', 'NM-B 12/3'],
+    ['10/2', 'NM-B 10/2'], ['10/3', 'NM-B 10/3'],
+    ['8/3', 'NM-B 8/3'], ['6/3', 'NM-B 6/3'],
+    ['MC 12/2', 'MC 12/2'], ['MC 12/3', 'MC 12/3'], ['MC 10/3', 'MC 10/3'],
+    ['THHN #12 en 1/2" EMT', 'THHN #12 · ½" EMT'], ['THHN #10 en 3/4" EMT', 'THHN #10 · ¾" EMT'],
+    ['THHN #8 en 3/4" EMT', 'THHN #8 · ¾" EMT'], ['THHN #6 en 1" EMT', 'THHN #6 · 1" EMT']
+  ];
+  var BREAKERS = [15, 20, 25, 30, 40, 50, 60, 70, 100];
+  // lo último que se puso se recuerda: el siguiente circuito sale con el
+  // mismo panel, el mismo cable y el número siguiente (viaja con el proyecto)
+  function circDefaults() {
+    if (!state.circDefaults) state.circDefaults = { panel: 'MSP', num: 0, cable: '12/2', amps: 20, poles: 1, drop: 15 };
+    return state.circDefaults;
+  }
+  // el cable va en TUBO (THHN en EMT/PVC): el takeoff saca tubo Y conductores
+  function esTubo(cable) { return /THHN/i.test(cable || ''); }
+  // conductores sin tierra segun polos: 1P = fase + neutro; 2P = 2 fases (+ neutro si lo pide); 3P = 3 fases + neutro
+  function hilosDe(c) { return c.hilos > 0 ? +c.hilos : (+c.poles === 3 ? 4 : +c.poles === 2 ? 3 : 2); }
+  function partesTubo(cable) {
+    // 'THHN #12 en 1/2" EMT' -> { calibre: '#12', tubo: '1/2" EMT' }
+    var m = /THHN\s*(#\d+)\s*en\s*(.+)$/i.exec(cable || '');
+    return m ? { calibre: m[1], tubo: m[2].trim() } : null;
+  }
+  function nuevoCirc() {
+    var d = circDefaults();
+    var usados = {};
+    state.areas.forEach(function (x) { if (x.circ && x.circ.num) usados[x.circ.num] = 1; });
+    var n = (d.num || 0) + 1;
+    while (usados[n]) n++;
+    return { panel: d.panel, num: n, desc: '', cable: d.cable, amps: d.amps, poles: d.poles, drop: d.drop, mult: 1 };
+  }
+  function recuerdaCirc(c) {
+    var d = circDefaults();
+    d.panel = c.panel; d.cable = c.cable; d.amps = c.amps; d.poles = c.poles; d.drop = c.drop;
+    if (c.num > (d.num || 0)) d.num = c.num;
+  }
+  // largo de cable que se compra: (trazo por el plano + lo que baja del techo) x
+  // unidades — la misma formula que la hoja 'Branch Circuits' del Excel de
+  // Edgar: Total = (Length + Drop) * # of Units
+  function largoHomerun(a) {
+    var c = a.circ || {};
+    return (perimDe(a) + ((+c.drop) || 0) * 12) * Math.max(1, (+c.mult) || 1);
+  }
+  // que cantidades salen de un homerun para materiales / CSV / estimador
+  function partidasHomerun(a) {
+    var c = a.circ || {}, L = largoHomerun(a), out = [];
+    var pt = esTubo(c.cable) ? partesTubo(c.cable) : null;
+    if (pt) {
+      out.push({ item: pt.tubo + ' CONDUIT', ft: L });                              // el tubo
+      out.push({ item: pt.calibre + ' THHN CU', ft: L * (hilosDe(c) + 1) });        // los hilos + la tierra
+    } else {
+      out.push({ item: c.cable || '12/2', ft: L });
+    }
+    return out;
+  }
+  function rotuloCirc(c) {
+    return '#' + (c.num || '?') + ' · ' + (c.cable || '') + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
+      (c.desc ? ' · ' + c.desc : '');
+  }
   var GLIFO_ALTO = 30;
   var GLIFO_K = [[0.5, 'Chico'], [1, 'Normal (site plan)'], [1.7, 'Grande'], [2.6, 'Extra grande']];
   /* El desplegable sale en DOS grupos: lo del plano de planta y lo del site
@@ -2315,6 +2388,18 @@
     return out;
   }
 
+  // el rotulo del circuito, montado sobre la mitad del trazo y girado con el
+  // tramo — como la etiqueta que Edgar pone en Bluebeam
+  function rotuloHomerun(a, col) {
+    var tr = largoTramos(a.pts, false);
+    if (!tr.segs.length) return '';
+    var P = puntoEn(tr, tr.tot / 2); if (!P) return '';
+    var an = P.ang; if (an > 90 || an < -90) an += 180;
+    var sz = 8 * glifoK(a);
+    return '<text x="0" y="' + (-(a.lw || 1.1) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
+      ') rotate(' + an.toFixed(1) + ')" font-size="' + sz.toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' + (col || '#14161a') +
+      '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(rotuloCirc(a.circ)) + '</text>';
+  }
   function renderAreas() {
     var out = '';
     state.areas.forEach(function (a) {
@@ -2345,6 +2430,7 @@
       }
       out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
       if (est.glifo) out += glifosLinea(a, est, col, lw);
+      if (a.open && a.circ) out += rotuloHomerun(a, col);
       if (a.open) out += plineCaps(a);
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
@@ -3345,6 +3431,7 @@
     ellipse: 'ELIPSE: clic y clic en las esquinas del cuadro · SHIFT = círculo · el patrón se elige en Propiedades',
     pline: 'POLILÍNEA: clic en cada punto · doble clic o Enter para terminar · SHIFT = tramos rectos',
     line: 'LÍNEA: clic en el inicio y clic en el final · SHIFT = recta a 0/45/90 · el tipo de línea y la punta se eligen en el ▾ o en Propiedades',
+    homerun: 'HOMERUN: clic en el PANEL y sigue marcando por donde va el cable hasta el cuarto · doble clic o Enter termina · después llenas circuito, cable, breaker y drop en Propiedades',
     cloud: 'NUBE DE REVISIÓN: clic en una esquina y clic en la opuesta · combínala con Callout para la nota',
     wire: 'CABLEADO / TUBERÍA: elige el material arriba en Propiedades (EMT, PVC, underground, recta o en L) y luego clic en el primer equipo y clic en el segundo',
     leader: 'NOTA: clic donde apunta la flecha · clic donde va el texto · escribe la nota (ej: GFI, Fridge Outlet)',
@@ -3547,6 +3634,7 @@
       case 'rect': case 'ellipse': return shapeDown(p, tool, ev);
       case 'cloud': return shapeDown(p, 'cloud', ev);
       case 'pline': return areaDown(p);
+      case 'homerun': return areaDown(p);
       case 'line': return twoPointDown(p, 'line');
       case 'door': return openingDown(p, curDoorType);
       case 'window': return openingDown(p, curWinType);
@@ -3605,14 +3693,14 @@
       var spts = shapePts(drawing.kind === 'cloud' ? 'rect' : drawing.kind, drawing.a, [Math.round(p[0]), Math.round(p[1])], ev && ev.shiftKey);
       var d2 = 'M' + spts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z';
       G.prev.innerHTML = '<g class="preview"><path d="' + d2 + '" fill="none" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
-    } else if ((tool === 'area' || tool === 'pline') && !drawing) {
+    } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun') && !drawing) {
       // AÚN NO HAY LÍNEA: las guías ya trabajan, para que veas DÓNDE empezar.
       // Es lo del refrigerador: el gabinete sigue al otro lado y la guía verde
       // te dice exactamente a qué altura arrancar para que quede parejo.
       var np0 = guiaAjusta(snapWallPt(p), null, ev);
       puntoGuiado = np0;
       G.prev.innerHTML = guiasVivas ? '<g class="preview">' + guiasVivas + '</g>' : '';
-    } else if ((tool === 'area' || tool === 'pline') && drawing && drawing.mode === 'areachain') {
+    } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun') && drawing && drawing.mode === 'areachain') {
       var ult = drawing.pts[drawing.pts.length - 1];
       var np = guiaAjusta(snapWallPt(p), ult, ev, ejeLadoPrevio(drawing.pts));
       drawing.cursor = np;                                  // el clic usa el punto YA guiado
@@ -4284,12 +4372,14 @@
   function finishAreaChain(cerrado) {
     if (!drawing || drawing.mode !== 'areachain') return;
     var pts = drawing.pts;
-    var isLine = tool === 'pline' && !cerrado;   // cerrar en el 1er punto = polígono
+    var esHomerun = tool === 'homerun';
+    var isLine = (tool === 'pline' || esHomerun) && !cerrado;   // cerrar en el 1er punto = polígono
     drawing = null; G.prev.innerHTML = '';
-    // quita el último punto si quedó duplicado por el doble clic
-    if (pts.length > 1) {
+    // quita los puntos duplicados del final: el doble clic mete DOS pointerdown
+    // encima del ultimo vertice (auditoria 31/08: quedaba un vertice repetido)
+    while (pts.length > 1) {
       var a = pts[pts.length - 1], b = pts[pts.length - 2];
-      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 2) pts.pop();
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 2) pts.pop(); else break;
     }
     if (pts.length < (isLine ? 2 : 3)) {
       setHint(isLine ? 'Se necesitan al menos 2 puntos' : 'Se necesitan al menos 3 esquinas para cerrar la superficie');
@@ -4298,10 +4388,23 @@
     pushUndo();
     var e = { id: uid(), pts: pts, pattern: isLine ? 'none' : curAreaPattern, rot: 0 };
     if (isLine) { e.open = true; if (curLineStyle !== 'solid') e.lineStyle = curLineStyle; }
+    if (esHomerun) {
+      // el circuito: sale con el panel, el cable y el numero siguiente del
+      // anterior; la flecha apunta al PANEL, que es donde se empezo a trazar
+      e.lineStyle = 'homerun'; e.capS = 'arrow'; e.lw = 1.1;
+      e.circ = nuevoCirc();
+      recuerdaCirc(e.circ);
+    }
     if (pendingAreaLabel) e.showLabel = true;
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
+    if (esHomerun) {
+      var fd = $('#prCircDesc'); if (fd) { fd.focus(); }
+      setHint('⚡ Circuito #' + e.circ.num + ' trazado: ' + fmtFtIn(perimDe(e)) + ' + ' + e.circ.drop + '\' de drop = ' + fmtFtIn(largoHomerun(e)) +
+        ' de ' + e.circ.cable + ' · escribe el cuarto y ajusta cable/breaker/drop en Propiedades');
+      return;
+    }
     setHint(isLine
       ? 'Polilínea creada (' + fmtFtIn(polyPerim(pts, true)) + ') — edítala en Propiedades'
       : 'Superficie creada (' + (polyArea(pts) / 144).toFixed(1) + ' sq ft) — elige el patrón en Propiedades');
@@ -5552,8 +5655,31 @@
       html += '<div class="row"><label>Tamaño</label><input id="prLeadSize" type="number" min="4" value="' + (e.size || 7) + '"></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'area') {
-      if (e.open) {
+      if (e.open && e.circ) {
+        var c = e.circ;
+        html += '<div><b>⚡ Circuito #' + esc(String(c.num || '')) + '</b> · trazo ' + fmtFtIn(perimDe(e)) + ' + drop ' + (c.drop || 0) + '\' = <b>' + fmtFtIn(largoHomerun(e)) + '</b> de ' + esc(c.cable || '') + '</div>';
+        html += '<div class="row"><label>Panel</label><input id="prCircPanel" value="' + esc(c.panel || '') + '" placeholder="MSP, A, B…"></div>';
+        html += '<div class="row"><label>Circuito #</label><input id="prCircNum" type="number" min="1" max="84" value="' + esc(String(c.num || '')) + '"></div>';
+        html += '<div class="row"><label>Cuarto / carga</label><input id="prCircDesc" value="' + esc(c.desc || '') + '" placeholder="Master bedroom, Range, A/C…"></div>';
+        html += '<div class="row"><label>Cable</label><select id="prCircCable">' + CABLES.map(function (cb) {
+          // el nombre del cable lleva comillas (1/2" EMT): va escapado o rompe el value
+          return '<option value="' + esc(cb[0]) + '"' + (c.cable === cb[0] ? ' selected' : '') + '>' + esc(cb[1]) + '</option>';
+        }).join('') + '</select></div>';
+        html += '<div class="row"><label>Breaker</label><select id="prCircAmps">' + BREAKERS.map(function (am) {
+          return '<option value="' + am + '"' + (+c.amps === am ? ' selected' : '') + '>' + am + ' A</option>';
+        }).join('') + '</select></div>';
+        html += '<div class="row"><label>Polos</label><select id="prCircPoles">' + [1, 2, 3].map(function (pl) {
+          return '<option value="' + pl + '"' + (+c.poles === pl ? ' selected' : '') + '>' + pl + (pl === 1 ? ' polo (120V)' : pl === 2 ? ' polos (240V)' : ' polos (3Ø)') + '</option>';
+        }).join('') + '</select></div>';
+        html += '<div class="row"><label>Drop (ft)</label><input id="prCircDrop" type="number" min="0" step="1" value="' + (c.drop == null ? 15 : c.drop) + '" title="Lo que baja el cable del techo a las cajas: con techos de 10\' se calculan 10–15 ft por circuito"></div>';
+        html += '<div class="row"><label>× Unidades</label><input id="prCircMult" type="number" min="1" step="1" value="' + (c.mult || 1) + '" title="El mismo recorrido repetido: 3 pisos iguales = 3. Como el # of Units del Excel"></div>';
+        if (esTubo(c.cable)) {
+          html += '<div class="row"><label>Hilos (sin tierra)</label><input id="prCircHilos" type="number" min="1" max="6" step="1" value="' + hilosDe(c) + '" title="Conductores de fase/neutro dentro del tubo; la tierra se suma sola"></div>';
+        }
+        html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo. Cambia el color o el grosor abajo para distinguir circuitos.</div>';
+      } else if (e.open) {
         html += '<div><b>Length: ' + fmtFtIn(perimDe(e)) + '</b></div>';
+        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">⚡ Convertir en circuito (homerun)</button>';
       } else {
         html += '<div><b>Area: ' + (areaDe(e) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(perimDe(e)) + '</div>';
       }
@@ -5864,6 +5990,26 @@
     on('prWireFlip', 'click', function () { pushUndo(); e.side = -(e.side || 1); refresh(); });
     on('prWireLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.7; lastWireLw = e.lw; refresh(); });
     on('prGlifoK', 'change', function (n) { pushUndo(); e.glifoK = parseFloat(n.value) || 1; refresh(); });
+    // circuito / homerun
+    function circSet(campo, v, num) {
+      var et = findSel(); if (!et || !et.circ) return;
+      pushUndo(); et.circ[campo] = num ? (parseFloat(v) || 0) : v; recuerdaCirc(et.circ); refresh();
+    }
+    on('prCircPanel', 'change', function (n) { circSet('panel', n.value.trim()); });
+    on('prCircNum', 'change', function (n) { circSet('num', n.value, true); });
+    on('prCircDesc', 'change', function (n) { circSet('desc', n.value.trim()); });
+    on('prCircCable', 'change', function (n) { circSet('cable', n.value); });
+    on('prCircAmps', 'change', function (n) { circSet('amps', n.value, true); });
+    on('prCircPoles', 'change', function (n) { circSet('poles', n.value, true); });
+    on('prCircDrop', 'change', function (n) { circSet('drop', n.value, true); });
+    on('prCircMult', 'change', function (n) { circSet('mult', Math.max(1, parseInt(n.value, 10) || 1), true); });
+    on('prCircHilos', 'change', function (n) { circSet('hilos', Math.max(1, parseInt(n.value, 10) || 2), true); });
+    on('prToCirc', 'click', function () {
+      var et = findSel(); if (!et || !et.open) return;
+      pushUndo(); et.circ = nuevoCirc(); et.lineStyle = 'homerun'; et.lw = et.lw || 1.1; if (!et.capS || et.capS === 'none') et.capS = 'arrow';
+      recuerdaCirc(et.circ); refresh();
+      var fd = $('#prCircDesc'); if (fd) fd.focus();
+    });
     on('prAreaCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
     on('prAreaCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
     on('prWireCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
@@ -5925,6 +6071,16 @@
     state.openings = aberturasVivas();
     return n - state.openings.length;
   }
+  function circuitosAlPanel() {
+    var p = curPanel(), n = 0;
+    state.areas.forEach(function (ar) {
+      if (!ar.open || !ar.circ || !ar.circ.num) return;
+      var k = String(ar.circ.num);
+      p.circuits[k] = Object.assign(p.circuits[k] || {}, { desc: ar.circ.desc || ar.circ.cable, trip: String(ar.circ.amps || ''), poles: String(ar.circ.poles || 1) });
+      n++;
+    });
+    return n;
+  }
   function refreshCounts() {
     var body = $('#countsBody');
     var rows = '';
@@ -5968,6 +6124,24 @@
         rows += '<tr><td>' + esc(nomP) + '</td><td class="n">' + (areaSum[k] / 144).toFixed(1) + ' sq ft</td></tr>';
       });
     }
+    // CIRCUITOS / HOMERUNS: cable por tipo (trazo + drop) y breakers
+    var cabPorTipo = {}, brk = {}, nCirc = 0;
+    state.areas.forEach(function (ar) {
+      if (!ar.open || !ar.circ) return;
+      nCirc++;
+      partidasHomerun(ar).forEach(function (q) { cabPorTipo[q.item] = (cabPorTipo[q.item] || 0) + q.ft; });
+      var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
+      brk[kb] = (brk[kb] || 0) + 1;
+    });
+    if (nCirc) {
+      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">📋 → Panel Schedule</button></td></tr>';
+      Object.keys(cabPorTipo).forEach(function (k) {
+        rows += '<tr><td>' + esc(k) + ' <span class="muted small">(trazo + drop)</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
+      });
+      Object.keys(brk).sort().forEach(function (k) {
+        rows += '<tr><td>' + esc(k) + '</td><td class="n">' + brk[k] + '</td></tr>';
+      });
+    }
     // cableado: agrupado por etiqueta (o por estilo si no tiene)
     var wireGroups = {};
     state.wires.forEach(function (w) {
@@ -5993,6 +6167,13 @@
       });
     }
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
+    var bcp = $('#btnCircPanel');
+    if (bcp) bcp.addEventListener('click', function () {
+      pushUndo();
+      var n = circuitosAlPanel();
+      scheduleAutosave();
+      setHint('📋 ' + n + ' circuito(s) llevados al Panel Schedule — ábrelo con el botón de arriba para ver la tabla y las cargas');
+    });
   }
 
   /* ================= LISTA DE MARCAS — el Markups List de Bluebeam =================
@@ -6005,7 +6186,7 @@
      Es un panel FLOTANTE, no un modal: se queda abierto mientras recorres el
      plano fila por fila. Se arrastra por la barra y se redimensiona por la
      esquina, igual que el chat. */
-  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', wire: 'Cable/Tubo' };
+  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo' };
   function filasMarcas() {
     var out = [];
     state.walls.forEach(function (w) {
@@ -6032,7 +6213,10 @@
     });
     state.areas.forEach(function (a) {
       var est = LINE_STYLES[a.lineStyle] || LINE_STYLES.solid;
-      if (a.open) {
+      if (a.open && a.circ) {
+        var Lh = largoHomerun(a);
+        out.push({ kind: 'area', tipo: 'circ', id: a.id, nombre: rotuloCirc(a.circ), det: (a.circ.panel || '') + ' · drop ' + (a.circ.drop || 0) + '\'', medida: fmtFtIn(Lh), num: Lh });
+      } else if (a.open) {
         var L2 = perimDe(a);
         out.push({ kind: 'area', tipo: 'line', id: a.id, nombre: est.name.replace(/^[^A-Za-zÁ-ú]+/, ''), det: a.pts.length === 2 ? 'línea' : 'polilínea ' + a.pts.length + ' pts', medida: fmtFtIn(L2), num: L2 });
       } else {
@@ -6182,6 +6366,18 @@
       var L = wireLen(w);
       rows.push(['Wiring', WIRE_STYLE_NAMES[w.style || 'dashed'] || 'Cableado', w.label || '', 1, (L / 12).toFixed(2), fmtFtIn(L), '']);
     });
+    // circuitos: una fila por homerun (con su drop sumado) y los breakers agrupados
+    var brkCsv = {};
+    state.areas.forEach(function (ar) {
+      if (!ar.open || !ar.circ) return;
+      var etq = (ar.circ.panel || '') + ' #' + (ar.circ.num || '') + (ar.circ.desc ? ' ' + ar.circ.desc : '') + ' (' + (ar.circ.amps || '') + 'A/' + (ar.circ.poles || 1) + 'P, drop ' + (ar.circ.drop || 0) + ' ft' + ((ar.circ.mult || 1) > 1 ? ', ×' + ar.circ.mult : '') + ')';
+      partidasHomerun(ar).forEach(function (q) {
+        rows.push(['Circuits', q.item, etq, 1, (q.ft / 12).toFixed(2), fmtFtIn(q.ft), '']);
+      });
+      var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
+      brkCsv[kb] = (brkCsv[kb] || 0) + 1;
+    });
+    Object.keys(brkCsv).forEach(function (k) { rows.push(['Circuits', k, '', brkCsv[k], '', '', '']); });
     var wallLen = {};
     state.walls.forEach(function (w) { wallLen[w.type] = (wallLen[w.type] || 0) + wallGeom(w).len; });
     Object.keys(wallLen).forEach(function (k) {
@@ -6258,13 +6454,21 @@
         var key = w.label || WIRE_STYLE_NAMES[w.style || 'dashed'] || 'Cableado';
         wg[key] = (wg[key] || 0) + wireLen(w);
       });
+      // homeruns: el cable sale con el nombre que el estimador ya entiende
+      // ('12/2' → '12/2   ROMEX' via alias_takeoff) y con el drop sumado
+      (d.areas || []).forEach(function (ar) {
+        if (!ar.open || !ar.circ) return;
+        partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; });
+        var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
+        byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + 1;
+      });
       (d.walls || []).forEach(function (w) { wl[w.type] = (wl[w.type] || 0) + wallGeom(w).len; });
       (d.areas || []).forEach(function (a) {
         if (a.open || !AREA_PATTERNS[a.pattern] || a.pattern === 'none') return;
         areas.push([AREA_PATTERNS[a.pattern].name, Math.round(polyArea(a.pts) / 144)]);
       });
     });
-    Object.keys(byKey).forEach(function (k) { add(SYMBOLS[k].name, byKey[k], 'EA'); });
+    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA'); else if (SYMBOLS[k]) add(SYMBOLS[k].name, byKey[k], 'EA'); });
     Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA'); });
     Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
