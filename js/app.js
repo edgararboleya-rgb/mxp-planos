@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.T';
+  var APP_VERSION = 'v29.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2834,6 +2834,20 @@
     var cx = (w.x1 + w.x2) / 2 + nx * s, cy = (w.y1 + w.y2) / 2 + ny * s;
     return { d: 'M' + w.x1 + ',' + w.y1 + ' Q' + cx + ',' + cy + ' ' + w.x2 + ',' + w.y2, cx: cx, cy: cy };
   }
+  /* ASA DE CURVATURA (Edgar, 03/09: "las líneas curvas del wire, ¿se pueden
+   * editar para darle más curvatura o menos?"). Antes solo por el número
+   * "Curvatura" de Propiedades. Ahora el cable curvo seleccionado trae un
+   * rombo en la mitad del arco: se jala hacia afuera para abombar más, hacia
+   * la cuerda para aplanar, y al otro lado para voltear el arco. */
+  function wireEsCurvo(w) {
+    var st = w.style || 'dashed';
+    return !(ES_L[st] || ES_TUBO[st] != null || st.indexOf('straight') === 0);
+  }
+  function wireMedio(w) {
+    // punto del arco en t = 0.5 de la cuadrática: la cuerda + la mitad del control
+    var wp = wirePath(w);
+    return [0.25 * w.x1 + 0.5 * wp.cx + 0.25 * w.x2, 0.25 * w.y1 + 0.5 * wp.cy + 0.25 * w.y2];
+  }
   function wireLen(w) {
     var st = w.style || 'dashed';
     if (st === 'straight' || st === 'straightdashed' || st === 'conduit') {
@@ -3653,6 +3667,11 @@
           if (whr > 0.5) {
             s += '<circle class="handle" data-h="1" cx="' + e.x1 + '" cy="' + e.y1 + '" r="' + whr + '"/>';
             s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + whr + '"/>';
+            if (wireEsCurvo(e)) {
+              // rombo de CURVATURA en la mitad del arco
+              var wm = wireMedio(e), wr = whr * 1.15;
+              s += '<path class="handle" data-h="bul" d="M' + wm[0] + ',' + (wm[1] - wr) + ' L' + (wm[0] + wr) + ',' + wm[1] + ' L' + wm[0] + ',' + (wm[1] + wr) + ' L' + (wm[0] - wr) + ',' + wm[1] + ' Z"/>';
+            }
           }
         } else if (sel.kind === 'leader') {
           var lw = (e.text.length * (e.size || 7)) * 0.58 + 6;
@@ -4352,6 +4371,10 @@
         var whr2 = Math.min((document.body.classList.contains('touch') ? 14 : 8) / view.z + 3, wLen2 / 3);
         if (Math.hypot(p[0] - wsel.x1, p[1] - wsel.y1) < whr2) { drag = { mode: 'wireEnd', wire: wsel, end: 1, start: p, snap: snapshot(), moved: false }; return; }
         if (Math.hypot(p[0] - wsel.x2, p[1] - wsel.y2) < whr2) { drag = { mode: 'wireEnd', wire: wsel, end: 2, start: p, snap: snapshot(), moved: false }; return; }
+        if (wireEsCurvo(wsel)) {
+          var wmH = wireMedio(wsel);
+          if (Math.hypot(p[0] - wmH[0], p[1] - wmH[1]) < whr2 * 1.2) { drag = { mode: 'wireBul', wire: wsel, start: p, snap: snapshot(), moved: false }; return; }
+        }
       }
     }
     // asas de extremos de una medida/cota seleccionada
@@ -4607,6 +4630,19 @@
       setHint('Largo ' + fmtFtIn(wireLen(drag.wire)));
       renderSymbols(); renderSel(); return;
     }
+    if (drag.mode === 'wireBul') {
+      // distancia con signo del puntero a la cuerda, medida por la normal: el
+      // arco pasa por la mitad del control, así que bulge = 2·d / largo
+      var wb = drag.wire, dxb = wb.x2 - wb.x1, dyb = wb.y2 - wb.y1, lenb = Math.hypot(dxb, dyb) || 1e-6;
+      var nxb = -dyb / lenb, nyb = dxb / lenb;
+      var db = (p[0] - (wb.x1 + wb.x2) / 2) * nxb + (p[1] - (wb.y1 + wb.y2) / 2) * nyb;
+      var bul = Math.max(-0.6, Math.min(0.6, 2 * db / lenb));
+      if (Math.abs(bul) < 0.03) bul = 0;   // cerca de la cuerda se endereza solo
+      wb.side = 1; wb.bulge = Math.round(bul * 100) / 100;
+      drag.moved = true;
+      setHint('↕ Curvatura ' + wb.bulge.toFixed(2) + (wb.bulge === 0 ? ' — recto' : '') + ' · jala más lejos de la cuerda para abombar, al otro lado para voltear el arco');
+      renderSymbols(); renderSel(); return;
+    }
     if (drag.mode === 'dimEnd') {
       var od = drag.dim;
       var anchor = drag.end === 1 ? [od.x2, od.y2] : [od.x1, od.y1];
@@ -4848,7 +4884,7 @@
       if (cambioE) { pushUndo(drag.snap); drag = null; refresh(); return; }
     }
     if (drag.mode === 'move' && drag.kind === 'symbol' && drag.moved) renderSymbols();   // la capa completa, una vez, al soltar
-    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'wireEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
+    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'wireEnd' || drag.mode === 'wireBul' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
     }
@@ -7292,7 +7328,9 @@
     riser_disc60: 'Disconnect / Safety Switch', riser_disc100: 'Disconnect / Safety Switch', riser_disc: 'Disconnect / Safety Switch',
     riser_disc400: 'Disconnect / Safety Switch', riser_disc600: 'Disconnect / Safety Switch',
     riser_ats: 'ATS (Transfer Switch)', riser_ats400: 'ATS (Transfer Switch)', riser_ev: 'EV Charger', riser_ct: 'CT Cabinet',
-    riser_ground: 'Ground Rods (2)', riser_ground_esc: 'Ground Rods (2)', riser_gnd_sym: 'Ground Rods (2)', riser_spd: 'Surge Protector (SPD)'
+    riser_ground: 'Ground Rods (2)', riser_ground_esc: 'Ground Rods (2)', riser_gnd_sym: 'Ground Rods (2)', riser_spd: 'Surge Protector (SPD)',
+    // receptáculos conmutados: mismo material que el duplex (ya cruzado en alias_takeoff)
+    recep_half_sw: 'Duplex Receptacle', recep_sw: 'Duplex Receptacle'
   };
   function nombreEst(k) { return EST_NOMBRE[k] || (SYMBOLS[k] ? SYMBOLS[k].name : k); }
   // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,

@@ -70,6 +70,16 @@
   S.recep_usb = { name: 'USB Receptacle', short: 'USB Recept.', cat: 'electrical', layer: 'electrical', w: 13, h: 28.5, bx: 0, by: 4,
     svg: duplexBase() + T(0, 16.5, 5, 'USB', { bold: true }) };
 
+  /* Receptáculos CONTROLADOS POR SWITCH (Edgar, 03/09). Convención del oficio:
+     el medio conmutado (half-hot: una salida siempre viva, la otra por el
+     switch de la lámpara de mesa) se dibuja con la MITAD SUPERIOR del círculo
+     rellena; el conmutado completo lleva la S encima, como los switches. Al
+     estimador van como duplex normal: el material es el mismo receptáculo. */
+  S.recep_half_sw = { name: 'Half-Switched Receptacle', short: 'Half-Sw Recept.', cat: 'electrical', layer: 'electrical', w: 16, h: 20,
+    svg: duplexBase() + '<path d="M-5.5,0 A5.5,5.5 0 0 1 5.5,0 Z" fill="#14161a" stroke="none"/>' };
+  S.recep_sw = { name: 'Switched Receptacle', short: 'Sw Recept.', cat: 'electrical', layer: 'electrical', w: 16, h: 26, by: -3,
+    svg: duplexBase() + T(0.6, -11, 5.5, 'S', { italic: true, bold: true }) };
+
   S.sw_single = { name: 'Single-Pole Switch', short: 'Switch S', cat: 'electrical', layer: 'electrical', w: 12, h: 16,
     svg: T(0, 5, 14, 'S', { italic: true, bold: true }) };
 
