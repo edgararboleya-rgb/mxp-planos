@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.O';
+  var APP_VERSION = 'v29.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -235,7 +235,7 @@
     panels: [],    // panel schedules E-2
     precision: 4,  // fracción de pulgada para medidas (8=1/8")
     symEsc: 0.5,   // tamaño de los devices (switches, receptáculos…) respecto al dibujo — Edgar 03/09: "están muy grandes"
-    lwEsc: 0.7,    // grosor de las líneas del plano (paredes, puertas, símbolos) — Edgar 03/09: "ponlas más finas"
+    lwEsc: 0.5,    // grosor de las líneas del plano (paredes, puertas, símbolos) — Edgar 03/09: "ponlas más finas", luego "más fino" (0.7 → 0.5)
     sheets: [{ no: '', title: '', data: null }],   // multi-hoja: cada hoja guarda su dibujo (sin nombre hasta que haya contenido)
     curSheet: 0,
     project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }
@@ -2658,7 +2658,7 @@
   // Símbolos, 30–120 %), por defecto 0.5. Y va en el proyecto, no en el
   // aparato: el plano se ve igual en el iPad, en la PC y en el PDF.
   function escSym() { var v = Number(state.symEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.5; }
-  function escLw() { var v = Number(state.lwEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.7; }
+  function escLw() { var v = Number(state.lwEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.5; }
   /* GROSOR DE LÍNEAS (Edgar, 03/09: "las líneas ponlas más finas"). Los
    * grosores del plano viven en el <style> del SVG en pulgadas de mundo
    * (pared 0.9, puerta 1.4, símbolo 1…). En vez de tocar cada regla, se
@@ -9344,7 +9344,7 @@
     pintaEscalas(); refresh(); scheduleAutosave();
   });
   $('#pjLwEsc').addEventListener('input', function () {
-    state.lwEsc = Math.min(1.5, Math.max(0.3, (parseInt(this.value, 10) || 70) / 100));
+    state.lwEsc = Math.min(1.5, Math.max(0.3, (parseInt(this.value, 10) || 50) / 100));
     pintaEscalas(); scheduleAutosave();
   });
   pintaEscalas();
@@ -11653,7 +11653,7 @@
     if ([8, 4, 2, 1].indexOf(+st.precision) < 0) st.precision = 4;
     // ajustes de escala: fuera de rango → por defecto (proyectos viejos no traen el campo)
     if (!(isFinite(+st.symEsc) && +st.symEsc >= 0.3 && +st.symEsc <= 1.5)) st.symEsc = 0.5;
-    if (!(isFinite(+st.lwEsc) && +st.lwEsc >= 0.3 && +st.lwEsc <= 1.5)) st.lwEsc = 0.7;
+    if (!(isFinite(+st.lwEsc) && +st.lwEsc >= 0.3 && +st.lwEsc <= 1.5)) st.lwEsc = 0.5;
     return null;
   }
   function hayContenido() {
