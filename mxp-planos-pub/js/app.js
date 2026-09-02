@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.X';
+  var APP_VERSION = 'v29.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2604,15 +2604,26 @@
           '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(g) + '</text>';
       }
     }
-    if (g === 'led' && tr.tot >= 18) {
-      // "LED" pequeño encima de la mitad del trazo, derecho siempre
+    if (g === 'led' && tr.tot >= 18 && a.ledRot !== 'no') {
+      /* El rótulo "LED". Edgar, 03/09: "dame la opción de que quede en el
+         centro de las luces con fondo atrás, para que no lo pique y se vea
+         que hay luz". Por defecto va AL CENTRO del trazo, sobre un fondito
+         color papel que corta la línea justo donde está la palabra (como el
+         glifo de una línea de utilidad). `ledRot: 'encima'` lo pone arriba,
+         como antes; 'no' lo quita. Se elige en Propiedades. */
       var Pm = puntoEn(tr, tr.tot / 2);
       if (Pm) {
-        var am = Pm.ang, rad = am * Math.PI / 180;
-        var ox = Math.sin(rad) * 4.5 * kg, oy = -Math.cos(rad) * 4.5 * kg;   // 6" por encima (normal a la izquierda del avance)
+        var am = Pm.ang, rad = am * Math.PI / 180, fs = 4 * kg;
+        var encima = a.ledRot === 'encima';
+        var ox = encima ? Math.sin(rad) * 4.5 * kg : 0, oy = encima ? -Math.cos(rad) * 4.5 * kg : 0;
         if (am > 90 || am < -90) { am += 180; ox = -ox; oy = -oy; }
-        out += '<text x="0" y="0" transform="translate(' + (Pm.x + ox).toFixed(2) + ' ' + (Pm.y + oy).toFixed(2) +
-          ') rotate(' + am.toFixed(1) + ')" font-size="' + (4 * kg).toFixed(1) +
+        var tfL = 'translate(' + (Pm.x + ox).toFixed(2) + ' ' + (Pm.y + oy).toFixed(2) + ') rotate(' + am.toFixed(1) + ')';
+        if (!encima) {
+          var wL = fs * 0.72 * 3 + fs * 0.9, hL = fs * 1.15;   // "LED" en mayúsculas + aire
+          out += '<rect x="' + (-wL / 2).toFixed(2) + '" y="' + (-hL / 2).toFixed(2) + '" width="' + wL.toFixed(2) + '" height="' + hL.toFixed(2) +
+            '" rx="' + (fs * 0.2).toFixed(2) + '" fill="' + PAPEL + '" stroke="none" transform="' + tfL + '" style="pointer-events:none"/>';
+        }
+        out += '<text x="0" y="0" transform="' + tfL + '" font-size="' + fs.toFixed(1) +
           '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
           '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">LED</text>';
       }
@@ -6591,6 +6602,12 @@
             return '<option value="' + o2[0] + '"' + (lwEf === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
           }).join('');
         })() + '</select></div>';
+      if (e.lineStyle === 'ledstrip') {
+        html += '<div class="row"><label>Rótulo LED</label><select id="prLedRot">' +
+          [['centro', 'Al centro, con fondo (se ve la luz)'], ['encima', 'Encima de la tira'], ['no', 'Sin rótulo']].map(function (o) {
+            return '<option value="' + o[0] + '"' + ((e.ledRot || 'centro') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+          }).join('') + '</select></div>';
+      }
       // el tamaño del rótulo solo se ofrece si la línea LLEVA rótulo
       var estSel = LINE_STYLES[e.lineStyle || 'solid'];
       if (estSel && estSel.glifo) {
@@ -6881,6 +6898,7 @@
     });
     var bSC = $('#prSinCurva');
     if (bSC) bSC.addEventListener('click', function () { pushUndo(); e.bul = null; refresh(); showProps(); });
+    on('prLedRot', 'change', function (n) { pushUndo(); if (n.value === 'centro') delete e.ledRot; else e.ledRot = n.value; refresh(); });
     on('prCloudArc', 'change', function (n) { pushUndo(); e.arco = CLOUD_ARCS[n.value] ? n.value : 'media'; curCloudArc = e.arco; refresh(); });
     on('prAreaLine', 'change', function (n) {
       pushUndo(); e.lineStyle = n.value; curLineStyle = n.value;
@@ -9586,7 +9604,7 @@
     (state.symbols || []).forEach(function (o) { nums(o, ['x', 'y', 'rot', 'scale', 'sx', 'sy', 'op']); });
     (state.texts || []).forEach(function (o) { nums(o, ['x', 'y', 'size', 'rot', 'op']); col(o); if (o.text != null) o.text = String(o.text); });
     (state.dims || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'off', 'op']); });
-    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK', 'rellenoOp']); col(o); if (o.relleno != null) o.relleno = colorSeguro(o.relleno); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
+    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK', 'rellenoOp']); col(o); if (o.relleno != null) o.relleno = colorSeguro(o.relleno); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.ledRot != null && o.ledRot !== 'encima' && o.ledRot !== 'no') delete o.ledRot; if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
     (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
