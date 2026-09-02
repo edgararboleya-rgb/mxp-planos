@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.S';
+  var APP_VERSION = 'v29.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1340,6 +1340,17 @@
   var curLineCap = 'none';    // la herramienta Línea: ➤ Flecha pone punta al final
   // forma de la herramienta Rect: rectangulo o poligono regular (poly3, poly5...)
   var curShapeKind = 'rect';
+  /* NUBE DE REVISIÓN — tamaño de la vuelta (Edgar, 03/09: "que las vueltas se
+   * puedan poner de varios tipos como en Bluebeam, más pequeñas y más grandes,
+   * de dos o tres medidas"). El radio del festón en pulgadas de mundo; 'media'
+   * es la nube de siempre (9"), así las nubes viejas sin `arco` no cambian. */
+  var CLOUD_ARCS = {
+    chica:  { r: 5,  name: 'Vuelta chica (5")' },
+    media:  { r: 9,  name: 'Vuelta normal (9")' },
+    grande: { r: 15, name: 'Vuelta grande (15")' }
+  };
+  var curCloudArc = 'media';
+  function cloudR(a) { var c = a && CLOUD_ARCS[a.arco]; return c ? c.r : 9; }
   var curDoorType = 'door', curWinType = 'window', curDoorW = 0;   // 0 = ancho por defecto del tipo
   var pendingAreaLabel = false;   // la próxima área/polilínea muestra su medida en el plano
 
@@ -2335,8 +2346,9 @@
     return d + (a.open ? '' : ' Z');
   }
   // contorno de nube de revisión: arcos festoneados a lo largo de cada lado
-  function cloudPath(pts, closed) {
-    var r = 9, n = pts.length, segs = closed ? n : n - 1;
+  function cloudPath(pts, closed, r) {
+    r = r || 9;
+    var n = pts.length, segs = closed ? n : n - 1;
     var d = 'M' + pts[0][0] + ',' + pts[0][1];
     for (var i = 0; i < segs; i++) {
       var a = pts[i], b = pts[(i + 1) % n];
@@ -2604,7 +2616,7 @@
       if (a.open || a.pattern === 'none' || !pdef) fill = 'none';
       else if (pdef.solid) fill = pdef.solid;
       else fill = 'url(#' + ensurePattern(a.pattern, a.rot || 0) + ')';
-      var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open) : areaPath(plineRecortada(a));
+      var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open, cloudR(a)) : areaPath(plineRecortada(a));
       // el preset trae su tipo de linea; si el usuario eligio otra, manda la suya
       var est = LINE_STYLES[a.lineStyle] || (pdef && pdef.dash && !a.open ? LINE_STYLES[pdef.dash] : null) || LINE_STYLES.solid;
       var dEst = dashDe(a, est);
@@ -4207,8 +4219,9 @@
       drawing.cursor = b;
     } else if (drawing && drawing.mode === 'shape2') {
       var spts = shapePts(drawing.kind === 'cloud' ? 'rect' : drawing.kind, drawing.a, [Math.round(p[0]), Math.round(p[1])], ev && ev.shiftKey);
-      var d2 = 'M' + spts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z';
-      G.prev.innerHTML = '<g class="preview"><path d="' + d2 + '" fill="none" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
+      var d2 = drawing.kind === 'cloud' ? cloudPath(spts, true, cloudR({ arco: curCloudArc }))
+        : 'M' + spts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z';
+      G.prev.innerHTML = '<g class="preview"><path d="' + d2 + '" fill="none" stroke="#0b84ff" stroke-width="1.2"' + (drawing.kind === 'cloud' ? '' : ' stroke-dasharray="5 4"') + '/></g>';
     } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun') && !drawing) {
       // AÚN NO HAY LÍNEA: las guías ya trabajan, para que veas DÓNDE empezar.
       // Es lo del refrigerador: el gabinete sigue al otro lado y la guía verde
@@ -4966,7 +4979,7 @@
     drawing = null; G.prev.innerHTML = '';
     pushUndo();
     var e = { id: uid(), pts: pts, pattern: 'none', rot: 0 };
-    if (isCloud) e.lineStyle = 'cloud';
+    if (isCloud) { e.lineStyle = 'cloud'; e.arco = curCloudArc; }
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
@@ -6423,6 +6436,12 @@
       }
       html += '<div class="row"><label>Line</label><select id="prAreaLine">' +
         opcionesLinea(e.lineStyle || 'solid') + '</select></div>';
+      if (e.lineStyle === 'cloud') {
+        html += '<div class="row"><label>Vuelta</label><select id="prCloudArc">' +
+          Object.keys(CLOUD_ARCS).map(function (k) {
+            return '<option value="' + k + '"' + ((CLOUD_ARCS[e.arco] ? e.arco : 'media') === k ? ' selected' : '') + '>' + esc(CLOUD_ARCS[k].name) + '</option>';
+          }).join('') + '</select></div>';
+      }
       // muestrario fijo de colores: el selector nativo no abre dentro del visor
       html += '<div class="row"><label>Color</label><div class="swRow" id="prColorRow">' +
         COLOR_PRESETS.map(function (c) {
@@ -6729,6 +6748,7 @@
     });
     var bSC = $('#prSinCurva');
     if (bSC) bSC.addEventListener('click', function () { pushUndo(); e.bul = null; refresh(); showProps(); });
+    on('prCloudArc', 'change', function (n) { pushUndo(); e.arco = CLOUD_ARCS[n.value] ? n.value : 'media'; curCloudArc = e.arco; refresh(); });
     on('prAreaLine', 'change', function (n) {
       pushUndo(); e.lineStyle = n.value; curLineStyle = n.value;
       refresh(); showProps();   // la fila Rótulo aparece o se va segun el estilo
@@ -9418,7 +9438,7 @@
     (state.symbols || []).forEach(function (o) { nums(o, ['x', 'y', 'rot', 'scale', 'sx', 'sy', 'op']); });
     (state.texts || []).forEach(function (o) { nums(o, ['x', 'y', 'size', 'rot', 'op']); col(o); if (o.text != null) o.text = String(o.text); });
     (state.dims || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'off', 'op']); });
-    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK']); col(o); if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
+    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK']); col(o); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
     (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op']); if (o.text != null) o.text = String(o.text); });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
@@ -12844,6 +12864,11 @@
       });
       html += '<div class="tmHead">Dibujo libre</div>';
       html += '<div class="tmItem" data-k="__pline"><span>⌐ Polígono a mano — clic en cada esquina y cierra en el 1er punto</span></div>';
+    } else if (kind === 'cloud') {
+      html += '<div class="tmHead">Tamaño de la vuelta</div>';
+      Object.keys(CLOUD_ARCS).forEach(function (k) {
+        html += '<div class="tmItem' + (k === curCloudArc ? ' cur' : '') + '" data-k="' + k + '"><span>☁ ' + esc(CLOUD_ARCS[k].name) + '</span></div>';
+      });
     } else if (kind === 'window') {
       html += '<div class="tmHead">Tipo de ventana</div>';
       ['window', 'slider'].forEach(function (k) {
@@ -12932,6 +12957,10 @@
               ? 'Rectángulo: 2 clics (SHIFT = cuadrado)'
               : 'Polígono de ' + k.slice(4) + ' lados: 2 clics para la caja (SHIFT = regular exacto)');
           }
+        } else if (kind === 'cloud') {
+          if (CLOUD_ARCS[k]) curCloudArc = k;
+          setTool('cloud');
+          setHint('Nube con ' + CLOUD_ARCS[curCloudArc].name.toLowerCase() + ': clic en una esquina y clic en la opuesta');
         } else if (kind === 'window') {
           curWinType = k;
           setTool('window');
