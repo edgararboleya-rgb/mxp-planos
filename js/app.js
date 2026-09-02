@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.W';
+  var APP_VERSION = 'v29.X';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1216,7 +1216,7 @@
        símbolo de LED strip"). Es un TIPO DE LÍNEA, no un símbolo fijo de 8 ft:
        se traza con Line o Polyline (bajo el gabinete, en la cornisa, en el
        escalón) y el takeoff la cuenta en FT (`ft`: nombre para el estimador). */
-    ledstrip: { name: '▭▭▭ LED STRIP — tira LED a la medida (cuenta en FT)', dash: '', lw: 1.1, glifo: 'led', paso: 12, ft: 'LED Strip Light' },
+    ledstrip: { name: '▭▭▭ LED STRIP — tira LED a la medida (cuenta en FT)', dash: '', lw: 0.7, glifo: 'led', paso: 12, ft: 'LED Strip Light' },   // 03/09 Edgar: "más fino" (era 1.1)
     cloud:    { name: '☁ Nube de revisión', dash: '' },
 
     /* -- lindero y servidumbres -- */
@@ -2577,9 +2577,9 @@
           ') rotate(' + P.ang.toFixed(1) + ')"';
         if (g === 'led') {
           // la tira: una rayita cruzada cada 12" (los cortes de la cinta LED)
-          var rl = 3 * kg;
+          var rl = 1.8 * kg;   // rayita de 3.6" (era 6"): Edgar, "las transversales más pequeñas"
           out += '<g' + tf + '><path d="M0,' + (-rl) + ' L0,' + rl + '" stroke="' + col +
-            '" stroke-width="' + (lw * 0.8).toFixed(2) + '" fill="none"/></g>';
+            '" stroke-width="' + (lw * 0.9).toFixed(2) + '" fill="none"/></g>';
         } else if (g === 'x') {
           out += '<g' + tf + '><path d="M' + (-r) + ',' + (-r) + ' L' + r + ',' + r +
             ' M' + (-r) + ',' + r + ' L' + r + ',' + (-r) + '" stroke="' + col +
@@ -2609,10 +2609,10 @@
       var Pm = puntoEn(tr, tr.tot / 2);
       if (Pm) {
         var am = Pm.ang, rad = am * Math.PI / 180;
-        var ox = Math.sin(rad) * 6 * kg, oy = -Math.cos(rad) * 6 * kg;   // 6" por encima (normal a la izquierda del avance)
+        var ox = Math.sin(rad) * 4.5 * kg, oy = -Math.cos(rad) * 4.5 * kg;   // 6" por encima (normal a la izquierda del avance)
         if (am > 90 || am < -90) { am += 180; ox = -ox; oy = -oy; }
         out += '<text x="0" y="0" transform="translate(' + (Pm.x + ox).toFixed(2) + ' ' + (Pm.y + oy).toFixed(2) +
-          ') rotate(' + am.toFixed(1) + ')" font-size="' + (5 * kg).toFixed(1) +
+          ') rotate(' + am.toFixed(1) + ')" font-size="' + (4 * kg).toFixed(1) +
           '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
           '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">LED</text>';
       }
