@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.N';
+  var APP_VERSION = 'v29.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -234,6 +234,8 @@
     bg2: null,     // overlay de comparación (plano rojo encima del azul)
     panels: [],    // panel schedules E-2
     precision: 4,  // fracción de pulgada para medidas (8=1/8")
+    symEsc: 0.5,   // tamaño de los devices (switches, receptáculos…) respecto al dibujo — Edgar 03/09: "están muy grandes"
+    lwEsc: 0.7,    // grosor de las líneas del plano (paredes, puertas, símbolos) — Edgar 03/09: "ponlas más finas"
     sheets: [{ no: '', title: '', data: null }],   // multi-hoja: cada hoja guarda su dibujo (sin nombre hasta que haya contenido)
     curSheet: 0,
     project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }
@@ -2651,6 +2653,32 @@
   // pedido de Edgar: la simbología del oficio (devices, switches, GFCI,
   // plomería…) se ve muy grande — factor global 0.7. Los MUEBLES y el
   // site del escaneo NO se tocan: van a tamaño real de la casa.
+  // 03/09: "los switch están muy grandes, escalados al actual plano". El
+  // factor deja de ser fijo: es un AJUSTE DEL PROYECTO (Propiedades →
+  // Símbolos, 30–120 %), por defecto 0.5. Y va en el proyecto, no en el
+  // aparato: el plano se ve igual en el iPad, en la PC y en el PDF.
+  function escSym() { var v = Number(state.symEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.5; }
+  function escLw() { var v = Number(state.lwEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.7; }
+  /* GROSOR DE LÍNEAS (Edgar, 03/09: "las líneas ponlas más finas"). Los
+   * grosores del plano viven en el <style> del SVG en pulgadas de mundo
+   * (pared 0.9, puerta 1.4, símbolo 1…). En vez de tocar cada regla, se
+   * reescribe el <style> con el factor del proyecto: así el PNG/PDF —que
+   * clona el SVG con su <style>— sale igual que la pantalla. NO se escalan
+   * las ayudas de pantalla (selección, asas, imanes, grilla, cotas, medir). */
+  var estiloBase = null;
+  function aplicaGrosor() {
+    var st = document.getElementById('mxpStyle'); if (!st) return;
+    if (estiloBase == null) estiloBase = st.textContent;
+    var k = escLw(), out = [];
+    estiloBase.split('\n').forEach(function (ln) {
+      if (/\.(sel|handle|osnap|gridline|dim|meas)\b/.test(ln) || /\.mxp\s*\{/.test(ln)) { out.push(ln); return; }
+      out.push(ln.replace(/stroke-width:\s*([\d.]+)/g, function (m, w) { return 'stroke-width:' + (Math.round(parseFloat(w) * k * 1000) / 1000); }));
+    });
+    var txt = out.join('\n');
+    if (st.textContent !== txt) st.textContent = txt;
+  }
+  window.__grosorDbg = function () { return (document.getElementById('mxpStyle') || {}).textContent; };
+  window.__restoreDbg = function (o) { try { restoreProject(o); return 'ok'; } catch (e) { return 'EXC ' + e.message; } };
   function symK(def) {
     // capa 'furniture' = objetos a TAMAÑO REAL (camas, toilet, tub, nevera
     // — vengan del escaneo o de la paleta); site (árboles) igual.
@@ -2659,7 +2687,7 @@
     // el plano de la casa tiene que ocupar lo que ocupa en la pared. Los
     // devices —receptáculos, switches— siguen al 0.7: ésos son símbolos de
     // medida convencional, no cajas a escala.
-    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'siteplan' || def.cat === 'riser')) ? 1 : 0.7;
+    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'siteplan' || def.cat === 'riser')) ? 1 : escSym();
   }
   /* FONDO OPACO DEL EQUIPO (Edgar, 08/30: "cuando yo haga un area, por ejemplo
    * un counter, los equipos que ponga encima —un sink, un dishwasher— que no
@@ -9305,6 +9333,21 @@
     state.precision = parseInt(this.value, 10) || 4;
     refresh(); scheduleAutosave();
   });
+  // Símbolos y Líneas: deslizadores en %, viven en el proyecto
+  function pintaEscalas() {
+    $('#pjSymEsc').value = String(Math.round(escSym() * 100)); $('#pjSymEscV').textContent = Math.round(escSym() * 100) + '%';
+    $('#pjLwEsc').value = String(Math.round(escLw() * 100)); $('#pjLwEscV').textContent = Math.round(escLw() * 100) + '%';
+    aplicaGrosor();
+  }
+  $('#pjSymEsc').addEventListener('input', function () {
+    state.symEsc = Math.min(1.5, Math.max(0.3, (parseInt(this.value, 10) || 50) / 100));
+    pintaEscalas(); refresh(); scheduleAutosave();
+  });
+  $('#pjLwEsc').addEventListener('input', function () {
+    state.lwEsc = Math.min(1.5, Math.max(0.3, (parseInt(this.value, 10) || 70) / 100));
+    pintaEscalas(); scheduleAutosave();
+  });
+  pintaEscalas();
   $('#pjScale').addEventListener('change', function () {
     state.printScale = this.value; scheduleAutosave();
   });
@@ -11608,6 +11651,9 @@
     var cs = st.curSheet;
     if (!(Number.isInteger(cs) && cs >= 0 && (!st.sheets || cs < st.sheets.length))) st.curSheet = 0;
     if ([8, 4, 2, 1].indexOf(+st.precision) < 0) st.precision = 4;
+    // ajustes de escala: fuera de rango → por defecto (proyectos viejos no traen el campo)
+    if (!(isFinite(+st.symEsc) && +st.symEsc >= 0.3 && +st.symEsc <= 1.5)) st.symEsc = 0.5;
+    if (!(isFinite(+st.lwEsc) && +st.lwEsc >= 0.3 && +st.lwEsc <= 1.5)) st.lwEsc = 0.7;
     return null;
   }
   function hayContenido() {
@@ -11653,6 +11699,7 @@
     state.huecos = o.state.huecos || [];
     state.precision = o.state.precision || 4;
     $('#pjPrec').value = String(state.precision);
+    pintaEscalas();
     state.printScale = o.state.printScale || 'fit';
     $('#pjScale').value = state.printScale;
     ponEqName(!!o.state.eqNameOff);   // la casilla de los nombres viaja con el proyecto

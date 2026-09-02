@@ -125,7 +125,7 @@
     <!-- ======= LIENZO ======= -->
     <div id="canvasWrap">
       <svg id="canvas" class="mxp" xmlns="http://www.w3.org/2000/svg">
-        <style>
+        <style id="mxpStyle">
           .mxp { background:#f5f4ef; }
           .mxp .sym, .mxp .arch { stroke:#14161a; fill:none; stroke-width:1; stroke-linecap:round; stroke-linejoin:round; }
           .mxp .sym text, .mxp text.lbl { fill:#14161a; stroke:none; font-family:Arial, Helvetica, sans-serif; }
@@ -246,6 +246,14 @@
               <option value="2">1/2"</option>
               <option value="1">1"</option>
             </select>
+          </div>
+          <div class="row" title="Tamaño de los devices (switches, receptáculos, luces…) respecto al plano. Muebles, paneles y site siguen a tamaño real. Se guarda con el proyecto y sale igual en el PDF."><label>Símbolos</label>
+            <input type="range" id="pjSymEsc" min="30" max="120" step="5" value="50" style="flex:1;min-width:0">
+            <span id="pjSymEscV" class="small muted" style="width:36px;text-align:right;flex:none">50%</span>
+          </div>
+          <div class="row" title="Grosor de las líneas del plano: paredes, puertas, ventanas, símbolos, cables. No cambia las ayudas de pantalla (selección, cotas, grilla). Se guarda con el proyecto y sale igual en el PDF."><label>Líneas</label>
+            <input type="range" id="pjLwEsc" min="40" max="130" step="5" value="70" style="flex:1;min-width:0">
+            <span id="pjLwEscV" class="small muted" style="width:36px;text-align:right;flex:none">70%</span>
           </div>
           <div class="row"><label>Hoja</label>
             <select id="pjSheet" style="flex:1" title="Qué sale al imprimir o exportar el PDF">
