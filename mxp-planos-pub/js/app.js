@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.L';
+  var APP_VERSION = 'v29.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -191,7 +191,7 @@
       content: '<path d="M0,4 Q3,1 6,4 T12,4 T18,4 T24,4"' + PAT_STROKE + '/><path d="M0,10 Q3,7 6,10 T12,10 T18,10 T24,10"' + PAT_STROKE + '/>' },
     spa_agua: { name: '♨ Spa / Jacuzzi — agua + borde', w: 16, h: 8, coping: 8,
       content: '<path d="M0,3 Q2,1 4,3 T8,3 T12,3 T16,3"' + PAT_STROKE + '/><path d="M0,7 Q2,5 4,7 T8,7 T12,7 T16,7"' + PAT_STROKE + '/>' },
-    pavers: { name: 'Pavers (running bond)', w: 32, h: 16,
+    pavers_rb: { name: 'Pavers (running bond)', w: 32, h: 16,
       content: '<path d="M0,8 H32 M0,16 H32 M16,0 V8 M0,8 V16 M32,8 V16"' + PAT_STROKE + '/><path d="M8,8 V16 M24,8 V16"' + PAT_STROKE + '/>' },
     carpet: { name: 'Carpet', w: 12, h: 12,
       content: '<line x1="2" y1="3" x2="4" y2="3"' + PAT_STROKE + '/><line x1="8" y1="9" x2="10" y2="9"' + PAT_STROKE + '/>' },
@@ -271,6 +271,7 @@
   var lastWireStyle = 'dashed';       // la herramienta Cable recuerda el último estilo
   var eqNameOff = false;              // nombres impresos en el equipo del riser (PANEL, DISC…)
   var lastWireLw = 0.7;               // …y el último grosor
+  var lastWireCapS = 'none', lastWireCapE = 'none';   // …y las últimas puntas (10 feeders con flecha)
 
   var svg = $('#canvas');
   var G = {
@@ -392,7 +393,11 @@
     if (state.bg && o.bgMeta) { state.bg.x = o.bgMeta.x; state.bg.y = o.bgMeta.y; state.bg.w = o.bgMeta.w; state.bg.h = o.bgMeta.h; state.bg.opacity = o.bgMeta.opacity; }
     if (state.bg2 && o.bg2Meta) { state.bg2.x = o.bg2Meta.x; state.bg2.y = o.bg2Meta.y; state.bg2.w = o.bg2Meta.w; state.bg2.h = o.bg2Meta.h; state.bg2.opacity = o.bg2Meta.opacity; }
     limpiaHuerfanas();      // aberturas cuya pared ya no existe
-    sel = null; selGroup = null;   // (auditoria 31/08) el grupo no puede sobrevivir a un deshacer
+    // (auditoría texto 03/09) la selección sobrevive si la pieza sigue ahí:
+    // Ctrl+Z escribiendo en Propiedades te sacaba del cuadro y había que
+    // volver a buscar el rótulo. El GRUPO sí se suelta (auditoría 31/08).
+    var keepSel = sel && entityOf(sel) ? sel : null;
+    sel = keepSel; selGroup = null;
     refresh();
     scheduleAutosave();            // (auditoria 31/08) deshacer tambien es un cambio que hay que guardar
   }
@@ -568,6 +573,53 @@
       h.type = 'blockdry'; h.drySide = lado;
       renderWalls();
       setHint('🧱 Ese bloque ya lleva su drywall: quedó como "8\" Block + Drywall" con la línea fina del lado que dibujaste — UNA pared, no dos encimadas (el lado se cambia en Propiedades)');
+      return true;
+    }
+    return false;
+  }
+
+  /* PARED ENCIMA DE OTRA IGUAL (auditoría 8, 31/08 → 03/09): dibujar un
+     drywall colineal sobre un drywall (o block sobre block) dejaba DOS paredes
+     encimadas y el takeoff contaba los pies dos veces. En la obra eso es UNA
+     pared más larga: la existente se estira al tramo unión y la nueva no se
+     agrega. Misma familia, paralelas (±4°), eje dentro de la banda, y con
+     solape real (≥ 40 % de la nueva o ≥ 12"). */
+  function absorbeColineal(w) {
+    var L = Math.hypot(w.x2 - w.x1, w.y2 - w.y1);
+    if (L < 6) return false;
+    var famW = famTipo(w.type);
+    var ux = (w.x2 - w.x1) / L, uy = (w.y2 - w.y1) / L;
+    var mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+    for (var i = 0; i < state.walls.length; i++) {
+      var h = state.walls[i];
+      if (h === w || famTipo(h.type) !== famW) continue;
+      var hL = Math.hypot(h.x2 - h.x1, h.y2 - h.y1);
+      if (hL < 6) continue;
+      var hx = (h.x2 - h.x1) / hL, hy = (h.y2 - h.y1) / hL;
+      if (Math.abs(ux * hy - uy * hx) > 0.07) continue;
+      var r = distToSeg(mx, my, h.x1, h.y1, h.x2, h.y2);
+      var perp = Math.abs((mx - h.x1) * -hy + (my - h.y1) * hx);
+      if (perp > Math.max(h.t, w.t) / 2 + 1) continue;           // no es la misma línea de pared
+      var t1 = (w.x1 - h.x1) * hx + (w.y1 - h.y1) * hy;
+      var t2 = (w.x2 - h.x1) * hx + (w.y2 - h.y1) * hy;
+      var a1 = Math.min(t1, t2), a2 = Math.max(t1, t2);
+      var solape = Math.min(hL, a2) - Math.max(0, a1);
+      if (solape < Math.min(12, L * 0.4)) continue;
+      // la existente se estira al tramo unión (sobre SU eje)
+      var lo = Math.min(0, a1), hi = Math.max(hL, a2);
+      if (lo < 0) {
+        // la punta 1 retrocede: las aberturas se miden desde ahí → se corren
+        var sh = -lo;
+        state.openings.forEach(function (o) { if (o.wallId === h.id) o.pos += sh; });
+      }
+      var nx1 = h.x1 + hx * lo, ny1 = h.y1 + hy * lo;
+      var nx2 = h.x1 + hx * hi, ny2 = h.y1 + hy * hi;
+      h.x1 = Math.round(nx1 * 100) / 100; h.y1 = Math.round(ny1 * 100) / 100;
+      h.x2 = Math.round(nx2 * 100) / 100; h.y2 = Math.round(ny2 * 100) / 100;
+      // el material más pesado manda (12" sobre 8", 6" sobre 4½")
+      if ((w.t || 0) > (h.t || 0)) { h.type = w.type; h.t = w.t; }
+      renderWalls();
+      setHint('🧱 Esa pared ya existía: se alargó a ' + fmtFtIn(hi - lo) + ' en vez de encimar dos (el takeoff no cuenta doble)');
       return true;
     }
     return false;
@@ -1229,6 +1281,7 @@
   function opcionesLinea(actual) {
     var pl = '', si = '';
     Object.keys(LINE_STYLES).forEach(function (k) {
+      if (LINE_STYLES[k].homerun && actual !== k) return;   // el homerun se traza con su herramienta
       var o = '<option value="' + k + '"' + (actual === k ? ' selected' : '') + '>' +
         esc(LINE_STYLES[k].name) + '</option>';
       if (LINE_STYLES[k].site) si += o; else pl += o;
@@ -1604,14 +1657,27 @@
         setJoin(w, atStart, { p: Ep, m: Em, cap: !tapada || pesadoEnLiviano });
         // misma familia: se abre la cara del host para que la unión sea continua
         // (drywall que tee en bloque NO la abre: la cara de mampostería sigue)
+        // HUELLA DE LA RAMA sobre una línea paralela al eje del host a
+        // distancia `off`: si la rama llega en DIAGONAL, la boca es más ancha
+        // (t/sinθ) y se corre a lo largo del eje (off·cotθ). Con la huella
+        // perpendicular de siempre, la raya del furring seguía cruzando por
+        // dentro de la rama diagonal (auditoría 8, 31/08).
+        var ubx = other[0] - P[0], uby = other[1] - P[1], ubL = Math.hypot(ubx, uby) || 1;
+        ubx /= ubL; uby /= ubL;
+        var sinT = Math.abs(ubx * hg.nx + uby * hg.ny), cosT = ubx * hg.ux + uby * hg.uy;
+        if (sinT < 0.17) sinT = 0.17;                 // ≤10°: tope para no abrir media pared
+        var huella = function (off) {
+          var c = hr.d + off * cosT / sinT, hw = (w.t / 2) / sinT;
+          return [c - hw, c + hw];
+        };
         if (mismaFam && tapada) {
-          (sside > 0 ? cuts[host.id].plus : cuts[host.id].minus).push([hr.d - w.t / 2, hr.d + w.t / 2]);
+          (sside > 0 ? cuts[host.id].plus : cuts[host.id].minus).push(huella(host.t / 2));
         }
         // la línea fina del furring SÍ se abre siempre: el yeso se interrumpe
         // aunque la rama sea de otro material. Si no, la raya cruza por delante
         // del tabique y que se vea o no depende del orden de dibujo.
         if (tapada) {
-          (sside > 0 ? cuts[host.id].dryPlus : cuts[host.id].dryMinus).push([hr.d - w.t / 2, hr.d + w.t / 2]);
+          (sside > 0 ? cuts[host.id].dryPlus : cuts[host.id].dryMinus).push(huella(host.t / 2 + 1.5));
         }
       });
     });
@@ -2040,6 +2106,11 @@
     return [+((A[0] + B[0]) / 2 - dy / c * sag).toFixed(2), +((A[1] + B[1]) / 2 + dx / c * sag).toFixed(2)];
   }
   function nLados(a) { return a.open ? a.pts.length - 1 : a.pts.length; }
+  // el rombo de curvatura solo cabe en lados que miden más de dos asas
+  function ladoConRombo(a, i, avr) {
+    var n = a.pts.length, A = a.pts[i], B = a.pts[(i + 1) % n];
+    return Math.hypot(B[0] - A[0], B[1] - A[1]) >= 2.2 * avr;
+  }
   // recorte del pico para la esquina redondeada: hasta donde llega cada lado
   function filete(a, i) {
     var rc = +(a.rc || 0);
@@ -2081,7 +2152,9 @@
   // redonda daba los sq ft del rectangulo — y eso se cotiza.
   function areaDe(a) {
     var base = polyArea(a.pts);
-    if (a.open || !a.bul) return base;
+    if (a.open) return base;
+    base += fileteDelta(a).area;
+    if (!a.bul) return Math.max(0, base);
     var n = a.pts.length, a2 = 0;
     for (var i = 0; i < n; i++) {
       var q1 = a.pts[i], q2 = a.pts[(i + 1) % n];
@@ -2099,9 +2172,30 @@
     }
     return Math.max(0, base);
   }
+  // lo que quitan los FILETES de esquina (rc) al perímetro y al área: cada
+  // esquina pierde sus dos tangentes t y gana el arco r·(π−ang); en área pierde
+  // la cometa t·r menos el sector r²(π−ang)/2. Un counter de 60' con r 12" se
+  // dibujaba de 58'-3½" y Propiedades decía 60'-0" (auditoría áreas 03/09).
+  function fileteDelta(a) {
+    var out = { perim: 0, area: 0 };
+    if (!(+(a.rc || 0) > 0) || !a.pts || a.pts.length < 3) return out;
+    var n = a.pts.length;
+    for (var i = 0; i < n; i++) {
+      var f = filete(a, i);
+      if (!f) continue;
+      var V = a.pts[i], P = a.pts[(i - 1 + n) % n], N = a.pts[(i + 1) % n];
+      var l1 = Math.hypot(P[0] - V[0], P[1] - V[1]) || 1, l2 = Math.hypot(N[0] - V[0], N[1] - V[1]) || 1;
+      var cosA = Math.max(-1, Math.min(1, ((P[0] - V[0]) * (N[0] - V[0]) + (P[1] - V[1]) * (N[1] - V[1])) / (l1 * l2)));
+      var ang = Math.acos(cosA), t = Math.hypot(f.T1[0] - V[0], f.T1[1] - V[1]);
+      out.perim += f.r * (Math.PI - ang) - 2 * t;
+      out.area -= t * f.r - f.r * f.r * (Math.PI - ang) / 2;
+    }
+    return out;
+  }
   // PERIMETRO con los lados curvos (el arco mide mas que la cuerda)
   function perimDe(a) {
     var base = polyPerim(a.pts, !!a.open);
+    base += fileteDelta(a).perim;
     if (!a.bul) return base;
     var n = a.pts.length, segs = nLados(a);
     for (var k = 0; k < segs; k++) {
@@ -2113,6 +2207,43 @@
       if (ar) base += ar.R * ar.th - c;
     }
     return base;
+  }
+  // CENTROIDE por shoelace; si cae fuera (una L, una U), el medio del tramo
+  // interior más ancho a la altura del centroide
+  function puntoInterior(pts) {
+    var n = pts.length, A = 0, cx = 0, cy = 0, i;
+    for (i = 0; i < n; i++) {
+      var p = pts[i], q = pts[(i + 1) % n], cr = p[0] * q[1] - q[0] * p[1];
+      A += cr; cx += (p[0] + q[0]) * cr; cy += (p[1] + q[1]) * cr;
+    }
+    if (Math.abs(A) < 1e-6) { cx = 0; cy = 0; pts.forEach(function (q) { cx += q[0]; cy += q[1]; }); return [cx / n, cy / n]; }
+    cx /= 3 * A; cy /= 3 * A;
+    if (pointInPoly([cx, cy], pts)) return [cx, cy];
+    // barrido horizontal por cy: cruces con los lados, pares → tramos interiores
+    var xs = [];
+    for (i = 0; i < n; i++) {
+      var a1 = pts[i], b1 = pts[(i + 1) % n];
+      if ((a1[1] <= cy) !== (b1[1] <= cy)) xs.push(a1[0] + (cy - a1[1]) * (b1[0] - a1[0]) / (b1[1] - a1[1]));
+    }
+    xs.sort(function (u, v) { return u - v; });
+    var mejor = null, ancho = -1;
+    for (i = 0; i + 1 < xs.length; i += 2) if (xs[i + 1] - xs[i] > ancho) { ancho = xs[i + 1] - xs[i]; mejor = (xs[i] + xs[i + 1]) / 2; }
+    return mejor == null ? [cx, cy] : [mejor, cy];
+  }
+  // ¿el contorno se cruza a sí mismo (moño)? el área con signo daría 0 y mentiría
+  function seCruza(pts) {
+    var n = pts.length;
+    if (n < 4) return false;
+    function cruzan(a, b, c, d) {
+      function o(p, q, r) { return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]); }
+      var o1 = o(a, b, c), o2 = o(a, b, d), o3 = o(c, d, a), o4 = o(c, d, b);
+      return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0) && o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0;
+    }
+    for (var i = 0; i < n; i++) for (var j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;   // lados vecinos por el cierre
+      if (cruzan(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true;
+    }
+    return false;
   }
   function areaPath(a) {
     var n = a.pts.length;
@@ -2388,7 +2519,7 @@
         var an = P.ang;
         if (an > 90 || an < -90) an += 180;
         out += '<text x="0" y="0" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
-          ') rotate(' + an.toFixed(1) + ')" font-size="' + GLIFO_ALTO +
+          ') rotate(' + an.toFixed(1) + ')" font-size="' + (GLIFO_ALTO * kg).toFixed(1) +
           '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
           '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(g) + '</text>';
       }
@@ -2443,11 +2574,17 @@
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
         var cx = 0, cy = 0;
-        a.pts.forEach(function (q) { cx += q[0]; cy += q[1]; });
-        cx /= a.pts.length; cy /= a.pts.length;
+        if (a.open) {
+          a.pts.forEach(function (q) { cx += q[0]; cy += q[1]; });
+          cx /= a.pts.length; cy /= a.pts.length;
+        } else {
+          // en una L el promedio de vértices cae en el cuarto vecino: se busca
+          // un punto DENTRO del polígono (auditoría áreas 03/09)
+          var pin = puntoInterior(a.pts); cx = pin[0]; cy = pin[1];
+        }
         var txt = a.open
           ? fmtFtIn(perimDe(a))
-          : (areaDe(a) / 144).toFixed(1) + ' sq ft';
+          : (seCruza(a.pts) ? '⚠ contorno cruzado' : (areaDe(a) / 144).toFixed(1) + ' sq ft');
         if (a.open) { cy -= 6; }
         out += '<text x="' + cx + '" y="' + cy + '" font-size="9" font-weight="bold" text-anchor="middle" fill="#1c5fa8" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(txt) + '</text>';
       }
@@ -2684,6 +2821,10 @@
     var st = w.style || 'dashed';
     if (ES_L[st]) {
       var sx = Math.sign(w.x2 - w.x1) || 1, sy = Math.sign(w.y2 - w.y1) || 1;
+      // L sin pata vertical (dy=0) o sin horizontal (dx=0): la punta sigue el
+      // único tramo que existe, no sale perpendicular (auditoría cables 03/09)
+      if (w.y2 === w.y1) return { s: [-sx, 0], e: [sx, 0] };
+      if (w.x2 === w.x1) return { s: [0, -sy], e: [0, sy] };
       return { s: [-sx, 0], e: [0, sy] };
     }
     if (st === 'straight' || st === 'straightdashed' || ES_TUBO[st] != null) {
@@ -2785,6 +2926,12 @@
     // un pelo a que desaparezca
     var tope = largo / 3;
     dS = Math.min(dS, tope); dE = Math.min(dE, tope);
+    if (ES_L[w.style || 'dashed']) {
+      // en L cada punta se recorta contra SU pata (una pata de 3" no aguanta
+      // una flecha de 7": se recorta a la mitad de la pata, no más)
+      var lx = Math.abs(w.x2 - w.x1), ly = Math.abs(w.y2 - w.y1);
+      dS = Math.min(dS, (lx || ly) / 2); dE = Math.min(dE, (ly || lx) / 2);
+    }
     q.x1 -= tg.s[0] * dS; q.y1 -= tg.s[1] * dS;
     q.x2 -= tg.e[0] * dE; q.y2 -= tg.e[1] * dE;
     return q;
@@ -2818,11 +2965,37 @@
       '" data-id="' + w.id + '" d="' + d + '"' + sw + '/>' + wireCaps(w);
   }
 
+  /* RÓTULO DEL CABLE en el plano (auditoría cables 03/09): la Etiqueta
+     ('2" EMT · 3#3/0 + 1#6G', 'Feeder (1) FPL→MSB') solo salía en Propiedades
+     y en Materiales; en la hoja no aparecía nada y había que duplicarla con
+     Texto, que no viaja con el tubo. Va en el medio del tramo largo, a un
+     lado, derecha aunque el tramo vaya al revés. */
+  function rotuloCable(w) {
+    if (!w.label) return '';
+    var st = w.style || 'dashed', mx, my, ang;
+    var off = capLw(w) * 1.1 + 3.5;
+    if (ES_L[st]) {
+      if (Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1)) { mx = (w.x1 + w.x2) / 2; my = w.y1 - off; ang = 0; }
+      else { mx = w.x2 + off; my = (w.y1 + w.y2) / 2; ang = -90; }
+    } else if (st === 'straight' || st === 'straightdashed' || ES_TUBO[st] != null) {
+      var dx = w.x2 - w.x1, dy = w.y2 - w.y1, L = Math.hypot(dx, dy) || 1;
+      mx = (w.x1 + w.x2) / 2 - dy / L * off; my = (w.y1 + w.y2) / 2 + dx / L * off;
+      ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    } else {
+      var wp = wirePath(w);   // curva cuadrática: B(0.5)
+      mx = 0.25 * w.x1 + 0.5 * wp.cx + 0.25 * w.x2; my = 0.25 * w.y1 + 0.5 * wp.cy + 0.25 * w.y2 - off;
+      ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1) * 180 / Math.PI;
+    }
+    if (ang > 90 || ang < -90) ang += 180;
+    return '<text class="wireLbl" data-id="' + w.id + '" x="0" y="0" transform="translate(' + mx.toFixed(2) + ' ' + my.toFixed(2) + ') rotate(' + ang.toFixed(1) + ')"' +
+      ' font-size="5.5" font-weight="bold" text-anchor="middle" dominant-baseline="central" fill="#14161a" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(w.label) + '</text>';
+  }
   function renderSymbols() {
     var elec = '', furn = '';
     state.wires.forEach(function (w) {
       var oW = opAttr(w);
-      elec += oW ? '<g' + oW + '>' + wireMarkup(w) + '</g>' : wireMarkup(w);
+      var mk = wireMarkup(w) + rotuloCable(w);
+      elec += oW ? '<g' + oW + '>' + mk + '</g>' : mk;
     });
     state.symbols.forEach(function (s) {
       var def = SYMBOLS[s.key]; if (!def) return;
@@ -2871,9 +3044,17 @@
     return out;
   }
   function textAncho(t, sz) {
+    // (auditoría texto 03/09) 0.58 por letra era 15 % corto en MAYÚSCULAS —lo
+    // que escribe un electricista—: las últimas letras no se podían clicar y el
+    // marco terminaba antes del texto. Se mide renglón por renglón.
     var ls = textLineas(t), mx = 0;
-    ls.forEach(function (l) { if (l.length > mx) mx = l.length; });
-    return mx * sz * (t.bold ? 0.62 : 0.58);
+    ls.forEach(function (l) {
+      var may = /^[^a-z]*$/.test(l) && /[A-Z0-9]/.test(l);
+      var k = may ? (t.bold ? 0.72 : 0.67) : (t.bold ? 0.62 : 0.58);
+      var w = l.length * sz * k;
+      if (w > mx) mx = w;
+    });
+    return mx;
   }
   function textAlto(t, sz) { return sz + (textLineas(t).length - 1) * sz * 1.25; }
   // borde izquierdo del bloque: con el texto centrado o a la derecha, la X
@@ -3129,7 +3310,8 @@
       var twS = textAncho(e, sz), txS = textIzq(e, sz);
       return '<rect class="sel" x="' + (txS - 3) + '" y="' + (e.y - sz) + '" width="' + (twS + 6) + '" height="' + (textAlto(e, sz) + 4) + '"' + rotT + '/>';
     }
-    if (kind === 'dim' || kind === 'wire') {
+    if (kind === 'wire') return '<path class="sel" d="' + wirePath(e).d + '"/>';
+    if (kind === 'dim') {
       return '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
     }
     if (kind === 'leader') {
@@ -3217,12 +3399,20 @@
           // (Edgar, 08/30: "convertir una linea recta de un poligono en curva")
           var mhr = ahr * 0.8;
           for (var mi = 0; mi < nLados(e); mi++) {
+            if (!ladoConRombo(e, mi, 9 / view.z + 3)) continue;
             var MM = medioLado(e, mi);
             s += '<rect class="handle" data-m="' + mi + '" x="' + (MM[0] - mhr) + '" y="' + (MM[1] - mhr) +
               '" width="' + (mhr * 2) + '" height="' + (mhr * 2) + '" transform="rotate(45 ' + MM[0] + ' ' + MM[1] + ')"/>';
           }
         } else if (sel.kind === 'wire') {
           s += '<path class="sel" d="' + wirePath(e).d + '"/>';
+          // asas de PUNTA (auditoría cables 03/09): antes solo se podía mover el
+          // cable entero; reacomodar el extremo a otro equipo era borrar y redibujar
+          var wLen = Math.hypot(e.x2 - e.x1, e.y2 - e.y1), whr = Math.min(5 / view.z + 2, wLen / 3);
+          if (whr > 0.5) {
+            s += '<circle class="handle" data-h="1" cx="' + e.x1 + '" cy="' + e.y1 + '" r="' + whr + '"/>';
+            s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + whr + '"/>';
+          }
         } else if (sel.kind === 'leader') {
           var lw = (e.text.length * (e.size || 7)) * 0.58 + 6;
           var lx = e.x >= e.tx ? e.x - 3 : e.x - lw + 3;
@@ -3402,7 +3592,7 @@
           }
         }
         // la tuberia es gorda: se agarra en todo su ancho
-        var tolW = ES_TUBO[stW] != null ? Math.max(PX(4), 1.8 * (lwDe(e) / LW_BASE) + PX(2)) : PX(4);
+        var tolW = ES_TUBO[stW] != null ? Math.max(PX(4), 1.8 * (lwDe(e) / LW_BASE) + PX(2)) : Math.max(PX(4), lwDe(e) / 2 + PX(2));
         if (best <= tolW) pon('wire', e.id, best, 5);
       }
     }
@@ -3417,15 +3607,27 @@
       for (i = 0; i < state.areas.length; i++) {
         e = state.areas[i];
         if (!e.pts || e.pts.length < 2) continue;
-        var dBor = 1e9, q2;
-        for (q2 = 0; q2 + 1 < e.pts.length; q2++) {
-          var dq = distToSeg(p[0], p[1], e.pts[q2][0], e.pts[q2][1], e.pts[q2 + 1][0], e.pts[q2 + 1][1]).d;
+        var dBor = 1e9, q2, nLd = nLados(e), nPt = e.pts.length;
+        for (q2 = 0; q2 < nLd; q2++) {
+          var A6 = e.pts[q2], B6 = e.pts[(q2 + 1) % nPt];
+          var sag6 = (e.bul && e.bul[q2]) || 0, dq;
+          if (Math.abs(sag6) > 0.01) {
+            // lado CURVO: se mide contra el arco muestreado, no contra la
+            // cuerda invisible (auditoría áreas 03/09: el ápice no respondía)
+            var ap6 = medioLado(e, q2), ox6 = ap6[0] - (A6[0] + B6[0]) / 2, oy6 = ap6[1] - (A6[1] + B6[1]) / 2;
+            var prev6 = A6;
+            dq = 1e9;
+            for (var t6 = 1; t6 <= 10; t6++) {
+              var u6 = t6 / 10, k6b = 4 * u6 * (1 - u6);
+              var pt6 = [A6[0] + (B6[0] - A6[0]) * u6 + ox6 * k6b, A6[1] + (B6[1] - A6[1]) * u6 + oy6 * k6b];
+              var d6 = distToSeg(p[0], p[1], prev6[0], prev6[1], pt6[0], pt6[1]).d;
+              if (d6 < dq) dq = d6;
+              prev6 = pt6;
+            }
+          } else {
+            dq = distToSeg(p[0], p[1], A6[0], A6[1], B6[0], B6[1]).d;
+          }
           if (dq < dBor) dBor = dq;
-        }
-        if (!e.open && e.pts.length > 2) {          // el tramo que cierra el polígono
-          var np2 = e.pts.length - 1;
-          var dqc = distToSeg(p[0], p[1], e.pts[np2][0], e.pts[np2][1], e.pts[0][0], e.pts[0][1]).d;
-          if (dqc < dBor) dBor = dqc;
         }
         var lwA = (e.lw || ((LINE_STYLES[e.lineStyle] || {}).lw) || 0.9) / 2;
         if (dBor - lwA <= PX(4)) pon('area', e.id, Math.max(0, dBor - lwA), 5);
@@ -3798,12 +4000,12 @@
       } else G.prev.innerHTML = '';
     } else if (drawing && drawing.mode === 'twopoint') {
       if (drawing.kind === 'wire') {
-        G.prev.innerHTML = '<g class="preview">' + wireMarkup({ id: 'prev', x1: drawing.a[0], y1: drawing.a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1 }) + '</g>';
+        G.prev.innerHTML = '<g class="preview">' + wireMarkup({ id: 'prev', x1: drawing.a[0], y1: drawing.a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, lw: lastWireLw, capS: lastWireCapS, capE: lastWireCapE }) + '</g>';
       } else if (drawing.kind === 'leader') {
         G.prev.innerHTML = '<g class="preview">' + leaderMarkup({ id: 'prev', tx: drawing.a[0], ty: drawing.a[1], x: p[0], y: p[1], text: 'nota…' }) + '</g>';
       } else if (drawing.kind === 'line') {
         // la misma pieza que va a quedar, con su trazo y su punta
-        var lnP = { id: 'prev', open: true, pts: [[drawing.a[0], drawing.a[1]], [p[0], p[1]]], lw: 0.9 };
+        var lnP = { id: 'prev', open: true, pts: [[drawing.a[0], drawing.a[1]], [p[0], p[1]]] };
         if (curLineStyle !== 'solid') lnP.lineStyle = curLineStyle;
         if (curLineCap && curLineCap !== 'none') lnP.capE = curLineCap;
         var estP = LINE_STYLES[lnP.lineStyle] || LINE_STYLES.solid, dP = dashDe(lnP, estP);
@@ -3880,6 +4082,16 @@
         if (Math.hypot(p[0] - w.x2, p[1] - w.y2) < hr) { drag = { mode: 'endpoint', wall: w, end: 2, start: p, ox: w.x2, oy: w.y2, snap: snapshot(), moved: false, opsW: opsW }; return; }
       }
     }
+    // asas de extremos de un cable / tubo seleccionado (se imantan al equipo)
+    if (sel && sel.kind === 'wire') {
+      var wsel = findSel();
+      if (wsel) {
+        var wLen2 = Math.hypot(wsel.x2 - wsel.x1, wsel.y2 - wsel.y1);
+        var whr2 = Math.min((document.body.classList.contains('touch') ? 14 : 8) / view.z + 3, wLen2 / 3);
+        if (Math.hypot(p[0] - wsel.x1, p[1] - wsel.y1) < whr2) { drag = { mode: 'wireEnd', wire: wsel, end: 1, start: p, snap: snapshot(), moved: false }; return; }
+        if (Math.hypot(p[0] - wsel.x2, p[1] - wsel.y2) < whr2) { drag = { mode: 'wireEnd', wire: wsel, end: 2, start: p, snap: snapshot(), moved: false }; return; }
+      }
+    }
     // asas de extremos de una medida/cota seleccionada
     if (sel && sel.kind === 'dim') {
       var dsel = findSel();
@@ -3907,17 +4119,20 @@
       var asel = findSel();
       if (asel && asel.pts) {
         var avr = (document.body.classList.contains('touch') ? 14 : 9) / view.z + 3;
-        for (var mj = 0; mj < nLados(asel); mj++) {
-          var MJ = medioLado(asel, mj);
-          if (Math.hypot(p[0] - MJ[0], p[1] - MJ[1]) < avr * 0.85) {
-            drag = { mode: 'areaBul', e: asel, i: mj, snap: snapshot(), moved: false };
-            return;
-          }
-        }
+        // la PUNTA manda sobre el rombo: en un lado de 30" el rombo se comía el
+        // vértice y no había forma de mover la esquina (auditoría áreas 03/09)
         for (var vi = 0; vi < asel.pts.length; vi++) {
           if (Math.hypot(p[0] - asel.pts[vi][0], p[1] - asel.pts[vi][1]) < avr) {
             drag = { mode: 'areaVtx', e: asel, i: vi, snap: snapshot(), moved: false,
                      ox: asel.pts[vi][0], oy: asel.pts[vi][1], start: p };
+            return;
+          }
+        }
+        for (var mj = 0; mj < nLados(asel); mj++) {
+          if (!ladoConRombo(asel, mj, avr)) continue;
+          var MJ = medioLado(asel, mj);
+          if (Math.hypot(p[0] - MJ[0], p[1] - MJ[1]) < avr * 0.85) {
+            drag = { mode: 'areaBul', e: asel, i: mj, snap: snapshot(), moved: false };
             return;
           }
         }
@@ -4116,6 +4331,15 @@
       if (finoOn(ev)) setHint('🐢 Fino (Alt) · largo ' + eLen + (wantOrtho(ev) ? ' · ∟ recto' : ''));
       else if (wantOrtho(ev)) setHint('∟ Shift: pared recta · ' + eLen);
       renderWalls(); renderSel(); return;
+    }
+    if (drag.mode === 'wireEnd') {
+      // la punta se imanta al borde/centro del equipo igual que al dibujar
+      var so2 = applyOsnap(p), nq = so2 && so2.p ? so2.p : p;
+      if (drag.end === 1) { drag.wire.x1 = nq[0]; drag.wire.y1 = nq[1]; }
+      else { drag.wire.x2 = nq[0]; drag.wire.y2 = nq[1]; }
+      drag.moved = true;
+      setHint('Largo ' + fmtFtIn(wireLen(drag.wire)));
+      renderSymbols(); renderSel(); return;
     }
     if (drag.mode === 'dimEnd') {
       var od = drag.dim;
@@ -4343,7 +4567,7 @@
       }
       if (cambioE) { pushUndo(drag.snap); drag = null; refresh(); return; }
     }
-    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
+    if ((drag.mode === 'move' || drag.mode === 'endpoint' || drag.mode === 'openJamb' || drag.mode === 'dimEnd' || drag.mode === 'wireEnd' || drag.mode === 'symResize' || drag.mode === 'areaVtx' || drag.mode === 'areaBul') && drag.moved) {
       pushUndo(drag.snap);
       refreshCounts(); showProps();
     }
@@ -4368,7 +4592,7 @@
       pushUndo();
       var wt = $('#wallType').value;
       var wNueva = { id: uid(), x1: drawing.last[0], y1: drawing.last[1], x2: b[0], y2: b[1], type: wt, t: WALL_TYPES[wt].t };
-      if (absorbeEnBloque(wNueva)) {
+      if (absorbeEnBloque(wNueva) || absorbeColineal(wNueva)) {
         drawing.last = b; drawing.cursor = b;
         G.prev.innerHTML = '';
         refreshCounts();
@@ -4401,7 +4625,9 @@
     // líneas y se veía como despegado"). Es lo que hace cualquier CAD: el
     // primer vértice tiene su propio imán, siempre, aunque los demás estén
     // apagados — cerrar exacto no puede depender de la puntería.
-    if (drawing && drawing.pts && drawing.pts.length >= 2) {
+    // (un homerun es una línea del panel al cuarto: tocar el primer punto no
+    // lo cierra, agrega el vértice como cualquier otro)
+    if (drawing && drawing.pts && drawing.pts.length >= 2 && tool !== 'homerun') {
       var p0 = drawing.pts[0];
       if (Math.hypot(p[0] - p0[0], p[1] - p0[1]) < 14 / (view.z || 1)) {
         finishAreaChain(true);           // true = cerrado en el primer punto
@@ -4460,6 +4686,14 @@
     if (kind === 'rect') kind = curShapeKind || 'rect';
     if (!drawing) { drawing = { mode: 'shape2', kind: kind, a: np }; return; }
     var isCloud = drawing.kind === 'cloud';
+    // dos clics en el mismo sitio (o el doble clic) no son un rectángulo: antes
+    // quedaba un área invisible de 4 vértices iguales contando en el takeoff
+    var minS = (ev && ev.pointerType === 'touch') ? 12 / view.z : Math.max(1, 4 / view.z);
+    if (Math.abs(np[0] - drawing.a[0]) < minS && Math.abs(np[1] - drawing.a[1]) < minS) {
+      drawing = null; G.prev.innerHTML = '';
+      setHint('Forma demasiado chica: haz el segundo clic más lejos del primero');
+      return;
+    }
     var pts = shapePts(isCloud ? 'rect' : drawing.kind, drawing.a, np, ev && ev.shiftKey);
     drawing = null; G.prev.innerHTML = '';
     pushUndo();
@@ -4474,11 +4708,12 @@
     if (!drawing || drawing.mode !== 'areachain') return;
     var pts = drawing.pts;
     var esHomerun = tool === 'homerun';
-    var isLine = (tool === 'pline' || esHomerun) && !cerrado;   // cerrar en el 1er punto = polígono
+    var esPl = tool === 'pline' || esHomerun;
+    var isLine = esPl && !cerrado;   // cerrar en el 1er punto = polígono
     drawing = null; G.prev.innerHTML = '';
     // quita los puntos duplicados del final: el doble clic mete DOS pointerdown
     // encima del ultimo vertice (auditoria 31/08: quedaba un vertice repetido)
-    var minV = isTouch ? 12 / view.z : 2;
+    var minV = isTouch ? 12 / view.z : Math.min(2, 4 / view.z);   // en píxeles: a 2000 % 2" son 40 px
     while (pts.length > 1) {
       var a = pts[pts.length - 1], b = pts[pts.length - 2];
       if (Math.hypot(a[0] - b[0], a[1] - b[1]) < minV) pts.pop(); else break;
@@ -4488,8 +4723,12 @@
       return;
     }
     pushUndo();
-    var e = { id: uid(), pts: pts, pattern: isLine ? 'none' : curAreaPattern, rot: 0 };
-    if (isLine) { e.open = true; if (curLineStyle !== 'solid') e.lineStyle = curLineStyle; }
+    // (auditoría áreas 03/09) un PROPERTY LINE cerrado en su primer vértice
+    // seguía siendo lindero: polígono sin relleno y con su tipo de línea. Antes
+    // se convertía en 'Pavers 8×4' y sumaba 1666 sq ft de adoquín al takeoff.
+    var e = { id: uid(), pts: pts, pattern: (isLine || esPl) ? 'none' : curAreaPattern, rot: 0 };
+    if (isLine) e.open = true;
+    if ((isLine || esPl) && curLineStyle !== 'solid') e.lineStyle = curLineStyle;
     if (esHomerun) {
       // el circuito: sale con el panel, el cable y el numero siguiente del
       // anterior; la flecha apunta al PANEL, que es donde se empezo a trazar
@@ -4552,6 +4791,7 @@
 
   /* --- medir / cotas / calibrar --- */
   function twoPointDown(p, kind) {
+    if (kind === 'dim' || kind === 'leader') enciendeCapaTexto();
     if (kind === 'calibrate' && !state.bg) { setHint('Primero importa un plano de fondo (botón "Fondo")'); return; }
     if (!drawing) { drawing = { mode: 'twopoint', kind: kind, a: p }; return; }
     var a = drawing.a; drawing = null; G.prev.innerHTML = '';
@@ -4568,6 +4808,8 @@
     } else if (kind === 'wire') {
       pushUndo();
       var wr = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, bulge: 0.22, lw: lastWireLw };
+      if (lastWireCapS && lastWireCapS !== 'none') wr.capS = lastWireCapS;
+      if (lastWireCapE && lastWireCapE !== 'none') wr.capE = lastWireCapE;
       state.wires.push(wr);
       sel = { kind: 'wire', id: wr.id };
       refresh();
@@ -4588,7 +4830,7 @@
          líneas de site plan. Lo que cambia es la MANO: dos clics y listo,
          sin doble clic ni Enter para terminar. */
       pushUndo();
-      var ln = { id: uid(), open: true, pts: [[a[0], a[1]], [p[0], p[1]]], pattern: 'none', lw: 0.9 };
+      var ln = { id: uid(), open: true, pts: [[a[0], a[1]], [p[0], p[1]]], pattern: 'none' };
       if (curLineStyle !== 'solid') ln.lineStyle = curLineStyle;
       if (curLineCap && curLineCap !== 'none') ln.capE = curLineCap;
       state.areas.push(ln);
@@ -4617,7 +4859,16 @@
   }
 
   /* --- texto --- */
+  function enciendeCapaTexto() {
+    // (auditoría texto 03/09) con 'Dims & Text' apagada el texto se creaba
+    // invisible y el usuario lo repetía tres veces
+    if (layerVisible.annotation) return;
+    var cbA = document.querySelector('#layersBody input[data-layer="annotation"]');
+    if (cbA) { cbA.checked = true; cbA.dispatchEvent(new Event('change')); }
+    setHint('Capa Dims & Text encendida para que veas lo que dibujas');
+  }
   function textDown(p) {
+    enciendeCapaTexto();
     uiPromptArea('Texto (Enter = renglón nuevo):', '', function (t) {
       if (!t) return;
       pushUndo();
@@ -4785,6 +5036,9 @@
         newRefs.push({ kind: it.kind, id: d.id });
       } else if (it.kind === 'area') {
         d.pts = d.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
+        // un homerun pegado es OTRO circuito: número nuevo, mismo cable/breaker
+        // (antes había dos #3 y el takeoff contaba el cable dos veces)
+        if (d.circ) { var nc = nuevoCirc(); d.circ = Object.assign({}, d.circ, { num: nc.num }); recuerdaCirc(d.circ); }
         state.areas.push(d); newRefs.push({ kind: 'area', id: d.id });
       }
     });
@@ -4882,8 +5136,16 @@
       if (!e) return;
       if (e.pts) e.pts = e.pts.map(function (q) { return rot(q[0], q[1]); });
       else if (e.x1 != null) {
+        // un tubo en L tiene su codo en (x2,y1): al girar, el codo real cae en
+        // una de las dos esquinas posibles; si es la otra, se intercambian las
+        // puntas (antes salía la L en espejo — auditoría cables 03/09)
+        var codo = (r.kind === 'wire' && ES_L[e.style || 'dashed']) ? rot(e.x2, e.y1) : null;
         var a = rot(e.x1, e.y1), b = rot(e.x2, e.y2);
         e.x1 = a[0]; e.y1 = a[1]; e.x2 = b[0]; e.y2 = b[1];
+        if (codo && Math.hypot(codo[0] - e.x1, codo[1] - e.y2) < Math.hypot(codo[0] - e.x2, codo[1] - e.y1)) {
+          var tx1 = e.x1, ty1 = e.y1; e.x1 = e.x2; e.y1 = e.y2; e.x2 = tx1; e.y2 = ty1;
+          var tc = e.capS; e.capS = e.capE; e.capE = tc;
+        }
       } else if (e.x != null) {
         var p = rot(e.x, e.y);
         e.x = p[0]; e.y = p[1];
@@ -5005,8 +5267,8 @@
       } else if (r.kind === 'text') {
         e.x = mx(e.x); e.y = my(e.y);
         if (e.rot) e.rot = ((vertical ? 180 - e.rot : -e.rot) % 360 + 360) % 360;
-        if (vertical && e.anchor === 'start') e.anchor = 'end';
-        else if (vertical && e.anchor === 'end') e.anchor = 'start';
+        // (auditoría texto 03/09) se cambiaba e.anchor, un campo que nadie lee
+        if (vertical) { var alT = e.align || 'left'; if (alT === 'left') e.align = 'right'; else if (alT === 'right') e.align = 'left'; }
       } else if (r.kind === 'leader') {
         e.x = mx(e.x); e.y = my(e.y); e.tx = mx(e.tx); e.ty = my(e.ty);
       } else if (r.kind === 'area') {
@@ -5624,6 +5886,7 @@
         LW_OPTS.map(function (o) {
           return '<option value="' + o[0] + '"' + (lastWireLw === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
         }).join('') + '</select></div>' +
+        filasPuntas({ capS: lastWireCapS, capE: lastWireCapE }, 'prWireCap0') +
         '<div class="muted small">Elige el material y luego clic en el primer equipo y clic en el segundo. ' +
         'Las opciones <b>(en L)</b> doblan en escuadra — son las del riser, de un panel a otro. ' +
         'Con los imanes 🧲 la punta se pega al <b>borde</b> del equipo (arriba, abajo, los lados) y al centro.</div>';
@@ -5631,6 +5894,9 @@
       if (s0) s0.addEventListener('change', function () { lastWireStyle = s0.value; });
       var l0 = $('#prWireLw0');
       if (l0) l0.addEventListener('change', function () { lastWireLw = parseFloat(l0.value) || 0.7; });
+      var c0s = $('#prWireCap0S'), c0e = $('#prWireCap0E');
+      if (c0s) c0s.addEventListener('change', function () { lastWireCapS = c0s.value; });
+      if (c0e) c0e.addEventListener('change', function () { lastWireCapE = c0e.value; });
       return;
     }
     if (!e) { body.className = 'pbody muted'; body.textContent = 'Nada seleccionado'; return; }
@@ -5743,13 +6009,14 @@
         html += '<option value="' + o[0] + '"' + ((e.style || 'dashed') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
       });
       html += '</select></div>';
-      html += '<div class="row"><label>Curvatura</label><input id="prWireBulge" type="number" step="0.05" min="-0.6" max="0.6" value="' + (e.bulge == null ? 0.22 : e.bulge) + '"></div>';
+      var stC = e.style || 'dashed', esCurvo = !(ES_L[stC] || ES_TUBO[stC] != null || stC.indexOf('straight') === 0);
+      if (esCurvo) html += '<div class="row"><label>Curvatura</label><input id="prWireBulge" type="number" step="0.05" min="-0.6" max="0.6" value="' + (e.bulge == null ? 0.22 : e.bulge) + '"></div>';
       html += '<div class="row"><label>Grosor</label><select id="prWireLw">' +
         LW_OPTS.map(function (o) {
           return '<option value="' + o[0] + '"' + (lwDe(e) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
         }).join('') + '</select></div>';
       html += filasPuntas(e, 'prWireCap');
-      html += '<button id="prWireFlip">↕ Cambiar lado del arco</button>';
+      if (esCurvo) html += '<button id="prWireFlip">↕ Cambiar lado del arco</button>';
       html += '<button id="prWireToWall">▬ Convertir en pared</button>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'leader') {
@@ -5805,9 +6072,16 @@
           return '<span class="sw' + ((e.color || '#14161a') === c[0] ? ' cur' : '') + '" data-c="' + c[0] + '" title="' + c[1] + '" style="background:' + c[0] + '"></span>';
         }).join('') + '</div></div>';
       html += '<div class="row"><label>Grosor</label><select id="prAreaLw">' +
-        [['0.5', 'Fina'], ['0.9', 'Normal'], ['1.5', 'Gruesa'], ['2.4', 'Extra gruesa']].map(function (o2) {
-          return '<option value="' + o2[0] + '"' + ((e.lw || 0.9) === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
-        }).join('') + '</select></div>';
+        (function () {
+          // el grosor EFECTIVO (el del estilo si la línea no tiene uno propio);
+          // si no está en la lista se agrega, para no mentir con 'Normal'
+          var lwEf = e.lw || ((LINE_STYLES[e.lineStyle] || {}).lw) || 0.9;
+          var ops = [['0.5', 'Fina'], ['0.9', 'Normal'], ['1.5', 'Gruesa'], ['2.4', 'Extra gruesa']];
+          if (!ops.some(function (o) { return parseFloat(o[0]) === lwEf; })) { ops.push([String(lwEf), 'Del estilo']); ops.sort(function (u, v) { return parseFloat(u[0]) - parseFloat(v[0]); }); }
+          return ops.map(function (o2) {
+            return '<option value="' + o2[0] + '"' + (lwEf === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
+          }).join('');
+        })() + '</select></div>';
       // el tamaño del rótulo solo se ofrece si la línea LLEVA rótulo
       var estSel = LINE_STYLES[e.lineStyle || 'solid'];
       if (estSel && estSel.glifo) {
@@ -5974,12 +6248,25 @@
     // de texto; el panel se reconstruye al terminar. Y el pushUndo va ANTES
     // de la primera letra, una sola vez, para que Ctrl+Z devuelva el texto
     // anterior (antes se hacia despues de mutar: deshacer no hacia nada).
-    var prTextUndo = false;
+    var prTextUndo = false, prTextUltimo = e && e.text;
     on('prText', 'input', function (n) {
       if (!prTextUndo) { pushUndo(); prTextUndo = true; }
+      if (n.value.trim()) prTextUltimo = n.value;
       e.text = n.value; renderAnnot(); renderSel();
     });
-    on('prText', 'change', function () { prTextUndo = false; refresh(); });
+    on('prText', 'change', function (n) {
+      prTextUndo = false;
+      // (auditoría texto 03/09) un texto vacío es un fantasma invisible que
+      // sigue en la Lista de marcas: o se borra o se recupera lo escrito
+      if (!n.value.trim()) {
+        uiConfirm('El texto quedó vacío. ¿Borrarlo del plano?', function (ok) {
+          if (ok) { deleteSelected(); }
+          else { e.text = prTextUltimo || 'TEXTO'; refresh(); showProps(); }
+        });
+        return;
+      }
+      refresh();
+    });
     on('prTextFont', 'change', function (n) { pushUndo(); e.font = n.value; refresh(); });
     function txtSize(v) {
       var et = findSel(); if (!et) return;
@@ -6020,7 +6307,13 @@
         pushUndo(); et.align = ab.dataset.al; refresh(); showProps();
       });
     });
-    on('prTextSize', 'change', function (n) { pushUndo(); e.size = parseFloat(n.value) || 9; refresh(); });
+    on('prTextSize', 'change', function (n) {
+      // (auditoría texto 03/09) -5 pasaba tal cual: font-size negativo, marco
+      // con ancho negativo y el texto ya no se podía volver a seleccionar
+      var v = parseFloat(n.value);
+      if (!isFinite(v)) { showProps(); return; }
+      txtSize(Math.min(200, v));
+    });
     on('prTextStyle', 'change', function (n) { pushUndo(); e.style = n.value; refresh(); });
     on('prFlipDim', 'click', function () { pushUndo(); e.off = -(e.off == null ? 14 : e.off); refresh(); });
     on('prDimLen', 'change', function (n) {
@@ -6090,7 +6383,7 @@
     });
     on('prWireStyle', 'change', function (n) { pushUndo(); e.style = n.value; lastWireStyle = n.value; refresh(); });
     on('prWireLabel', 'change', function (n) { pushUndo(); e.label = n.value; refresh(); });
-    on('prWireBulge', 'change', function (n) { pushUndo(); e.bulge = Math.max(-0.6, Math.min(0.6, parseFloat(n.value) || 0.22)); refresh(); });
+    on('prWireBulge', 'change', function (n) { var bv = parseFloat(n.value); pushUndo(); e.bulge = isFinite(bv) ? Math.max(-0.6, Math.min(0.6, bv)) : 0.22; refresh(); });
     on('prWireFlip', 'click', function () { pushUndo(); e.side = -(e.side || 1); refresh(); });
     on('prWireLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.7; lastWireLw = e.lw; refresh(); });
     on('prGlifoK', 'change', function (n) { pushUndo(); e.glifoK = parseFloat(n.value) || 1; refresh(); });
@@ -6116,8 +6409,8 @@
     });
     on('prAreaCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
     on('prAreaCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
-    on('prWireCapS', 'change', function (n) { pushUndo(); e.capS = n.value; refresh(); });
-    on('prWireCapE', 'change', function (n) { pushUndo(); e.capE = n.value; refresh(); });
+    on('prWireCapS', 'change', function (n) { pushUndo(); e.capS = n.value; lastWireCapS = n.value; refresh(); });
+    on('prWireCapE', 'change', function (n) { pushUndo(); e.capE = n.value; lastWireCapE = n.value; refresh(); });
     on('prWireToWall', 'click', function () {
       pushUndo();
       var wt = $('#wallType').value;
@@ -6176,25 +6469,51 @@
     return n - state.openings.length;
   }
   function circuitosAlPanel() {
-    var p = curPanel(), n = 0;
+    // (auditoría takeoff 03/09) todo caía en panels[0] con la clave num: el #1
+    // del subpanel A pisaba al #1 del MSP, un 2P no ocupaba su segundo
+    // espacio y un #40 en un panel de 30 desaparecía. Ahora: un panel por
+    // nombre (el primero se renombra si está vacío), se marcan los espacios
+    // del 2P/3P y el panel crece si hace falta.
+    var n = 0, avisos = [];
     state.areas.forEach(function (ar) {
       if (!ar.open || !ar.circ || !ar.circ.num) return;
-      var k = String(ar.circ.num);
-      p.circuits[k] = Object.assign(p.circuits[k] || {}, { desc: ar.circ.desc || ar.circ.cable, trip: String(ar.circ.amps || ''), poles: String(ar.circ.poles || 1) });
+      var nom = (ar.circ.panel || '').trim(), p = null;
+      if (nom) p = state.panels.filter(function (q) { return (q.name || '').trim().toUpperCase() === nom.toUpperCase(); })[0];
+      if (!p) {
+        var p0 = curPanel();
+        if (nom && !Object.keys(p0.circuits || {}).length) { p0.name = nom; p = p0; }
+        else if (nom && state.panels.length < 8) { p = defaultPanel(); p.name = nom; state.panels.push(p); }
+        else p = p0;
+      }
+      var num = +ar.circ.num, poles = +ar.circ.poles || 1;
+      var ultimo = num + (poles - 1) * 2;
+      if (ultimo > (p.spaces || 30)) { p.spaces = Math.ceil(ultimo / 2) * 2; avisos.push((p.name || 'Panel') + ' creció a ' + p.spaces + ' espacios por el #' + num); }
+      var k = String(num);
+      p.circuits[k] = Object.assign(p.circuits[k] || {}, { desc: ar.circ.desc || ar.circ.cable, trip: String(ar.circ.amps || ''), poles: String(poles) });
+      for (var e2 = 1; e2 < poles; e2++) {
+        var k2 = String(num + e2 * 2);
+        if (p.circuits[k2] && !p.circuits[k2].ocupadoPor) avisos.push((p.name || 'Panel') + ': el #' + k2 + ' choca con el ' + poles + 'P del #' + num);
+        p.circuits[k2] = { desc: '— (' + poles + 'P del #' + num + ')', trip: '', poles: '', ocupadoPor: num };
+      }
       n++;
     });
+    if (avisos.length) setTimeout(function () { setHint('⚠ ' + avisos.join(' · ')); }, 50);
     return n;
   }
   function refreshCounts() {
     var body = $('#countsBody');
     var rows = '';
     // símbolos por categoría
-    var byCat = {};
+    var byCat = {}, desconocidos = 0;
     state.symbols.forEach(function (s) {
-      var d = SYMBOLS[s.key]; if (!d) return;
+      var d = SYMBOLS[s.key]; if (!d) { desconocidos++; return; }
       byCat[d.cat] = byCat[d.cat] || {};
       byCat[d.cat][s.key] = (byCat[d.cat][s.key] || 0) + 1;
     });
+    // el conteo es de ESTA hoja (el estimador pregunta hoja o set)
+    var tabAct = document.querySelector('#sheetTabs .stab.active');
+    if (tabAct && state.sheets && state.sheets.length > 1) rows += '<tr class="cat"><td colspan="2" class="muted small">Hoja ' + esc(tabAct.textContent.replace('×', '').trim()) + ' (solo esta hoja)</td></tr>';
+    if (desconocidos) rows += '<tr><td colspan="2" style="color:#a33">⚠ ' + desconocidos + ' símbolo(s) de una versión anterior no reconocidos: no se dibujan ni se cuentan</td></tr>';
     Object.keys(SYMBOL_CATS).forEach(function (cat) {
       if (!byCat[cat]) return;
       rows += '<tr class="cat"><td colspan="2">' + SYMBOL_CATS[cat] + '</td></tr>';
@@ -6219,7 +6538,8 @@
     state.areas.forEach(function (a) {
       if (a.open) return;
       var pk = a.pattern || 'none';
-      areaSum[pk] = (areaSum[pk] || 0) + polyArea(a.pts);
+      if (pk === 'none') return;   // un contorno de referencia no suma sq ft (el estimador tampoco lo toma)
+      areaSum[pk] = (areaSum[pk] || 0) + areaDe(a);   // con los lados curvos (eso se cotiza)
     });
     if (Object.keys(areaSum).length) {
       rows += '<tr class="cat"><td colspan="2">Surfaces / Roofs</td></tr>';
@@ -6235,7 +6555,7 @@
       nCirc++;
       partidasHomerun(ar).forEach(function (q) { cabPorTipo[q.item] = (cabPorTipo[q.item] || 0) + q.ft; });
       var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
-      brk[kb] = (brk[kb] || 0) + 1;
+      brk[kb] = (brk[kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // × unidades también en el breaker
     });
     if (nCirc) {
       rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">📋 → Panel Schedule</button></td></tr>';
@@ -6263,7 +6583,7 @@
     }
     // pies lineales de pared
     var wallLen = {};
-    state.walls.forEach(function (w) { wallLen[w.type] = (wallLen[w.type] || 0) + wallGeom(w).len; });
+    state.walls.forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wallLen[w.type] = (wallLen[w.type] || 0) + lnW; });
     if (Object.keys(wallLen).length) {
       rows += '<tr class="cat"><td colspan="2">Walls (linear feet)</td></tr>';
       Object.keys(wallLen).forEach(function (k) {
@@ -6343,7 +6663,23 @@
       if (w) { var g = wallGeom(w), P = ptAlong(w, g, e.pos); xs.push(P[0] - e.w / 2, P[0] + e.w / 2); ys.push(P[1] - e.w / 2, P[1] + e.w / 2); }
     }
     else if (kind === 'symbol') { var cs = symCorners(e) || [[e.x, e.y]]; cs.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
-    else if (kind === 'text') { var sz = e.size || 9; xs.push(e.x - 20, e.x + textAncho(e.text, sz) + 20); ys.push(e.y - textAlto(e.text, sz) - 10, e.y + 10); }
+    else if (kind === 'text') {
+      // (auditoría texto 03/09, GRAVE) se llamaba textAncho(e.text…) con el
+      // STRING y salía ancho 0: los rótulos largos se recortaban en el PDF/PNG
+      var sz = Math.max(3, e.size || 9), cornersT;
+      if (e.style === 'circle' || e.style === 'hex') {
+        var cjB = textCaja(e, sz);
+        cornersT = [[e.x - cjB.w / 2, e.y - cjB.h / 2], [e.x + cjB.w / 2, e.y - cjB.h / 2], [e.x + cjB.w / 2, e.y + cjB.h / 2], [e.x - cjB.w / 2, e.y + cjB.h / 2]];
+      } else {
+        var wT = textAncho(e, sz), hT = textAlto(e, sz), x0T = textIzq(e, sz);
+        cornersT = [[x0T - 4, e.y - sz - 4], [x0T + wT + 4, e.y - sz - 4], [x0T + wT + 4, e.y + hT - sz + 6], [x0T - 4, e.y + hT - sz + 6]];
+      }
+      if (e.rot) {
+        var rr = e.rot * Math.PI / 180, cr = Math.cos(rr), sr = Math.sin(rr);
+        cornersT = cornersT.map(function (q) { var ox = q[0] - e.x, oy = q[1] - e.y; return [e.x + ox * cr - oy * sr, e.y + ox * sr + oy * cr]; });
+      }
+      cornersT.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
+    }
     else if (kind === 'leader') { xs.push(e.x, e.tx); ys.push(e.y, e.ty); }
     else if (kind === 'dim' || kind === 'wire') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
     else if (kind === 'area') { e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
@@ -6479,16 +6815,17 @@
         rows.push(['Circuits', q.item, etq, 1, (q.ft / 12).toFixed(2), fmtFtIn(q.ft), '']);
       });
       var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
-      brkCsv[kb] = (brkCsv[kb] || 0) + 1;
+      brkCsv[kb] = (brkCsv[kb] || 0) + Math.max(1, +ar.circ.mult || 1);
     });
     Object.keys(brkCsv).forEach(function (k) { rows.push(['Circuits', k, '', brkCsv[k], '', '', '']); });
     var wallLen = {};
-    state.walls.forEach(function (w) { wallLen[w.type] = (wallLen[w.type] || 0) + wallGeom(w).len; });
+    state.walls.forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wallLen[w.type] = (wallLen[w.type] || 0) + lnW; });
     Object.keys(wallLen).forEach(function (k) {
       rows.push(['Walls', WALL_TYPES[k] ? WALL_TYPES[k].name : k, '', '', (wallLen[k] / 12).toFixed(2), fmtFtIn(wallLen[k]), '']);
     });
     state.areas.forEach(function (a) {
-      rows.push(['Surfaces', AREA_PATTERNS[a.pattern] ? AREA_PATTERNS[a.pattern].name : a.pattern, '', 1, '', '', (polyArea(a.pts) / 144).toFixed(1)]);
+      if (a.open || (a.pattern || 'none') === 'none') return;   // polilíneas y contornos sin relleno no son superficies
+      rows.push(['Surfaces', AREA_PATTERNS[a.pattern] ? AREA_PATTERNS[a.pattern].name : (a.pattern || 'Polígono'), '', 1, '', '', (areaDe(a) / 144).toFixed(1)]);
     });
     var csv = '﻿' + rows.map(function (r) {
       return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',');
@@ -6545,15 +6882,36 @@
   }
   function normTxt2(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
   // cantidades de TODO el set (todas las hojas), listas para mapear al catálogo
-  function buildTakeoffEntries() {
+  /* NOMBRE PARA EL ESTIMADOR: el equipo del riser se llama por su modelo
+     ('Panel 200A 20/40 — Siemens PL 3R (28.6"×14.4")') y los alias del
+     estimador son cortos ('Panel / Load Center'). Auditoría takeoff 03/09: 8
+     alias muertos, la acometida entera salía SIN MAPEAR. */
+  var EST_NOMBRE = {
+    riser_meter: 'Meter Can', riser_meter_320: 'Meter Can', riser_meter_main: 'Meter Can', riser_meter_main40: 'Meter Can',
+    riser_panel_125: 'Panel / Load Center', riser_panel_100: 'Panel / Load Center', riser_panel: 'Panel / Load Center',
+    riser_panel_200_30: 'Panel / Load Center', riser_panel_400: 'Panel / Load Center', riser_subpanel: 'Subpanel',
+    riser_disc60: 'Disconnect / Safety Switch', riser_disc100: 'Disconnect / Safety Switch', riser_disc: 'Disconnect / Safety Switch',
+    riser_disc400: 'Disconnect / Safety Switch', riser_disc600: 'Disconnect / Safety Switch',
+    riser_ats: 'ATS (Transfer Switch)', riser_ats400: 'ATS (Transfer Switch)', riser_ev: 'EV Charger', riser_ct: 'CT Cabinet',
+    riser_ground: 'Ground Rods (2)', riser_ground_esc: 'Ground Rods (2)', riser_gnd_sym: 'Ground Rods (2)', riser_spd: 'Surge Protector (SPD)'
+  };
+  function nombreEst(k) { return EST_NOMBRE[k] || (SYMBOLS[k] ? SYMBOLS[k].name : k); }
+  // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,
+  // paisajismo (engordaban la lista SIN MAPEAR del estimador)
+  function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing'; }
+  function buildTakeoffEntries(soloHoja) {
     syncSheet();
     var out = [];
     function add(name, qty, unit) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areas = [];
-    state.sheets.forEach(function (sh) {
-      var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {}
-      (d.symbols || []).forEach(function (s) { if (SYMBOLS[s.key]) byKey[s.key] = (byKey[s.key] || 0) + 1; });
-      (d.openings || []).forEach(function (o) { oc[o.type] = (oc[o.type] || 0) + 1; });
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {};
+    var fuentes = soloHoja
+      ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls }]
+      : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
+    fuentes.forEach(function (d) {
+      (d.symbols || []).forEach(function (s) { if (SYMBOLS[s.key] && vaAlEstimador(SYMBOLS[s.key])) byKey[s.key] = (byKey[s.key] || 0) + 1; });
+      // aberturas huérfanas (pared borrada) no se cotizan — igual que en Materiales
+      var wids = {}; (d.walls || []).forEach(function (w) { wids[w.id] = 1; });
+      (d.openings || []).forEach(function (o) { if (wids[o.wallId]) oc[o.type] = (oc[o.type] || 0) + 1; });
       (d.wires || []).forEach(function (w) {
         var key = w.label || WIRE_STYLE_NAMES[w.style || 'dashed'] || 'Cableado';
         wg[key] = (wg[key] || 0) + wireLen(w);
@@ -6564,24 +6922,38 @@
         if (!ar.open || !ar.circ) return;
         partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; });
         var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
-        byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + 1;
+        byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // 3 pisos = 3 breakers
       });
-      (d.walls || []).forEach(function (w) { wl[w.type] = (wl[w.type] || 0) + wallGeom(w).len; });
+      (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
       (d.areas || []).forEach(function (a) {
         if (a.open || !AREA_PATTERNS[a.pattern] || a.pattern === 'none') return;
-        areas.push([AREA_PATTERNS[a.pattern].name, Math.round(polyArea(a.pts) / 144)]);
+        var nomA = AREA_PATTERNS[a.pattern].name;
+        areaSumE[nomA] = (areaSumE[nomA] || 0) + areaDe(a);   // se agrupa y se redondea la SUMA
       });
     });
-    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA'); else if (SYMBOLS[k]) add(SYMBOLS[k].name, byKey[k], 'EA'); });
+    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA'); else if (SYMBOLS[k]) add(nombreEst(k), byKey[k], 'EA'); });
     Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA'); });
     Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
-    areas.forEach(function (a) { add(a[0], a[1], 'SF'); });
+    Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF'); });
     return out;
   }
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
     if (!SB || typeof fetch === 'undefined') { uiAlert('La conexión al estimador no está configurada.'); return; }
-    var entries = buildTakeoffEntries();
+    var entries = null;
+    // (auditoría takeoff 03/09) con E-1 y E-2 sobre la misma planta, el SET
+    // duplicaba paredes, puertas y áreas sin avisar; Materiales y CSV son de
+    // la hoja activa. Se pregunta, como al imprimir.
+    syncSheet();
+    if (state.sheets.length > 1) {
+      uiConfirm('¿Qué se manda al estimador?\n\nOK = SOLO ESTA HOJA (lo mismo que ve Materiales)\nCancelar = TODO EL SET (' + state.sheets.length + ' hojas; ojo: una planta repetida en dos hojas se cuenta dos veces)', function (soloHoja) {
+        entries = buildTakeoffEntries(!!soloHoja);
+        if (!entries.length) { uiAlert('No hay nada que contar en ' + (soloHoja ? 'esta hoja' : 'el set') + '.'); return; }
+        go();
+      });
+      return;
+    }
+    entries = buildTakeoffEntries(true);
     if (!entries.length) { uiAlert('El plano no tiene nada que contar todavía — coloca símbolos, paredes o cableado primero.'); return; }
     function go() {
       setHint('Leyendo el catálogo del estimador…');
@@ -10935,8 +11307,15 @@
       var nxD = -(d.y2 - d.y1) / lnD * offD, nyD = (d.x2 - d.x1) / lnD * offD;
       xs.push(d.x1, d.x2, d.x1 + nxD, d.x2 + nxD); ys.push(d.y1, d.y2, d.y1 + nyD, d.y2 + nyD);   // tambien la linea de cota desplazada
     });
-    state.areas.forEach(function (a) { a.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); });
-    state.wires.forEach(function (w) { var wp = wirePath(w); xs.push(w.x1, w.x2, wp.cx); ys.push(w.y1, w.y2, wp.cy); });
+    state.areas.forEach(function (a) {
+      a.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
+      // el ápice de cada lado curvo sobresale de los vértices (se recortaba en el PDF)
+      if (a.bul) for (var kb = 0; kb < nLados(a); kb++) if (Math.abs(a.bul[kb] || 0) > 0.01) { var ap = medioLado(a, kb); xs.push(ap[0]); ys.push(ap[1]); }
+    });
+    state.wires.forEach(function (w) {
+      var wp = wirePath(w); xs.push(w.x1, w.x2, wp.cx); ys.push(w.y1, w.y2, wp.cy);
+      if (w.label) { var lm = (w.label.length * 5.5 * 0.6) / 2 + 8; xs.push(wp.cx - lm, wp.cx + lm); ys.push(wp.cy - 12, wp.cy + 12); }
+    });
     state.leaders.forEach(function (l) {
       var lsz = l.size || 7, ltw = (l.text || '').length * lsz * 0.58 + 6;
       var lx0 = l.x >= l.tx ? l.x : l.x - ltw;
@@ -11674,7 +12053,14 @@
     var inField = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
     // escribiendo en el chat, Ctrl+Z deshace LO ESCRITO, no el plano
     if (inField && document.activeElement.id === 'chatTxt') return;
-    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); ev.shiftKey ? redo() : undo(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+      ev.preventDefault();
+      var enPrText = document.activeElement && document.activeElement.id === 'prText';
+      ev.shiftKey ? redo() : undo();
+      // escribiendo el texto en Propiedades, el cursor vuelve al cuadro
+      if (enPrText) setTimeout(function () { var tq = $('#prText'); if (tq) { tq.focus(); tq.setSelectionRange(tq.value.length, tq.value.length); } }, 0);
+      return;
+    }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { ev.preventDefault(); redo(); return; }
     // (auditoria 31/08) Ctrl+P del navegador imprimia una hoja EN BLANCO: aqui
     // imprimir es armar la hoja primero, asi que pasa por el boton
@@ -11881,7 +12267,7 @@
       // el menu de la Polilinea tambien separado: planta arriba, site abajo
       html += '<div class="tmHead">Tipo de línea</div>';
       Object.keys(LINE_STYLES).forEach(function (k6) {
-        if (k6 === 'cloud' || LINE_STYLES[k6].site) return;   // la nube tiene su propia herramienta
+        if (k6 === 'cloud' || LINE_STYLES[k6].site || LINE_STYLES[k6].homerun) return;   // nube y homerun tienen su herramienta
         html += '<div class="tmItem' + (k6 === curLineStyle ? ' cur' : '') + '" data-k="' + k6 + '"><span>' +
           esc(LINE_STYLES[k6].name) + '</span></div>';
       });
