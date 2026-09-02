@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.V';
+  var APP_VERSION = 'v29.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2646,6 +2646,19 @@
       var dEst = dashDe(a, est);
       var dash = dEst ? ' stroke-dasharray="' + dEst + '"' : '';
       var col = colorSeguro(a.color), lw = numSeguro(a.lw, 0) || est.lw || 0.9;
+      /* RELLENO DE COLOR (Edgar, 03/09: "que un cuadradito o rectángulo o la
+         forma que yo quiera me permita dibujar el interior de cualquier color,
+         y ponerle un fondo como sombreado que no oculte lo que está abajo,
+         solo que señale esa área como resaltándola"). `relleno` es el color;
+         `rellenoOp` la opacidad (0.3 por defecto = resaltador). Con menos de
+         100 % se pinta en multiply, como la tinta de resaltar: las líneas de
+         abajo se siguen viendo negras a través del color. */
+      var fillOpA = '';
+      if (a.relleno && !a.open) {
+        fill = colorSeguro(a.relleno);
+        var roA = a.rellenoOp == null ? 0.3 : Math.max(0.05, Math.min(1, numSeguro(a.rellenoOp, 0.3)));
+        if (roA < 1) fillOpA = ' fill-opacity="' + roA + '" style="mix-blend-mode:multiply"';
+      }
       // el borde de la piscina va DEBAJO: el agua se dibuja dentro de el
       var cop = copingDe(a);
       if (cop > 0) {
@@ -2654,13 +2667,13 @@
           // la banda del coping queda en blanco (es el borde de concreto) y el
           // agua solo llena el poligono de adentro
           out += '<path d="' + d + '" fill="#ffffff" stroke="none"' + opAttr(a) + '/>';
-          out += '<path d="M' + inner.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z" fill="' + fill +
-            '" stroke="' + col + '" stroke-width="' + Math.max(0.6, lw * 0.8) + '" stroke-linejoin="round"' + opAttr(a) + '/>';
+          out += '<path d="M' + inner.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z" fill="' + fill + '"' + fillOpA +
+            ' stroke="' + col + '" stroke-width="' + Math.max(0.6, lw * 0.8) + '" stroke-linejoin="round"' + opAttr(a) + '/>';
           fill = 'none';
           lw = Math.max(lw, 1.5);
         }
       }
-      out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '" stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
+      out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '"' + fillOpA + ' stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
       if (est.glifo) out += glifosLinea(a, est, col, lw);
       if (a.open && a.circ) out += rotuloHomerun(a, col);
       if (a.open) out += plineCaps(a);
@@ -3258,6 +3271,18 @@
     var w = textAncho(t, sz), a = t.align || 'left';
     return a === 'center' ? t.x - w / 2 : (a === 'right' ? t.x - w : t.x);
   }
+  /* CALLOUT = texto con flecha (Edgar, 03/09: "las notas que yo haga callout,
+     que pueda editarlas, darle Enter para que cojan menos espacio, cambiarles
+     el color, la fuente, el formato y el centrado como hago con los otros
+     textos"). El callout comparte TODO con el texto: renglones, fuente,
+     negrita, cursiva, color, alineado. Sin alineado explícito, el texto se
+     acomoda solo según de qué lado quede la flecha (como siempre). */
+  function leaderAnchor(l) { return l.align ? (TEXT_ANCHOR[l.align] || 'start') : (l.x >= l.tx ? 'start' : 'end'); }
+  function leaderCaja(l) {
+    var sz = l.size || 7, w = textAncho(l, sz), h = textAlto(l, sz), an = leaderAnchor(l);
+    var x0 = an === 'start' ? l.x : (an === 'end' ? l.x - w : l.x - w / 2);
+    return { x: x0 - 3, y: l.y - sz, w: w + 6, h: h + 4, an: an, sz: sz };
+  }
 
   /* ---------------- render: anotaciones ---------------- */
   function dimMarkup(x1, y1, x2, y2, off, cls, label) {
@@ -3298,16 +3323,19 @@
   }
 
   function leaderMarkup(l) {
-    var size = l.size || 7;
-    var anchor = l.x >= l.tx ? 'start' : 'end';
-    var sx = l.x + (anchor === 'start' ? -2 : 2), sy = l.y - size * 0.35;
+    var size = l.size || 7, cj = leaderCaja(l);
+    // la línea sale del lado de la caja que mira a la flecha, a media altura del bloque
+    var izq = l.tx < cj.x + cj.w / 2;
+    var sx = izq ? cj.x + 1 : cj.x + cj.w - 1;
+    var sy = l.y - size * 0.35 + (textLineas(l).length - 1) * size * 1.25 / 2;
     var dx = l.tx - sx, dy = l.ty - sy, len = Math.hypot(dx, dy) || 1e-6;
     var ux = dx / len, uy = dy / len, nx = -uy, ny = ux;
     var bx = l.tx - ux * 4, by = l.ty - uy * 4;   // base de la flecha
+    var colL = l.color ? colorSeguro(l.color) : null;
     var s = '<g data-id="' + l.id + '">';
-    s += '<line class="leader-line" x1="' + sx + '" y1="' + sy + '" x2="' + bx + '" y2="' + by + '"/>';
-    s += '<polygon class="leader-head" points="' + l.tx + ',' + l.ty + ' ' + (bx + nx * 1.6) + ',' + (by + ny * 1.6) + ' ' + (bx - nx * 1.6) + ',' + (by - ny * 1.6) + '"/>';
-    s += '<text class="lbl" x="' + l.x + '" y="' + l.y + '" font-size="' + size + '" text-anchor="' + anchor + '">' + esc(l.text) + '</text>';
+    s += '<line class="leader-line" x1="' + sx + '" y1="' + sy + '" x2="' + bx + '" y2="' + by + '"' + (colL ? ' style="stroke:' + colL + '"' : '') + '/>';
+    s += '<polygon class="leader-head" points="' + l.tx + ',' + l.ty + ' ' + (bx + nx * 1.6) + ',' + (by + ny * 1.6) + ' ' + (bx - nx * 1.6) + ',' + (by - ny * 1.6) + '"' + (colL ? ' style="fill:' + colL + '"' : '') + '/>';
+    s += '<text class="lbl" x="' + l.x + '" y="' + l.y + '" font-size="' + size + '" text-anchor="' + cj.an + '"' + textAttrs(l) + '>' + textTspans(l, size, l.x) + '</text>';
     return s + '</g>';
   }
 
@@ -3592,9 +3620,8 @@
       return '<circle class="sel" cx="' + ((e.x1 + e.x2) / 2) + '" cy="' + ((e.y1 + e.y2) / 2) + '" r="10"/>';
     }
     if (kind === 'leader') {
-      var lsz = e.size || 7, lw = (e.text.length * lsz) * 0.58 + 6;
-      var lx = e.x >= e.tx ? e.x - 3 : e.x - lw + 3;
-      return '<rect class="sel" x="' + lx + '" y="' + (e.y - lsz) + '" width="' + lw + '" height="' + (lsz + 5) + '"/>';
+      var cjL = leaderCaja(e);
+      return '<rect class="sel" x="' + cjL.x + '" y="' + cjL.y + '" width="' + cjL.w + '" height="' + cjL.h + '"/>';
     }
     if (kind === 'area') return '<path class="sel" d="' + areaPath(e) + '"/>';
     return '';
@@ -3698,9 +3725,7 @@
             }
           }
         } else if (sel.kind === 'leader') {
-          var lw = (e.text.length * (e.size || 7)) * 0.58 + 6;
-          var lx = e.x >= e.tx ? e.x - 3 : e.x - lw + 3;
-          s += '<rect class="sel" x="' + lx + '" y="' + (e.y - (e.size || 7)) + '" width="' + lw + '" height="' + ((e.size || 7) + 5) + '"/>';
+          s += selShapeMarkup('leader', e);
         }
         // el circulito de girar tambien en una sola pieza (menos aberturas,
         // que viajan pegadas a su pared)
@@ -4164,6 +4189,11 @@
       var t = state.texts.find(function (x) { return x.id === h.id; });
       uiPromptArea('Editar texto (Enter = renglón nuevo):', t.text, function (nt) {
         if (nt !== null && nt !== '') { pushUndo(); t.text = nt; refresh(); }
+      });
+    } else if (h && h.kind === 'leader') {
+      var ldE = state.leaders.find(function (x) { return x.id === h.id; });
+      if (ldE) uiPromptArea('Editar nota (Enter = renglón nuevo):', ldE.text, function (nt) {
+        if (nt !== null && nt.trim() !== '') { pushUndo(); ldE.text = nt; refresh(); }
       });
     } else if (h && h.kind === 'dim') {
       editDimValue(state.dims.find(function (x) { return x.id === h.id; }));
@@ -5155,10 +5185,13 @@
       sel = { kind: 'wire', id: wr.id };
       refresh();
     } else if (kind === 'leader') {
-      uiPrompt('Texto de la nota (ej: GFI, Fridge Outlet, A-30):', '', function (txt) {
-        if (!txt) return;
+      uiPromptArea('Texto de la nota (Enter = renglón nuevo; ej: GFI, Fridge Outlet, A-30):', '', function (txt) {
+        if (!txt || !txt.trim()) return;
         pushUndo();
         var ld = { id: uid(), tx: a[0], ty: a[1], x: p[0], y: p[1], text: txt, size: 7 };
+        // hereda el formato del último callout (fuente, tamaño, color, negrita…)
+        var ref = state.leaders[state.leaders.length - 1];
+        if (ref) ['size', 'font', 'bold', 'italic', 'color', 'align'].forEach(function (k) { if (ref[k] != null) ld[k] = ref[k]; });
         state.leaders.push(ld);
         sel = { kind: 'leader', id: ld.id };
         refresh();
@@ -6450,8 +6483,35 @@
       html += '<div class="row"><button id="prInkModo">' + (e.modo === 'hi' ? '✒️ Pasar a lápiz' : '🖍 Pasar a resaltador') + '</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'leader') {
-      html += '<div class="row"><label>Texto</label><input id="prLeadText" value="' + esc(e.text) + '"></div>';
-      html += '<div class="row"><label>Tamaño</label><input id="prLeadSize" type="number" min="4" value="' + (e.size || 7) + '"></div>';
+      // el callout usa la misma área de texto y la misma barra que el texto
+      // (los manejadores de #prText, fuente, tamaño, B/I, alineado y color son
+      // compartidos); sin giro ni Estilo, que no aplican a una nota con flecha
+      html += '<textarea id="prText" rows="3" style="width:100%;box-sizing:border-box;resize:vertical;' +
+        'font-family:inherit;font-size:12px;padding:5px;border:1px solid #c9c9c3;border-radius:5px" ' +
+        'title="Enter hace un renglón nuevo — la nota puede ir en varias líneas">' + esc(e.text) + '</textarea>';
+      var alL = e.align || '';
+      html += '<div class="txtBar">' +
+        '<select id="prTextFont" title="Fuente">' +
+          Object.keys(TEXT_FONTS).map(function (fk) {
+            return '<option value="' + fk + '"' + ((e.font || 'arch') === fk ? ' selected' : '') + '>' + esc(TEXT_FONTS[fk].corto) + '</option>';
+          }).join('') + '</select>' +
+        '<button id="prTxtMenos" title="Más chica">A−</button>' +
+        '<input id="prTextSize" class="n" type="number" min="3" step="0.5" value="' + (e.size || 7) + '" title="Tamaño">' +
+        '<button id="prTxtMas" title="Más grande">A+</button>' +
+        '<span class="sep"></span>' +
+        '<button id="prTxtBold" class="' + (e.bold ? 'on' : '') + '" style="font-weight:800" title="Negrita">B</button>' +
+        '<button id="prTxtItal" class="' + (e.italic ? 'on' : '') + '" style="font-style:italic" title="Cursiva">I</button>' +
+        '<span class="sep"></span>' +
+        '<button class="alBtn ' + (alL === '' ? 'on' : '') + '" data-al="" title="Automático: según el lado de la flecha">↔</button>' +
+        '<button class="alBtn ' + (alL === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">⯇</button>' +
+        '<button class="alBtn ' + (alL === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
+        '<button class="alBtn ' + (alL === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
+        '<span class="sep"></span>' +
+        COLOR_PRESETS.map(function (c8) {
+          return '<span class="sw' + ((e.color || '#14161a') === c8[0] ? ' cur' : '') + '" data-c="' + c8[0] + '" title="' + c8[1] + '" style="background:' + c8[0] + '"></span>';
+        }).join('') +
+        '</div>';
+      html += '<div class="muted small">Doble clic sobre la nota también la edita. Arrastra la nota para moverla; la flecha se queda en su punto.</div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'area') {
       if (e.open && e.circ) {
@@ -6489,6 +6549,19 @@
         });
         html += '</select></div>';
         html += '<div class="row"><label>Rotación</label><input id="prAreaRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
+        // relleno de color: resalta el área sin tapar lo de abajo (o sólido al 100 %)
+        html += '<div class="row" title="Color del interior. Con opacidad menor a 100 % resalta como marcador: lo de abajo se sigue viendo."><label>Relleno</label><div class="swRow" id="prFillRow">' +
+          '<span class="sw' + (!e.relleno ? ' cur' : '') + '" data-c="" title="Sin relleno" style="background:#fff;color:#a33;font-size:10px;line-height:14px;text-align:center">✕</span>' +
+          COLOR_PRESETS.map(function (c) {
+            return '<span class="sw' + (e.relleno === c[0] ? ' cur' : '') + '" data-c="' + c[0] + '" title="' + c[1] + '" style="background:' + c[0] + '"></span>';
+          }).join('') + '</div></div>';
+        if (e.relleno) {
+          var roSel = e.rellenoOp == null ? 0.3 : +e.rellenoOp;
+          html += '<div class="row"><label>Opacidad</label><select id="prFillOp">' +
+            [[0.15, '15 % — muy suave'], [0.3, '30 % — resaltador'], [0.5, '50 %'], [0.75, '75 %'], [1, '100 % — sólido (tapa lo de abajo)']].map(function (o) {
+              return '<option value="' + o[0] + '"' + (Math.abs(roSel - o[0]) < 0.01 ? ' selected' : '') + '>' + o[1] + '</option>';
+            }).join('') + '</select></div>';
+        }
         html += '<div class="row"><label>Borde (coping)</label><select id="prCoping">' +
           [['0', 'Sin borde'], ['8', '8\"'], ['12', '12\" (normal)'], ['16', '16\"'], ['18', '18\"'], ['24', '24\" (deck)']].map(function (c9) {
             return '<option value="' + c9[0] + '"' + (copingDe(e) === parseFloat(c9[0]) ? ' selected' : '') + '>' + c9[1] + '</option>';
@@ -6757,7 +6830,7 @@
     $$('.txtBar .alBtn').forEach(function (ab) {
       ab.addEventListener('click', function () {
         var et = findSel(); if (!et) return;
-        pushUndo(); et.align = ab.dataset.al; refresh(); showProps();
+        pushUndo(); if (ab.dataset.al) et.align = ab.dataset.al; else delete et.align; refresh(); showProps();
       });
     });
     on('prTextSize', 'change', function (n) {
@@ -6818,6 +6891,14 @@
         pushUndo(); e.color = sw.dataset.c; refresh(); showProps();
       });
     });
+    $$('#prFillRow .sw').forEach(function (sw) {
+      sw.addEventListener('click', function () {
+        pushUndo();
+        if (sw.dataset.c) e.relleno = sw.dataset.c; else { delete e.relleno; delete e.rellenoOp; }
+        refresh(); showProps();
+      });
+    });
+    on('prFillOp', 'change', function (n) { pushUndo(); e.rellenoOp = Math.max(0.05, Math.min(1, parseFloat(n.value) || 0.3)); refresh(); });
     on('prAreaLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.9; refresh(); });
     on('prAreaLbl', 'change', function (n) { pushUndo(); e.showLabel = n.checked; refresh(); });
     on('prToWall', 'click', function () {
@@ -6874,8 +6955,6 @@
       refresh();
       setHint('✔ Línea convertida en pared de ' + WALL_TYPES[wt].name);
     });
-    on('prLeadText', 'change', function (n) { pushUndo(); e.text = n.value; refresh(); });
-    on('prLeadSize', 'change', function (n) { pushUndo(); e.size = parseFloat(n.value) || 7; refresh(); });
   }
 
   function recuerdaHueco(w) {
@@ -7088,7 +7167,7 @@
       out.push({ kind: 'ink', tipo: 'ink', id: k.id, nombre: k.modo === 'hi' ? 'Resaltado' : 'Trazo a mano', det: (COLOR_PRESETS.filter(function (c) { return c[0] === k.color; })[0] || ['', k.color || ''])[1], medida: fmtFtIn(Lk), num: Lk });
     });
     state.leaders.forEach(function (l) {
-      out.push({ kind: 'leader', tipo: 'leader', id: l.id, nombre: l.text || '', det: 'callout', medida: '', num: 0 });
+      out.push({ kind: 'leader', tipo: 'leader', id: l.id, nombre: String(l.text || '').replace(/\r?\n/g, ' / '), det: 'callout', medida: '', num: 0 });
     });
     state.dims.forEach(function (d) {
       var L = Math.hypot(d.x2 - d.x1, d.y2 - d.y1);
@@ -7139,7 +7218,7 @@
       }
       cornersT.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
     }
-    else if (kind === 'leader') { xs.push(e.x, e.tx); ys.push(e.y, e.ty); }
+    else if (kind === 'leader') { var cjD = leaderCaja(e); xs.push(e.tx, cjD.x, cjD.x + cjD.w); ys.push(e.ty, cjD.y, cjD.y + cjD.h); }
     else if (kind === 'dim' || kind === 'wire') { xs.push(e.x1, e.x2); ys.push(e.y1, e.y2); }
     else if (kind === 'area') { e.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
     if (!xs.length) return null;
@@ -9507,9 +9586,9 @@
     (state.symbols || []).forEach(function (o) { nums(o, ['x', 'y', 'rot', 'scale', 'sx', 'sy', 'op']); });
     (state.texts || []).forEach(function (o) { nums(o, ['x', 'y', 'size', 'rot', 'op']); col(o); if (o.text != null) o.text = String(o.text); });
     (state.dims || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'off', 'op']); });
-    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK']); col(o); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
+    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK', 'rellenoOp']); col(o); if (o.relleno != null) o.relleno = colorSeguro(o.relleno); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
     (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
-    (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op']); if (o.text != null) o.text = String(o.text); });
+    (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
     ['bg', 'bg2'].forEach(function (k) {
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
@@ -11916,9 +11995,8 @@
       if (w.label) { var lm = (w.label.length * 5.5 * 0.6) / 2 + 8; xs.push(wp.cx - lm, wp.cx + lm); ys.push(wp.cy - 12, wp.cy + 12); }
     });
     state.leaders.forEach(function (l) {
-      var lsz = l.size || 7, ltw = (l.text || '').length * lsz * 0.58 + 6;
-      var lx0 = l.x >= l.tx ? l.x : l.x - ltw;
-      xs.push(l.tx, lx0, lx0 + ltw); ys.push(l.ty, l.y - lsz, l.y + 6);
+      var cjB = leaderCaja(l);
+      xs.push(l.tx, cjB.x, cjB.x + cjB.w); ys.push(l.ty, cjB.y, cjB.y + cjB.h);
     });
     if (state.bg) { xs.push(state.bg.x, state.bg.x + state.bg.w); ys.push(state.bg.y, state.bg.y + state.bg.h); }
     if (!xs.length) return { x: -60, y: -60, w: 720, h: 480 };
