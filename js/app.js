@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.U';
+  var APP_VERSION = 'v29.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1211,6 +1211,12 @@
     centro:   { name: '—·—·— Eje (línea de centro)', dash: '12 3 1 3' },
     fantasma: { name: '—··—··— Fantasma (lote, lo que se quita)', dash: '14 3 1 3 1 3' },
     gruesa:   { name: '▬▬▬ Gruesa (contorno destacado)', dash: '', lw: 2.2 },
+    /* LED STRIP a la medida (Edgar, 03/09: "permite que pueda ser como una
+       línea que yo corra y ponga de la dimensión que yo quiera, pero con el
+       símbolo de LED strip"). Es un TIPO DE LÍNEA, no un símbolo fijo de 8 ft:
+       se traza con Line o Polyline (bajo el gabinete, en la cornisa, en el
+       escalón) y el takeoff la cuenta en FT (`ft`: nombre para el estimador). */
+    ledstrip: { name: '▭▭▭ LED STRIP — tira LED a la medida (cuenta en FT)', dash: '', lw: 1.1, glifo: 'led', paso: 12, ft: 'LED Strip Light' },
     cloud:    { name: '☁ Nube de revisión', dash: '' },
 
     /* -- lindero y servidumbres -- */
@@ -2565,11 +2571,16 @@
     for (var d = prim; d <= tr.tot - 1 && cnt < nMax; d += paso, cnt++) {
       var P = puntoEn(tr, d);
       if (!P) break;
-      if (g === 'x' || g === 'o' || g === 'silt') {
+      if (g === 'x' || g === 'o' || g === 'silt' || g === 'led') {
         var r = (g === 'silt' ? 13 : 11) * kg;
         var tf = ' transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
           ') rotate(' + P.ang.toFixed(1) + ')"';
-        if (g === 'x') {
+        if (g === 'led') {
+          // la tira: una rayita cruzada cada 12" (los cortes de la cinta LED)
+          var rl = 3 * kg;
+          out += '<g' + tf + '><path d="M0,' + (-rl) + ' L0,' + rl + '" stroke="' + col +
+            '" stroke-width="' + (lw * 0.8).toFixed(2) + '" fill="none"/></g>';
+        } else if (g === 'x') {
           out += '<g' + tf + '><path d="M' + (-r) + ',' + (-r) + ' L' + r + ',' + r +
             ' M' + (-r) + ',' + r + ' L' + r + ',' + (-r) + '" stroke="' + col +
             '" stroke-width="' + (lw * 0.9 * kg).toFixed(2) + '" fill="none"/></g>';
@@ -2591,6 +2602,19 @@
           ') rotate(' + an.toFixed(1) + ')" font-size="' + (GLIFO_ALTO * kg).toFixed(1) +
           '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
           '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(g) + '</text>';
+      }
+    }
+    if (g === 'led' && tr.tot >= 18) {
+      // "LED" pequeño encima de la mitad del trazo, derecho siempre
+      var Pm = puntoEn(tr, tr.tot / 2);
+      if (Pm) {
+        var am = Pm.ang, rad = am * Math.PI / 180;
+        var ox = Math.sin(rad) * 6 * kg, oy = -Math.cos(rad) * 6 * kg;   // 6" por encima (normal a la izquierda del avance)
+        if (am > 90 || am < -90) { am += 180; ox = -ox; oy = -oy; }
+        out += '<text x="0" y="0" transform="translate(' + (Pm.x + ox).toFixed(2) + ' ' + (Pm.y + oy).toFixed(2) +
+          ') rotate(' + am.toFixed(1) + ')" font-size="' + (5 * kg).toFixed(1) +
+          '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
+          '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">LED</text>';
       }
     }
     return out;
@@ -7336,11 +7360,12 @@
   // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,
   // paisajismo (engordaban la lista SIN MAPEAR del estimador)
   function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing'; }
+  window.__takeoffDbg = function () { try { return buildTakeoffEntries(true); } catch (e) { return [{ name: 'EXC ' + e.message }]; } };
   function buildTakeoffEntries(soloHoja) {
     syncSheet();
     var out = [];
     function add(name, qty, unit) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {};
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {};   // lf: líneas que se cotizan por pie (LED strip)
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -7363,6 +7388,11 @@
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
       (d.areas || []).forEach(function (a) {
+        var estA = LINE_STYLES[a.lineStyle];
+        if (estA && estA.ft && Array.isArray(a.pts) && a.pts.length >= 2) {
+          var lfA = polyPerim(a.pts, a.open);
+          if (lfA >= 1) lf[estA.ft] = (lf[estA.ft] || 0) + lfA;
+        }
         if (a.open || !AREA_PATTERNS[a.pattern] || a.pattern === 'none') return;
         var nomA = AREA_PATTERNS[a.pattern].name;
         areaSumE[nomA] = (areaSumE[nomA] || 0) + areaDe(a);   // se agrupa y se redondea la SUMA
@@ -7373,6 +7403,7 @@
     Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
     Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF'); });
+    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT'); });
     return out;
   }
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
