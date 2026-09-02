@@ -111,22 +111,22 @@
       '<polygon points="14,-8 11,-3.6 8.9,-6.6" fill="#14161a" stroke="none"/>' +
       L(-4, 1, -2, 4.5, 0.9) + L(0, -1, 2, 2.5, 0.9) };
 
-  S.light_ceiling = { name: 'Ceiling Light (surface)', short: 'Ceiling Light', cat: 'electrical', layer: 'electrical', w: 24, h: 24,
+  S.light_ceiling = { name: 'Ceiling Light (surface)', short: 'Ceiling Light', cat: 'lighting', layer: 'electrical', w: 24, h: 24,
     svg: C(0, 0, 7.5) + L(7.5, 0, 12, 0) + L(-7.5, 0, -12, 0) + L(0, 7.5, 0, 12) + L(0, -7.5, 0, -12) };
 
-  S.light_recessed = { name: 'Recessed Light', short: 'Recessed', cat: 'electrical', layer: 'electrical', w: 18, h: 18,
+  S.light_recessed = { name: 'Recessed Light', short: 'Recessed', cat: 'lighting', layer: 'electrical', w: 18, h: 18,
     svg: C(0, 0, 7.5) + C(0, 0, 3.8) };
 
-  S.light_pendant = { name: 'Pendant Light', short: 'Pendant', cat: 'electrical', layer: 'electrical', w: 18, h: 18,
+  S.light_pendant = { name: 'Pendant Light', short: 'Pendant', cat: 'lighting', layer: 'electrical', w: 18, h: 18,
     svg: C(0, 0, 7.5) + C(0, 0, 2.2, ' fill="#14161a"') };
 
-  S.light_sconce = { name: 'Wall Sconce', short: 'Sconce', cat: 'electrical', layer: 'electrical', w: 14, h: 20,
+  S.light_sconce = { name: 'Wall Sconce', short: 'Sconce', cat: 'lighting', layer: 'electrical', w: 14, h: 20,
     svg: C(0, 2, 5.5) + L(0, -3.5, 0, -10) };
 
-  S.light_strip = { name: '4 ft LED Strip Light', short: 'LED 4 ft', cat: 'electrical', layer: 'electrical', w: 52, h: 14,
+  S.light_strip = { name: '4 ft LED Strip Light', short: 'LED 4 ft', cat: 'lighting', layer: 'electrical', w: 52, h: 14,
     svg: R(-24, -5.5, 48, 11) + L(-24, 0, 24, 0, 0.6) };
 
-  S.fan_ceiling = { name: 'Ceiling Fan', short: 'Fan', cat: 'electrical', layer: 'electrical', w: 42, h: 42,
+  S.fan_ceiling = { name: 'Ceiling Fan', short: 'Fan', cat: 'lighting', layer: 'electrical', w: 42, h: 42,
     svg: C(0, 0, 4.5) +
       '<ellipse cx="12.5" cy="0" rx="8.5" ry="3.4"/>' +
       '<ellipse cx="-12.5" cy="0" rx="8.5" ry="3.4"/>' +
@@ -135,6 +135,93 @@
 
   S.fan_exhaust = { name: 'Exhaust Fan', short: 'Exhaust', cat: 'electrical', layer: 'electrical', w: 20, h: 20,
     svg: R(-9, -9, 18, 18) + C(0, 0, 6.5) + T(0, 2.4, 5.5, 'EF', { bold: true }) };
+
+  /* ============================ ILUMINACIÓN ============================
+   * (Edgar, 02/09: "aliméntame más los símbolos con luminarias tipo recessed
+   * lights, wall sconces, pendants, chandeliers entre otros"). Convención del
+   * plano eléctrico de EE. UU.: círculo = luminaria de techo; círculo con
+   * punto = pendiente; con rayos = chandelier; con palito hacia la pared =
+   * aplique; rectángulo = troffer/fluorescente (línea central = empotrado,
+   * doble borde = de superficie). Los NOMBRES son los del Excel del estimado
+   * y de las herramientas de Bluebeam de Edgar (Lights_v2.btx), así el
+   * takeoff cruza solo con alias_takeoff (v3). */
+  var DOT = ' fill="#14161a"';
+  function luz(clave, nombre, corto, w, h, svg, extra) {
+    S[clave] = Object.assign({ name: nombre, short: corto, cat: 'lighting', layer: 'electrical', w: w, h: h, svg: svg }, extra || {});
+  }
+  function rayos(r0, r1, n, w, giro) {
+    var out = '';
+    for (var i = 0; i < n; i++) {
+      var a = (giro || 0) + i * 2 * Math.PI / n;
+      out += L(+(Math.cos(a) * r0).toFixed(2), +(Math.sin(a) * r0).toFixed(2), +(Math.cos(a) * r1).toFixed(2), +(Math.sin(a) * r1).toFixed(2), w);
+    }
+    return out;
+  }
+  function pendiente(x, y, r) { return C(x, y, r) + C(x, y, r * 0.3, DOT); }
+  function cabezaTrack(x) { return C(x, 0, 2.6) + L(x + 1.8, 1.8, x + 4, 4.5, 0.7); }
+
+  // --- empotradas (recessed) ---
+  luz('light_recessed4', 'Recessed Light 4"', 'Rec 4"', 14, 14, C(0, 0, 5.5) + C(0, 0, 2.6));
+  luz('light_downlight', 'Down Light', 'Down Light', 18, 18, C(0, 0, 7.5) + L(-4, 0, 4, 0, 0.7) + L(0, -4, 0, 4, 0.7));
+  luz('light_recessed_adj', 'Recessed Adjustable (eyeball)', 'Eyeball', 18, 18,
+    C(0, 0, 7.5) + C(1.8, -1.8, 3.2) + L(-5.2, 5.2, -1.6, 1.6, 0.9) + L(-5.2, 5.2, -5.2, 2.4, 0.9) + L(-5.2, 5.2, -2.4, 5.2, 0.9));
+  luz('light_recessed_wp', 'Recessed Shower Light (WP)', 'Rec WP', 18, 26, C(0, 0, 7.5) + C(0, 0, 3.8) + T(0, 15, 5, 'WP', { bold: true }), { bx: 0, by: 4 });
+  luz('light_wallwash', 'Recessed Wall Washer', 'Wall Wash', 18, 18, C(0, 0, 7.5) + '<path d="M-7.5,0 A7.5,7.5 0 0,1 7.5,0 Z"' + DOT + '/>');
+  luz('light_soffit', 'Soffit / Eave Recessed Light', 'Soffit', 18, 26, C(0, 0, 7.5) + C(0, 0, 3.8) + T(0, 15, 4.2, 'EAVE', { bold: true }), { bx: 0, by: 4 });
+  // --- de superficie ---
+  luz('light_flush', 'Flush Mount Ceiling Light', 'Flush Mount', 20, 20, C(0, 0, 8) + L(-8, 0, 8, 0, 0.7) + L(0, -8, 0, 8, 0.7));
+  luz('light_closet', 'Closet Light (surface LED)', 'Closet Lt', 16, 16, C(0, 0, 6.5) + T(0, 2.3, 5, 'C', { bold: true }));
+  luz('light_keyless', 'Keyless / Pull-Chain Light', 'Pull Chain', 16, 16, C(0, 0, 6.5) + T(0, 2.3, 4.6, 'PC', { bold: true }));
+  luz('light_puck', 'Puck Light', 'Puck', 10, 10, C(0, 0, 3.5) + C(0, 0, 1.4, DOT));
+  // --- pendientes y chandeliers ---
+  luz('light_pendant_mini', 'Mini Pendant', 'Mini Pend.', 14, 14, pendiente(0, 0, 5.5));
+  luz('light_island', 'Island Pendants (3)', 'Island x3', 84, 18, L(-30, 0, 30, 0, 0.5) + pendiente(-30, 0, 6) + pendiente(0, 0, 6) + pendiente(30, 0, 6));
+  luz('light_linear', 'Linear Pendant 48"', 'Linear 48"', 52, 10, R(-24, -3, 48, 6) + C(-12, 0, 1.6, DOT) + C(12, 0, 1.6, DOT));
+  luz('light_chandelier', 'Chandelier', 'Chandelier', 30, 30, C(0, 0, 8) + rayos(8, 13, 8, 0.8) + C(0, 0, 2.2, DOT));
+  luz('light_chandelier_lg', 'Chandelier Large (foyer)', 'Chand. Lg', 44, 44, C(0, 0, 12) + rayos(12, 20, 12, 0.8) + C(0, 0, 3, DOT));
+  // --- de pared (el palito apunta a la pared) ---
+  luz('light_sconce_updown', 'Wall Sconce Up/Down', 'Sconce U/D', 14, 22, C(0, 3, 5.5) + L(0, -2.5, 0, -10) + L(0, -1, 0, 7, 0.9), { bx: 0, by: -1 });
+  luz('light_vanity', 'Vanity Bar Light (3-light)', 'Vanity x3', 28, 14, R(-12, 0, 24, 5) + C(-8, 2.5, 1.5, DOT) + C(0, 2.5, 1.5, DOT) + C(8, 2.5, 1.5, DOT) + L(0, 0, 0, -7), { bx: 0, by: -1 });
+  luz('light_vanity4', 'Vanity Bar Light (4-light)', 'Vanity x4', 34, 14, R(-15, 0, 30, 5) + C(-11, 2.5, 1.5, DOT) + C(-3.7, 2.5, 1.5, DOT) + C(3.7, 2.5, 1.5, DOT) + C(11, 2.5, 1.5, DOT) + L(0, 0, 0, -7), { bx: 0, by: -1 });
+  luz('light_picture', 'Picture Light', 'Picture Lt', 24, 12, R(-10, 0, 20, 3) + L(0, 0, 0, -7), { bx: 0, by: -2 });
+  luz('light_coach', 'Exterior Wall Lantern (coach light)', 'Coach Lt', 14, 22, '<path d="M-5,-1 L0,-4 L5,-1 L5,7 L0,10 L-5,7 Z"/>' + L(0, -4, 0, -10), { bx: 0, by: 0 });
+  // --- track ---
+  luz('light_track1', "Track Light 1'", "Track 1'", 16, 12, L(-6, 0, 6, 0, 1.2) + cabezaTrack(0));
+  luz('light_track4', "Track Light 4'", "Track 4'", 52, 12, L(-24, 0, 24, 0, 1.2) + cabezaTrack(-16) + cabezaTrack(0) + cabezaTrack(16));
+  luz('light_track8', "Track Light 8'", "Track 8'", 100, 12, L(-48, 0, 48, 0, 1.2) + cabezaTrack(-36) + cabezaTrack(-18) + cabezaTrack(0) + cabezaTrack(18) + cabezaTrack(36));
+  // --- troffers / fluorescentes (medidas reales) ---
+  function troffer(w, h, superficie) {
+    return R(-w / 2, -h / 2, w, h) +
+      (superficie ? R(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4, 0, ' stroke-width="0.5"') : '') +
+      L(-w / 2 + (superficie ? 2 : 0), 0, w / 2 - (superficie ? 2 : 0), 0, 0.6);
+  }
+  luz('light_troffer22', '24"x24" LED Troffer (recessed)', '2x2 Rec', 26, 26, troffer(24, 24, false));
+  luz('light_troffer22s', '24"x24" LED Troffer (surface)', '2x2 Surf', 26, 26, troffer(24, 24, true));
+  luz('light_troffer24', '24"x48" LED Troffer (recessed)', '2x4 Rec', 52, 28, troffer(48, 24, false));
+  luz('light_troffer24s', '24"x48" LED Troffer (surface)', '2x4 Surf', 52, 28, troffer(48, 24, true));
+  luz('light_troffer14', '12"x48" LED Troffer (recessed)', '1x4 Rec', 52, 16, troffer(48, 12, false));
+  luz('light_troffer14s', '12"x48" LED Troffer (surface)', '1x4 Surf', 52, 16, troffer(48, 12, true));
+  luz('light_vapor', '12"x48" LED Vapor-Tight (WP)', 'Vapor WP', 52, 24, R(-24, -6, 48, 12, 3) + L(-24, 0, 24, 0, 0.6) + T(0, 14.5, 4.5, 'WP', { bold: true }), { bx: 0, by: 3 });
+  luz('light_strip8', '8 ft LED Strip Light', 'LED 8 ft', 100, 14, R(-48, -5.5, 96, 11) + L(-48, 0, 48, 0, 0.6));
+  luz('light_highbay', 'LED High-Bay', 'High-Bay', 22, 22, C(0, 0, 9) + L(-6.4, -6.4, 6.4, 6.4, 0.7) + L(-6.4, 6.4, 6.4, -6.4, 0.7));
+  // --- emergencia ---
+  luz('light_exit', 'Exit Sign', 'EXIT', 18, 10, R(-8, -4, 16, 8) + T(0, 1.6, 4.2, 'EXIT', { bold: true }));
+  luz('light_emerg', 'Emergency Light (battery, 2 heads)', 'EM Light', 18, 14, R(-6, -1, 12, 6) + C(-4, -3.5, 2.4) + C(4, -3.5, 2.4) + T(0, 3.9, 3.6, 'EM', { bold: true }), { bx: 0, by: -1 });
+  luz('light_exit_combo', 'Exit / Emergency Combo', 'EXIT/EM', 18, 16, R(-8, -1, 16, 8) + T(0, 5, 4, 'EXIT', { bold: true }) + C(-5, -3.5, 2.4) + C(5, -3.5, 2.4), { bx: 0, by: -1 });
+  // --- exterior y jardín ---
+  luz('light_flood', 'LED Flood Light (2 heads)', 'Flood x2', 16, 18, L(0, -4, 0, -9) + R(-7, -4, 6, 5) + R(1, -4, 6, 5) + L(-4, 1, -6, 6, 0.7) + L(4, 1, 6, 6, 0.7), { bx: 0, by: -1.5 });
+  luz('light_path', 'LED Landscape Path Light', 'Path Lt', 12, 16, C(0, -3, 4) + L(0, 1, 0, 8, 1));
+  luz('light_step', 'LED Step Light', 'Step Lt', 14, 10, R(-5, -2.5, 10, 5) + L(-5, 0, 5, 0, 0.5));
+  luz('light_uplight', 'Landscape Uplight / Spot', 'Uplight', 12, 14, '<path d="M-4.5,6 L0,-6 L4.5,6 Z"/>' + C(0, 2.2, 1.6, DOT));
+  luz('light_post', 'Post Lamp / Lamp Post', 'Post Lamp', 20, 20, C(0, 0, 6.5) + C(0, 0, 2, DOT) + rayos(6.5, 9, 4, 0.6, Math.PI / 4));
+  // --- ventiladores con luz ---
+  luz('fan_light', 'Ceiling Fan w/ Light Kit', 'Fan+Light', 42, 42, S.fan_ceiling.svg + C(0, 0, 2, DOT));
+  luz('bath_fan_light', 'Bath Fan / Light Combo', 'Fan/Light', 20, 20, R(-9, -9, 18, 18) + C(0, 0, 6.5) + C(0, 0, 2.2, DOT));
+  luz('bath_fan_light_heat', 'Bath Fan / Light / Heater', 'Fan/Lt/Ht', 20, 20, R(-9, -9, 18, 18) + C(0, 0, 6.5) + T(0, 2.4, 5, 'H', { bold: true }));
+  // --- controles de iluminación ---
+  luz('ctl_occ', 'Occupancy Sensor (ceiling)', 'Occ Sensor', 16, 16, C(0, 0, 6.5) + T(0, 2.3, 4.6, 'OS', { bold: true }));
+  luz('ctl_daylight', 'Daylight Sensor', 'Daylight', 16, 16, C(0, 0, 6.5) + T(0, 2.3, 4.6, 'DL', { bold: true }));
+  luz('ctl_photocell', 'Photocell', 'Photocell', 16, 16, C(0, 0, 6.5) + T(0, 2.3, 4.6, 'PE', { bold: true }));
 
   S.smoke = { name: 'Smoke Detector', short: 'Smoke Det.', cat: 'electrical', layer: 'electrical', w: 18, h: 18,
     svg: C(0, 0, 7.5) + T(0, 2.4, 5.5, 'SD', { bold: true }) };
@@ -1251,6 +1338,7 @@
 
   window.SYMBOL_CATS = {
     electrical: '⚡ Electrical',
+    lighting: '💡 Lighting',
     riser: '🔌 Riser / One-line',
     elev: '🗄 Elevation / Cabinets',
     plumbing: '🚿 Plumbing / Appliances',

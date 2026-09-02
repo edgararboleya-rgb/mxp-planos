@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.K';
+  var APP_VERSION = 'v29.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1164,7 +1164,9 @@
     ['12/2', 'NM-B 12/2 (Romex)'], ['12/3', 'NM-B 12/3'],
     ['10/2', 'NM-B 10/2'], ['10/3', 'NM-B 10/3'],
     ['8/3', 'NM-B 8/3'], ['6/3', 'NM-B 6/3'],
+    ['MC 14/2', 'MC 14/2'], ['MC 14/3', 'MC 14/3'],
     ['MC 12/2', 'MC 12/2'], ['MC 12/3', 'MC 12/3'], ['MC 10/3', 'MC 10/3'],
+    ['MC 8/3', 'MC 8/3'], ['MC 6/3', 'MC 6/3'],
     ['THHN #12 en 1/2" EMT', 'THHN #12 · ½" EMT'], ['THHN #10 en 3/4" EMT', 'THHN #10 · ¾" EMT'],
     ['THHN #8 en 3/4" EMT', 'THHN #8 · ¾" EMT'], ['THHN #6 en 1" EMT', 'THHN #6 · 1" EMT']
   ];
@@ -2477,6 +2479,32 @@
    * def.bg: 'rect' (por defecto), 'ellipse' para los redondos, 'none' para
    * los que no deben tapar nada (la campana, el TV, lo que va por encima). */
   var PAPEL = '#fbfaf7';
+  /* EL CUERPO DEL SÍMBOLO (Edgar, 02/09: "quiero que me salga solo el
+   * contorno del panel, no por fuera de las líneas que cubre otras cosas; solo
+   * el fondo dentro de las líneas de cada device"). El fondo opaco ya no pinta
+   * toda la caja del símbolo (que incluye el rótulo y el aire alrededor, y
+   * tapaba el conduit que pasa al lado): pinta el rectángulo o círculo MÁS
+   * GRANDE que el símbolo dibuja — el cajón del panel, el meter, el
+   * disconnect. Si el símbolo no tiene una forma cerrada que valga (menos del
+   * 45 % de su caja, o solo trazos), se queda con la caja de siempre. */
+  function cuerpoSym(def) {
+    if (def._cuerpo !== undefined) return def._cuerpo;
+    var mejor = null, area = 0, m;
+    var reR = /<rect\s+x="([-\d.]+)"\s+y="([-\d.]+)"\s+width="([\d.]+)"\s+height="([\d.]+)"(?:\s+rx="([\d.]+)")?/g;
+    while ((m = reR.exec(def.svg || ''))) {
+      var a = parseFloat(m[3]) * parseFloat(m[4]);
+      if (a > area) { area = a; mejor = { t: 'r', x: +m[1], y: +m[2], w: +m[3], h: +m[4], rx: m[5] ? +m[5] : 0 }; }
+    }
+    var reC = /<circle\s+cx="([-\d.]+)"\s+cy="([-\d.]+)"\s+r="([\d.]+)"/g;
+    while ((m = reC.exec(def.svg || ''))) {
+      var r = parseFloat(m[3]), ac = Math.PI * r * r;
+      if (ac > area) { area = ac; mejor = { t: 'c', cx: +m[1], cy: +m[2], r: r }; }
+    }
+    // 35 %: el meter socket (12x15 en una caja de 18x24 = 41 %) también cuenta
+    if (!mejor || area < 0.35 * def.w * def.h) mejor = null;
+    def._cuerpo = mejor;
+    return mejor;
+  }
   function fondoSym(s, def) {
     var quiere = (s.bg == null) ? (def.layer === 'furniture' && def.bg !== 'none') : !!s.bg;
     if (!quiere || def.bg === 'none') return '';
@@ -2484,6 +2512,9 @@
     if (def.bg === 'ellipse') {
       return '<ellipse cx="' + bx + '" cy="' + by + '" rx="' + (w / 2) + '" ry="' + (h / 2) + '" fill="' + PAPEL + '" stroke="none"/>';
     }
+    var c = cuerpoSym(def);
+    if (c && c.t === 'c') return '<circle cx="' + c.cx + '" cy="' + c.cy + '" r="' + c.r + '" fill="' + PAPEL + '" stroke="none"/>';
+    if (c) return '<rect x="' + c.x + '" y="' + c.y + '" width="' + c.w + '" height="' + c.h + (c.rx ? '" rx="' + c.rx : '') + '" fill="' + PAPEL + '" stroke="none"/>';
     return '<rect x="' + (bx - w / 2) + '" y="' + (by - h / 2) + '" width="' + w + '" height="' + h +
       '" fill="' + PAPEL + '" stroke="none"/>';
   }
