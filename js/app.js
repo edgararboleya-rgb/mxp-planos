@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.P';
+  var APP_VERSION = 'v29.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2762,8 +2762,14 @@
      propósito: son símbolos de medida convencional, no cajas a escala, y
      cuatro asas encima de algo de 12 unidades harían imposible moverlos.
      Para ésos está el campo Escala en Propiedades. */
+  /* Antes solo muebles, riser y site tenían asas de esquina; los devices se
+   * escalaban únicamente por el número "Escala" de Propiedades. Edgar, 03/09:
+   * "dame la posibilidad de achicarlo más, con Shift apretado para que no
+   * pierda la forma" — ahora TODO símbolo se estira desde la esquina; Shift
+   * conserva la proporción (y el mínimo baja a 1"). Las asas aparecen cuando
+   * el símbolo mide al menos ~44 px en pantalla: para uno chico, acércate. */
   function estirable(def) {
-    return !!def && (def.layer === 'furniture' || def.cat === 'riser' || def.cat === 'site' || def.cat === 'siteplan');
+    return !!def;
   }
   function symTransform(s) {
     var k = symK(SYMBOLS[s.key]);
@@ -4688,7 +4694,7 @@
       // a CUARTO DE PULGADA, no a pulgada entera: desde que el equipo del
       // riser va a medida real (un meter socket de 9½"), redondear a 1" era
       // un 5% de error y con SHIFT la forma se notaba cambiada
-      var q4 = function (v) { return Math.max(2, Math.round(v * 4) / 4); };
+      var q4 = function (v) { return Math.max(1, Math.round(v * 4) / 4); };   // mínimo 1" (era 2")
       var W4 = q4(Math.abs(lw));
       var H4 = q4(Math.abs(lh));
       // SHIFT: el objeto no pierde su forma (Edgar, 08/30 — el sink y el
@@ -6274,12 +6280,14 @@
       html += '<div><b>' + esc(def.name) + '</b></div>';
       html += '<div class="row"><label>Rotación</label><input id="prRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
       var def2 = SYMBOLS[e.key];
-      html += '<div class="row"><label>Escala</label><input id="prScale" type="number" step="0.1" min="0.2" value="' + (e.scale || 1) + '"></div>';
+      html += '<div class="row"><label>Escala</label><input id="prScale" type="number" step="0.1" min="0.1" value="' + (e.scale || 1) + '"></div>';
       if (estirable(def2)) {
         // pedido de Edgar: estirar a la MEDIDA real (un shower 36x60, una
         // tina a la medida...) — ancho y fondo independientes, en ft-in
-        html += '<div class="row"><label>Ancho</label><input id="prSymW" value="' + fmtFtIn(def2.w * (e.scale || 1) * (e.sx || 1)) + '"></div>';
-        html += '<div class="row"><label>Fondo</label><input id="prSymH" value="' + fmtFtIn(def2.h * (e.scale || 1) * (e.sy || 1)) + '"></div>';
+        // con symK: en los devices (factor del proyecto) la medida real es la que se ve en el plano
+        var kD = symK(def2);
+        html += '<div class="row"><label>Ancho</label><input id="prSymW" value="' + fmtFtIn(def2.w * kD * (e.scale || 1) * (e.sx || 1)) + '"></div>';
+        html += '<div class="row"><label>Fondo</label><input id="prSymH" value="' + fmtFtIn(def2.h * kD * (e.scale || 1) * (e.sy || 1)) + '"></div>';
       }
       html += '<div class="row"><label>Contorno</label><select id="prSymRaya">' +
         [['', '——— Continuo (va en este contrato)'],
@@ -6592,16 +6600,16 @@
     on('prAttrH', 'change', function (n) { attrSet('h', n.value); });
     on('prAttrNote', 'change', function (n) { attrSet('note', n.value.toUpperCase()); });
     on('prRot45', 'click', function () { pushUndo(); e.rot = ((e.rot || 0) + 45) % 360; refresh(); });
-    on('prScale', 'change', function (n) { pushUndo(); e.scale = Math.max(0.2, parseFloat(n.value) || 1); refresh(); });
+    on('prScale', 'change', function (n) { pushUndo(); e.scale = Math.max(0.1, parseFloat(n.value) || 1); refresh(); });
     on('prSymW', 'change', function (n) {
       var v = parseDist(n.value), d2 = SYMBOLS[e.key];
-      if (!v || v < 4 || !d2) return;
-      pushUndo(); e.sx = v / (d2.w * (e.scale || 1)); refresh(); showProps();
+      if (!v || v < 1 || !d2) return;
+      pushUndo(); e.sx = v / (d2.w * symK(d2) * (e.scale || 1)); refresh(); showProps();
     });
     on('prSymH', 'change', function (n) {
       var v = parseDist(n.value), d2 = SYMBOLS[e.key];
-      if (!v || v < 4 || !d2) return;
-      pushUndo(); e.sy = v / (d2.h * (e.scale || 1)); refresh(); showProps();
+      if (!v || v < 1 || !d2) return;
+      pushUndo(); e.sy = v / (d2.h * symK(d2) * (e.scale || 1)); refresh(); showProps();
     });
     on('prDup', 'click', function () {
       pushUndo();
