@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.Z';
+  var APP_VERSION = 'v30.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -7411,15 +7411,79 @@
      usando los nombres EXACTOS del catálogo y la tabla alias_takeoff. */
   var SB = window.MAXPOWER_SUPABASE || null;
   function sbAuth() { try { return JSON.parse(localStorage.getItem('mxp_sb_auth') || 'null'); } catch (e) { return null; } }
-  function sbFetch(path, opts) {
+  /* FASE 7.2 — LA SESION NO SE CIERRA SOLA. Antes solo se guardaba el
+     `access_token`, que Supabase vence en una hora: al volver del almuerzo el
+     iPad pedia email y contrasena otra vez. Ahora se guarda tambien el
+     `refresh_token` (que dura semanas), la hora de vencimiento y el `uid` del
+     usuario — el uid es ademas la carpeta donde van a vivir los planos en la
+     nube (fase 7.3/7.4). `sbRefresh()` renueva en silencio: antes de que
+     venza, y tambien si el servidor contesta 401. Solo se pide la contrasena
+     cuando el refresh_token ya no sirve de verdad. */
+  function sbUid(tok) {
+    // el id del usuario viaja dentro del token (campo 'sub'), en base64url
+    try {
+      var p = String(tok).split('.')[1]; if (!p) return '';
+      p = p.replace(/-/g, '+').replace(/_/g, '/');
+      while (p.length % 4) p += '=';
+      var o = JSON.parse(atob(p));
+      return o && o.sub ? String(o.sub) : '';
+    } catch (e) { return ''; }
+  }
+  function sbGuardaAuth(d, email) {
+    var ant = sbAuth() || {};
+    var a = {
+      access_token: d.access_token,
+      refresh_token: d.refresh_token || ant.refresh_token || '',
+      expires_at: d.expires_at ? d.expires_at * 1000 : (Date.now() + ((+d.expires_in || 3600) * 1000)),
+      email: email || (d.user && d.user.email) || ant.email || '',
+      uid: (d.user && d.user.id) || sbUid(d.access_token) || ant.uid || ''
+    };
+    try { localStorage.setItem('mxp_sb_auth', JSON.stringify(a)); } catch (e) {}
+    return a;
+  }
+  function sbOlvida() { try { localStorage.removeItem('mxp_sb_auth'); } catch (e) {} }
+  var sbRefreshing = null;
+  function sbRefresh() {
+    var a = sbAuth();
+    if (!a || !a.refresh_token) return Promise.reject(new Error('login'));
+    // varias peticiones a la vez comparten UNA sola renovacion (si no, la
+    // segunda usa un refresh_token ya gastado y Supabase la rechaza)
+    if (sbRefreshing) return sbRefreshing;
+    sbRefreshing = fetch(SB.url + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: { 'apikey': SB.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: a.refresh_token })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.access_token) throw new Error('login');
+      return sbGuardaAuth(d, a.email);
+    }).catch(function () {
+      sbOlvida();                       // el refresh ya no sirve: que pida contrasena
+      throw new Error('login');
+    });
+    var fin = function () { sbRefreshing = null; };
+    sbRefreshing.then(fin, fin);
+    return sbRefreshing;
+  }
+  function sbFetch(path, opts, _rein) {
     opts = opts || {};
     var auth = sbAuth();
+    // vence en menos de un minuto: se renueva ANTES de pedir (asi no hay 401)
+    if (!_rein && auth && auth.refresh_token && auth.expires_at && (auth.expires_at - Date.now()) < 60000) {
+      return sbRefresh().then(function () { return sbFetch(path, opts, true); });
+    }
     var headers = { 'apikey': SB.key, 'Content-Type': 'application/json' };
     if (auth && auth.access_token) headers['Authorization'] = 'Bearer ' + auth.access_token;
     if (opts.prefer) headers['Prefer'] = opts.prefer;
     return fetch(SB.url + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
       .then(function (r) {
-        if (r.status === 401) throw new Error('login');
+        if (r.status === 401) {
+          // el token murio antes de tiempo (contrasena cambiada, sesion
+          // revocada): se intenta UNA renovacion y se repite la peticion
+          if (!_rein && auth && auth.refresh_token) {
+            return sbRefresh().then(function () { return sbFetch(path, opts, true); });
+          }
+          throw new Error('login');
+        }
         return r.text().then(function (t) {
           var data = null; try { data = t ? JSON.parse(t) : null; } catch (e2) {}
           if (!r.ok) throw new Error((data && (data.message || data.msg || data.error_description)) || ('HTTP ' + r.status));
@@ -7434,10 +7498,11 @@
       body: JSON.stringify({ email: email, password: pass })
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d.access_token) throw new Error(d.error_description || d.msg || 'email o contraseña incorrectos');
-      localStorage.setItem('mxp_sb_auth', JSON.stringify({ access_token: d.access_token, email: email }));
+      sbGuardaAuth(d, email);
       return d;
     });
   }
+  window.__sbDbg = { auth: sbAuth, uid: sbUid, guarda: sbGuardaAuth, refresh: sbRefresh, fetch: sbFetch, olvida: sbOlvida };
   function askLogin(done) {
     uiPrompt('Entra con tu usuario del panel de Max Power — email:', (sbAuth() && sbAuth().email) || '', function (em) {
       if (!em) return;
@@ -7544,7 +7609,7 @@
         var cat = res[0] || [], alias = res[1] || [];
         if (!cat.length) {
           uiAlert('El catálogo del estimador llegó vacío.\nEntra con el usuario DUEÑO del panel de Max Power (el mismo de la app operativa) y vuelve a intentar.');
-          localStorage.removeItem('mxp_sb_auth');
+          sbOlvida();
           setHint(''); return;
         }
         var catByNorm = {}; cat.forEach(function (c) { catByNorm[normTxt2(c.item)] = c; });
