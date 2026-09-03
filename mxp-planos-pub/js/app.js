@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v29.Y';
+  var APP_VERSION = 'v29.Z';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -322,11 +322,26 @@
   var restaurando = false;        // mientras se lee el autosave al arrancar, NO se guarda encima
   var autosaveAvisado = false;
   function scheduleAutosave() { if (restaurando) return; clearTimeout(autosaveTimer); autosaveTimer = setTimeout(doAutosave, 1500); }
+  /* FASE 7.0 — EL FONDO VIAJA UNA SOLA VEZ. El .mxp.json y el autosave
+     llevaban la imagen del plano de fondo (la parte pesada, megas) DOS veces:
+     en `state.bg` (la hoja viva) y dentro de `sheets[cur].data` (la copia de
+     la hoja). Aquí se quita la del nivel de arriba y se marca `bgEnHoja`; al
+     abrir, restoreProject la recupera de la hoja activa. Los archivos viejos
+     (con el fondo arriba) siguen abriendo igual. Un solo embudo para autosave,
+     💾 Guardar y el rescate de la barra roja. */
+  function payloadProyecto() {
+    syncSheet();
+    var st = state, sh = state.sheets && state.sheets[state.curSheet];
+    if ((state.bg || state.bg2) && sh && typeof sh.data === 'string') {
+      st = Object.assign({}, state, { bg: null, bg2: null, bgEnHoja: 1 });
+    }
+    return JSON.stringify({ app: 'mxp-planos', version: 1, state: st, view: view });
+  }
+  window.__payloadDbg = function () { return payloadProyecto(); };
   function doAutosave() {
     if (restaurando) return;
     try {
-      syncSheet();
-      var payload = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
+      var payload = payloadProyecto();
       // IndexedDB primero: localStorage se queda corto (~5MB) con varios planos
       // de fondo y fallaba en silencio — se perdían las medidas al salir
       var lsOk = true;
@@ -9975,7 +9990,7 @@
   $('#btnSave').addEventListener('click', function () {
     syncSheet(); limpiaMarcas();
     try { purgaPdfBin(); } catch (e) {}
-    var data = JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view });
+    var data = payloadProyecto();
     var baseN = (state.project.name || '').replace(/[^\w\-. ]+/g, '').trim().slice(0, 80) || 'proyecto';
     saveFile(baseN + '.mxp.json', data);
     setHint('Proyecto guardado (archivo descargado)');
@@ -11873,6 +11888,13 @@
     state.bg2 = o.state.bg2 || null;
     state.sheets = Array.isArray(o.state.sheets) ? o.state.sheets : null;
     state.curSheet = o.state.curSheet || 0;
+    // (fase 7.0) el fondo viene una sola vez, dentro de la hoja activa
+    if (!state.bg && !state.bg2 && state.sheets && Number.isInteger(state.curSheet) && state.sheets[state.curSheet] && typeof state.sheets[state.curSheet].data === 'string') {
+      try {
+        var dH = JSON.parse(state.sheets[state.curSheet].data);
+        if (dH && typeof dH === 'object') { sinProto(dH); state.bg = dH.bg || null; state.bg2 = dH.bg2 || null; }
+      } catch (e) {}
+    }
     state.project = Object.assign({ name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '' }, o.state.project || {});
     sinProto(o.state); sinProto(o.view);
     // solo lo ESCALAR y los ajustes (precision, printScale, eqNameOff,
@@ -12801,7 +12823,7 @@
       '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">✕</button>';
     errBar.querySelector('#errCerrar').addEventListener('click', function () { errBar.remove(); errBar = null; });
     errBar.querySelector('#errBajar').addEventListener('click', function () {
-      try { syncSheet(); saveFile('rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json', JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view })); } catch (e) {}
+      try { saveFile('rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json', payloadProyecto()); } catch (e) {}
     });
   }
   window.addEventListener('error', function (ev) { muestraError(ev && ev.message || 'error'); });
