@@ -552,3 +552,17 @@ body.touch #marcasCab button { width: 34px; height: 34px; }
 svg.tool-pen, svg.tool-hi { cursor: crosshair; }
 svg.tool-erase { cursor: cell; }
 #canvas path.ink { pointer-events: none; }
+
+/* ☁ nube (7.3) y pantalla de proyectos (7.4) */
+.nubeBadge { flex: 1; font-size: 11px; color: #666; }
+.nubeBadge.ok { color: #0a8f3c; }
+.nubeBadge.subiendo, .nubeBadge.espera { color: #1c5fa8; }
+.nubeBadge.error { color: #a33; font-weight: 600; }
+.nubeBadge.sinred { color: #a1690a; }
+table.pmTabla { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.pmTabla th { text-align: left; font-size: 10.5px; letter-spacing: .4px; color: #666; border-bottom: 1px solid #ddd; padding: 4px 6px; }
+table.pmTabla td { border-bottom: 1px solid #eee; padding: 6px; vertical-align: top; }
+table.pmTabla tr.cur td { background: #eef5ff; }
+td.pmAcc { white-space: nowrap; text-align: right; }
+td.pmAcc button { font-size: 11px; padding: 3px 8px; margin-left: 4px; border: 1px solid #c9c9c3; background: #fff; border-radius: 5px; cursor: pointer; }
+td.pmAcc button.danger { color: #a33; border-color: #c9a0a0; }

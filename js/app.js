@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.D';
+  var APP_VERSION = 'v30.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -458,26 +458,38 @@
       });
     });
   }
-  // (H) upsert sobre el índice FRESCO de IndexedDB, no sobre la copia en memoria:
-  // otra pestaña pudo haber agregado proyectos entre medias
-  function actualizaIndice(meta, done) {
-    if (!meta) { if (done) done(false); return; }
+  /* (H) El índice se escribe leyendo SIEMPRE el de IndexedDB (otra pestaña pudo
+     agregar proyectos), y las escrituras van EN FILA: si dos cambios salen a la
+     vez —importar 3 archivos de golpe, duplicar mientras sube algo— cada uno
+     leería el mismo índice viejo y el último borraría lo de los otros. */
+  var colaIdx = [], colaIdxCorriendo = false;
+  function enFilaIndice(fn, done) {
+    colaIdx.push({ fn: fn, done: done });
+    if (!colaIdxCorriendo) siguienteIndice();
+  }
+  function siguienteIndice() {
+    var t = colaIdx.shift();
+    if (!t) { colaIdxCorriendo = false; return; }
+    colaIdxCorriendo = true;
     leeIndice(function (arr, to) {
-      var base = to ? libIndex.slice() : arr, i = -1, k;
-      for (k = 0; k < base.length; k++) if (base[k].id === meta.id) { i = k; break; }
-      if (i >= 0) base[i] = meta; else base.push(meta);
-      libIndex = base; ordenaIndice(); pintaLista();
-      if (libListo && !to && !soloLectura) idbSet('proj_index', JSON.stringify(libIndex), done);
-      else if (done) done(false);
+      var base = to ? libIndex.slice() : arr;
+      libIndex = t.fn(base); ordenaIndice(); pintaLista();
+      function fin(ok) { if (t.done) t.done(ok); siguienteIndice(); }
+      if (libListo && !to && !soloLectura) idbSet('proj_index', JSON.stringify(libIndex), fin);
+      else fin(false);
     });
   }
+  function actualizaIndice(meta, done) {
+    if (!meta) { if (done) done(false); return; }
+    enFilaIndice(function (base) {
+      var i = -1, k;
+      for (k = 0; k < base.length; k++) if (base[k].id === meta.id) { i = k; break; }
+      if (i >= 0) base[i] = meta; else base.push(meta);
+      return base;
+    }, done);
+  }
   function quitaDelIndice(id, done) {
-    leeIndice(function (arr, to) {
-      libIndex = (to ? libIndex : arr).filter(function (m) { return m.id !== id; });
-      ordenaIndice(); pintaLista();
-      if (libListo && !to && !soloLectura) idbSet('proj_index', JSON.stringify(libIndex), done);
-      else if (done) done(false);
-    });
+    enFilaIndice(function (base) { return base.filter(function (m) { return m.id !== id; }); }, done);
   }
   /* Guarda el proyecto ABIERTO en la biblioteca. (F) 'ultimo' y el índice se
      escriben solo cuando proj_<id> quedó escrito de verdad: si la primera
@@ -492,7 +504,7 @@
     if (!bump && !opts.forzar && !hayAlgoQueGuardar()) { if (done) setTimeout(function () { done(true); }, 0); return payload; }
     var ficha = fichaDe(pj, state, payload.length);
     idbSet('proj_' + id, payload, function (ok) {
-      if (ok) { idbSet('ultimo', id); actualizaIndice(ficha); }
+      if (ok) { idbSet('ultimo', id); actualizaIndice(ficha); if (bump) encolaSubida(id); }
       if (done) done(ok);
     });
     return payload;
@@ -508,8 +520,8 @@
       var payload = JSON.stringify(o), ficha = fichaDe(pj, o.state, payload.length);
       if (soloLectura) { if (done) done(false); return; }
       idbSet('proj_' + pj.id, payload, function (ok) {
-        if (ok) actualizaIndice(ficha);
-        if (done) done(ok);
+        if (!ok) { if (done) done(false); return; }
+        actualizaIndice(ficha, function () { if (done) done(true); });
       });
     } catch (e) { if (done) done(false); }
   }
@@ -611,6 +623,132 @@
       });
     });
   }
+  /* ================= FASE 7.3 — ☁ COLA DE SUBIDA =================
+     El proyecto que ya vive en este aparato (7.1) sube solo a Supabase: el
+     .mxp.json comprimido va al bucket 'planos' en <uid>/<id>/latest.mxp.json.gz
+     y la ficha (nombre, cliente, rev, fecha, aparato) a la tabla
+     planos_proyectos. Nada bloquea el dibujo: se encola, se sube en segundo
+     plano y el badge ☁ dice en qué anda. Sin sesión del estimador no hace
+     nada; sin red, espera a que vuelva. */
+  var nube = { estado: 'off', msg: '', intentos: 0, timer: null, subiendo: false, pendientes: {}, ultimoOk: '' };
+  var NUBE_ESPERA = 6000, NUBE_REINTENTO = [8000, 25000, 60000];
+  function nubeUid() { var s = sbAuth(); return s && s.uid ? s.uid : null; }
+  function nubeActiva() { return !!(SB && SB.url && nubeUid()); }
+  function nombreAparato() {
+    var u = navigator.userAgent || '';
+    if (/iPad/.test(u) || (/Macintosh/.test(u) && navigator.maxTouchPoints > 1)) return 'iPad';
+    if (/iPhone/.test(u)) return 'iPhone';
+    if (/Android/.test(u)) return 'Android';
+    if (/Macintosh/.test(u)) return 'Mac';
+    if (/Windows/.test(u)) return 'PC';
+    return 'Aparato';
+  }
+  function pintaNube() {
+    var n = $('#pjNube'); if (!n) return;
+    var txt = { off: '☁ sin conexión al panel', espera: '☁ pendiente de subir', subiendo: '☁ subiendo…', ok: '☁ al día', error: '⚠ no subió', sinred: '☁ sin internet' }[nube.estado] || '';
+    n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '');
+    n.title = nube.msg || (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón 💲 Estimador) para que los planos suban solos.' : '');
+    n.className = 'nubeBadge ' + nube.estado;
+  }
+  function nubeSet(estado, msg) { nube.estado = estado; nube.msg = msg || ''; pintaNube(); }
+  function gzipTexto(txt, cb) {
+    try {
+      if (typeof CompressionStream !== 'function') return cb(new Blob([txt], { type: 'application/json' }), false);
+      new Response(new Blob([txt]).stream().pipeThrough(new CompressionStream('gzip'))).blob()
+        .then(function (b) { cb(b, true); }, function () { cb(new Blob([txt], { type: 'application/json' }), false); });
+    } catch (e) { cb(new Blob([txt], { type: 'application/json' }), false); }
+  }
+  function gunzipBlob(blob, cb) {
+    function plano() { blob.text().then(function (t) { cb(t); }, function () { cb(null); }); }
+    try {
+      if (typeof DecompressionStream !== 'function') return plano();
+      new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).text().then(function (t) { cb(t); }, plano);
+    } catch (e) { plano(); }
+  }
+  var NUBE_BUCKET = 'planos';
+  function rutaNube(uid, id) { return uid + '/' + id + '/latest.mxp.json.gz'; }   // sin bucket: es lo que se guarda en la columna 'path'
+  function urlObjeto(path) { return '/storage/v1/object/' + NUBE_BUCKET + '/' + path; }
+  function encolaSubida(id) {
+    if (!nubeActiva()) { nubeSet('off'); return; }
+    nube.pendientes[id || state.project.id] = 1;
+    nube.intentos = 0;
+    if (nube.estado !== 'subiendo') nubeSet('espera');
+    clearTimeout(nube.timer);
+    nube.timer = setTimeout(subeCola, NUBE_ESPERA);
+  }
+  function subeCola() {
+    if (nube.subiendo) return;
+    var ids = Object.keys(nube.pendientes);
+    if (!ids.length) { nubeSet(nubeActiva() ? 'ok' : 'off'); return; }
+    if (!nubeActiva()) { nubeSet('off'); return; }
+    if (navigator.onLine === false) { nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); return; }
+    var id = ids[0];
+    nube.subiendo = true; nubeSet('subiendo');
+    subeProyecto(id, function (ok, msg) {
+      nube.subiendo = false;
+      if (ok) {
+        delete nube.pendientes[id];
+        nube.intentos = 0;
+        var d = new Date();
+        nube.ultimoOk = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+        nubeSet(Object.keys(nube.pendientes).length ? 'espera' : 'ok');
+        if (Object.keys(nube.pendientes).length) { clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400); }
+      } else {
+        // reintento con espera creciente; no se pierde nada: sigue en la cola
+        var esp = NUBE_REINTENTO[Math.min(nube.intentos, NUBE_REINTENTO.length - 1)];
+        nube.intentos++;
+        nubeSet('error', msg || 'No se pudo subir; se reintenta solo.');
+        clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, esp);
+      }
+    });
+  }
+  function subeProyecto(id, done) {
+    var uid = nubeUid();
+    if (!uid) return done(false, 'Sin sesión');
+    function conPayload(payload) {
+      if (!payload) return done(false, 'No se encontró el proyecto en este aparato');
+      var o = null; try { o = JSON.parse(payload); } catch (e) { return done(false, 'El proyecto guardado está dañado'); }
+      var pj = (o.state && o.state.project) || {};
+      gzipTexto(payload, function (blob) {
+        if (blob.size > 50 * 1024 * 1024) return done(false, 'El proyecto pesa más de 50 MB comprimido: no cabe en la nube. Quita algún PDF de fondo.');
+        var path = rutaNube(uid, id);
+        sbFetch(urlObjeto(path), { method: 'POST', rawBody: blob, blob: false,
+          headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
+          .then(function () {
+            return sbFetch('/rest/v1/planos_proyectos', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+              body: [{ id: id, nombre: pj.name || '', cliente: pj.client || '', direccion: pj.address || '', job: pj.job || '',
+                rev: pj.rev || 0, aparato: nombreAparato(), path: path, tamano: blob.size, pdf_ids: pdfsDe(o), borrado: false }] });
+          })
+          .then(function () { done(true); })
+          .catch(function (e) { done(false, e && e.message === 'login' ? 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.' : (e && e.message) || 'Error de red'); });
+      });
+    }
+    if (id === state.project.id) conPayload(payloadProyecto());
+    else idbGet('proj_' + id, function (pl, to) { conPayload(to ? null : pl); });
+  }
+  function bajaProyecto(fila, done) {
+    var path = fila.path || rutaNube(nubeUid(), fila.id);
+    sbFetch(urlObjeto(path), { blob: true })
+      .then(function (blob) { gunzipBlob(blob, function (txt) {
+        var o = null; try { o = txt ? JSON.parse(txt) : null; } catch (e) {}
+        if (!o || o.app !== 'mxp-planos' || !o.state) return done(null, 'El archivo de la nube no se pudo leer');
+        done(o);
+      }); })
+      .catch(function (e) { done(null, (e && e.message) || 'Error de red'); });
+  }
+  function listaNube(done) {
+    if (!nubeActiva()) return done(null, 'sin sesión');
+    sbFetch('/rest/v1/planos_proyectos?select=id,nombre,cliente,job,direccion,rev,updated_at,aparato,path,tamano,borrado&borrado=is.false&order=updated_at.desc')
+      .then(function (rows) { done(Array.isArray(rows) ? rows : []); })
+      .catch(function (e) { done(null, e && e.message === 'login' ? 'La sesión del panel caducó' : (e && e.message) || 'Error de red'); });
+  }
+  try {
+    window.addEventListener('online', function () { if (Object.keys(nube.pendientes).length) { nube.intentos = 0; clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 800); } });
+    window.addEventListener('offline', function () { if (Object.keys(nube.pendientes).length) nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); });
+  } catch (e) {}
+  window.__nubeDbg = { estado: function () { return { estado: nube.estado, pendientes: Object.keys(nube.pendientes), intentos: nube.intentos, ultimoOk: nube.ultimoOk }; },
+    encola: encolaSubida, sube: subeProyecto, baja: bajaProyecto, lista: listaNube, ruta: rutaNube, gzip: gzipTexto, gunzip: gunzipBlob, cola: subeCola, activa: nubeActiva };
+
   function pedirPersistencia() {
     try {
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(function (ok) { persistido = !!ok; }, function () { persistido = false; });
@@ -7851,7 +7989,8 @@
     var headers = { 'apikey': SB.key, 'Content-Type': 'application/json' };
     if (auth && auth.access_token) headers['Authorization'] = 'Bearer ' + auth.access_token;
     if (opts.prefer) headers['Prefer'] = opts.prefer;
-    return fetch(SB.url + path, { method: opts.method || 'GET', headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
+    if (opts.headers) Object.keys(opts.headers).forEach(function (k) { headers[k] = opts.headers[k]; });
+    return fetch(SB.url + path, { method: opts.method || 'GET', headers: headers, body: opts.rawBody !== undefined ? opts.rawBody : (opts.body ? JSON.stringify(opts.body) : undefined) })
       .then(function (r) {
         if (r.status === 401) {
           // el token murio antes de tiempo (contrasena cambiada, sesion
@@ -7860,6 +7999,10 @@
             return sbRefresh().then(function () { return sbFetch(path, opts, true); });
           }
           throw new Error('login');
+        }
+        if (opts.blob) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error('HTTP ' + r.status + (t ? ' ' + t.slice(0, 120) : '')); });
+          return r.blob();
         }
         return r.text().then(function (t) {
           var data = null; try { data = t ? JSON.parse(t) : null; } catch (e2) {}
@@ -10009,6 +10152,133 @@
   $('#pjScale').addEventListener('change', function () {
     state.printScale = this.value; scheduleAutosave();
   });
+  /* ================= FASE 7.4 — ☁ PROYECTOS =================
+     Una sola pantalla con TODO: lo que está en este aparato, lo que está en la
+     nube y lo que está en los dos. Abrir, duplicar, borrar, y meter de golpe
+     varios .mxp.json (los 13 de Caroline, por ejemplo). */
+  var pmFilas = [];
+  function pmAbrir() {
+    $('#projModal').hidden = false;
+    pmRefresca();
+  }
+  function pmCerrar() { $('#projModal').hidden = true; }
+  function pmRefresca() {
+    var cuerpo = $('#pmBody');
+    cuerpo.innerHTML = '<div class="muted small" style="padding:10px">Leyendo…</div>';
+    var locales = libIndex.slice();
+    function pinta(nubeRows, errNube) {
+      var porId = {};
+      locales.forEach(function (m) { porId[m.id] = { id: m.id, nombre: m.nombre, cliente: m.cliente, job: m.job, fecha: m.updatedAt, hojas: m.hojas, tam: m.tam, local: true, nube: false, rev: m.rev }; });
+      (nubeRows || []).forEach(function (r) {
+        var f = porId[r.id] || (porId[r.id] = { id: r.id, nombre: r.nombre, cliente: r.cliente, job: r.job, fecha: r.updated_at, hojas: 0, tam: r.tamano, local: false, rev: r.rev });
+        f.nube = true; f.path = r.path; f.aparato = r.aparato; f.revNube = r.rev; f.fechaNube = r.updated_at;
+        if (!f.local || (r.updated_at || '') > (f.fecha || '')) { f.nombre = f.nombre || r.nombre; f.cliente = f.cliente || r.cliente; }
+      });
+      pmFilas = Object.keys(porId).map(function (k) { return porId[k]; });
+      pmFilas.sort(function (x, y) { return String(y.fecha || '').localeCompare(String(x.fecha || '')); });
+      var html = '';
+      if (errNube) html += '<div class="muted small" style="padding:4px 2px 8px">☁ No se pudo leer la nube (' + esc(errNube) + '). Se muestra lo de este aparato.</div>';
+      if (!pmFilas.length) html += '<div class="muted small" style="padding:10px">Todavía no hay proyectos guardados. Dibuja algo, o usa ⬆ Importar para meter tus .mxp.json.</div>';
+      else {
+        html += '<table class="pmTabla"><tr><th>Proyecto</th><th>Cliente</th><th>Guardado</th><th>Dónde</th><th></th></tr>';
+        pmFilas.forEach(function (f, i) {
+          var d = f.fecha ? new Date(f.fecha) : null;
+          var cuando = d && !isNaN(d) ? (d.getMonth() + 1) + '/' + d.getDate() + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) : '—';
+          var donde = f.local && f.nube ? '💾☁ aparato y nube' : (f.local ? '💾 solo aquí' : '☁ solo en la nube' + (f.aparato ? ' (' + esc(f.aparato) + ')' : ''));
+          var abierto = f.id === state.project.id;
+          html += '<tr' + (abierto ? ' class="cur"' : '') + '><td><b>' + esc(f.nombre || '(sin nombre)') + '</b>' + (abierto ? ' <span class="muted small">— abierto</span>' : '') +
+            (f.job ? '<div class="muted small">' + esc(f.job) + '</div>' : '') + '</td><td>' + esc(f.cliente || '') + '</td><td>' + cuando +
+            '</td><td class="small">' + donde + '</td><td class="pmAcc">' +
+            (abierto ? '' : '<button data-a="abrir" data-i="' + i + '">Abrir</button>') +
+            '<button data-a="dup" data-i="' + i + '" title="Hacer una copia aparte para probar cambios sin tocar el original">Duplicar</button>' +
+            '<button data-a="del" data-i="' + i + '" class="danger">Borrar</button></td></tr>';
+        });
+        html += '</table>';
+      }
+      cuerpo.innerHTML = html;
+      $$('#pmBody button[data-a]').forEach(function (b) {
+        b.addEventListener('click', function () { pmAccion(b.dataset.a, pmFilas[+b.dataset.i]); });
+      });
+    }
+    if (nubeActiva()) listaNube(function (rows, err) { pinta(rows, err); });
+    else pinta(null, null);
+  }
+  function pmAccion(acc, f) {
+    if (!f) return;
+    if (acc === 'abrir') {
+      if (f.local) { pmCerrar(); abrirDeBiblioteca(f.id); return; }
+      setHint('⏳ Bajando de la nube…');
+      bajaProyecto(f, function (o, err) {
+        if (!o) { uiAlert('No se pudo bajar de la nube: ' + (err || 'error')); setHint(''); return; }
+        if (validaProyecto(o)) { uiAlert('El proyecto de la nube llegó dañado.'); setHint(''); return; }
+        cierraPendiente(function () {
+          try { restoreProject(o); } catch (e) { uiAlert('No se pudo abrir: ' + (e && e.message || 'error')); return; }
+          renderSheetTabs(); pmCerrar();
+          setHint('☁ ' + (state.project.name || 'Proyecto') + ' bajado de la nube');
+        });
+      });
+      return;
+    }
+    if (acc === 'dup') {
+      function duplica(o) {
+        o.state.project = o.state.project || {};
+        o.state.project.id = nuevoIdProyecto();
+        o.state.project.name = (o.state.project.name || 'Proyecto') + ' (copia)';
+        o.state.project.rev = 0; delete o.state.project.updatedAt;
+        registraSinAbrir(o, function (ok) {
+          if (!ok) { uiAlert('No se pudo guardar la copia en este aparato.'); return; }
+          pmRefresca(); setHint('📋 Copia creada: ' + o.state.project.name);
+        });
+      }
+      if (f.local) idbGet('proj_' + f.id, function (pl, to) {
+        var o = null; try { o = (!to && pl) ? JSON.parse(pl) : null; } catch (e) {}
+        if (!o) { uiAlert('No se pudo leer ese proyecto de este aparato.'); return; }
+        duplica(o);
+      });
+      else bajaProyecto(f, function (o, err) { if (!o) { uiAlert('No se pudo bajar de la nube: ' + (err || 'error')); return; } duplica(o); });
+      return;
+    }
+    if (acc === 'del') {
+      var donde = f.local && f.nube ? 'de este aparato Y de la nube' : (f.local ? 'de este aparato' : 'de la nube');
+      uiConfirm('¿Borrar «' + (f.nombre || 'este proyecto') + '» ' + donde + '?\n\nLos .mxp.json que ya descargaste NO se tocan.' + (f.id === state.project.id ? '\n\nOJO: es el proyecto que tienes abierto ahora.' : ''), function (ok) {
+        if (!ok) return;
+        var falta = (f.local ? 1 : 0) + (f.nube ? 1 : 0);
+        function paso() { if (--falta <= 0) pmRefresca(); }
+        if (f.local) { idbSet('proj_' + f.id, ''); quitaDelIndice(f.id, paso); if (f.id === state.project.id) { try { idbSet('ultimo', ''); } catch (e) {} } }
+        if (f.nube) sbFetch('/rest/v1/planos_proyectos?id=eq.' + encodeURIComponent(f.id), { method: 'PATCH', prefer: 'return=minimal', body: { borrado: true } })
+          .then(paso, function (e) { uiAlert('Se borró de este aparato, pero no de la nube: ' + ((e && e.message) || 'error')); paso(); });
+        setHint('🗑 «' + (f.nombre || 'Proyecto') + '» borrado ' + donde);
+      });
+      return;
+    }
+  }
+  function pmImporta(files) {
+    var lista = Array.prototype.slice.call(files || []);
+    if (!lista.length) return;
+    var hechos = 0, fallos = 0, falta = lista.length;
+    setHint('⏳ Importando ' + lista.length + ' archivo(s)…');
+    lista.forEach(function (f) {
+      var rd = new FileReader();
+      rd.onload = function () {
+        var o = null; try { o = JSON.parse(rd.result); } catch (e) {}
+        if (!o || o.app !== 'mxp-planos' || !o.state || validaProyecto(o)) { fallos++; fin(); return; }
+        registraSinAbrir(o, function (ok) { if (ok) hechos++; else fallos++; fin(); });
+      };
+      rd.onerror = function () { fallos++; fin(); };
+      rd.readAsText(f);
+    });
+    function fin() {
+      if (--falta > 0) return;
+      pmRefresca();
+      setHint('⬆ Importados ' + hechos + ' proyecto(s)' + (fallos ? ' · ' + fallos + ' no se pudieron leer (¿son .mxp.json?)' : ''));
+    }
+  }
+  $('#pmClose').addEventListener('click', pmCerrar);
+  $('#pmRefresh').addEventListener('click', pmRefresca);
+  $('#pmNuevo').addEventListener('click', function () { pmCerrar(); nuevoProyecto(); });
+  $('#pmImport').addEventListener('click', function () { $('#fileProyectos').click(); });
+  $('#fileProyectos').addEventListener('change', function () { pmImporta(this.files); this.value = ''; });
+  $('#btnProyectos').addEventListener('click', pmAbrir);
   $('#pjLista').addEventListener('change', function () { abrirDeBiblioteca(this.value); });
   $('#pjNuevo').addEventListener('click', function () {
     if (!hayAlgoQueGuardar()) { setHint('Este proyecto ya está vacío'); return; }
@@ -13849,7 +14119,7 @@
     // aparato recién estrenado: el primer proyecto nace con id propio (el id
     // sacado del nombre queda solo para archivos viejos que no traen uno)
     if (!restored && !roto && !idValido(state.project.id)) { state.project.id = nuevoIdProyecto(); state.project.creado = new Date().toISOString(); }
-    pintaLista();
+    pintaLista(); pintaNube();
     // precalentar el PDF guardado: el zoom nítido queda listo sin esperar al primer zoom
     try { if (restored && state.bg && state.bg.pdfId) loadPdfLive(state.bg); } catch (e) {}
     renderSheetTabs();
