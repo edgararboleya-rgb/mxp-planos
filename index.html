@@ -302,10 +302,20 @@
 
   <!-- ======= BARRA DE ESTADO ======= -->
   <div class="dock horiz abajo" id="dockBottom"></div>
+  <!-- Barra de abajo, fija y fina (estilo Bluebeam): aviso a la izquierda,
+       Select / Pan / zoom en el centro, coordenadas y versión a la derecha. -->
   <footer id="statusbar">
     <span id="hint">Selecciona una herramienta para comenzar</span>
-    <span id="coords"></span>
-    <span id="verTag" style="opacity:.55;margin-left:10px;font-size:10px"></span>
+    <div id="navFijo">
+      <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚</button>
+      <button class="tool" data-tool="pan" title="Mover vista (H)">✋</button>
+      <span class="sep"></span>
+      <button class="act zo" data-act="zoomOut" title="Alejar">−</button>
+      <span id="zoomLabel" title="Zoom">100%</span>
+      <button class="act zo" data-act="zoomIn" title="Acercar">+</button>
+      <button class="act zo" data-act="zoomFit" title="Ajustar a contenido">⛶</button>
+    </div>
+    <span class="sbDer"><span id="coords"></span><span id="verTag"></span></span>
   </footer>
 </div>
 

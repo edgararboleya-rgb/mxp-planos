@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.O';
+  var APP_VERSION = 'v30.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -13996,7 +13996,6 @@
   var BARRAS = {
     favs: { nom: 'Mis herramientas', tip: 'Las herramientas que más usas, a un toque. Añade o quita con la ☆ de cada grupo, o en ⋮⋮ Barras.' },
     grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' },
-    nav: { nom: 'Navegar y zoom', tip: 'Seleccionar, mover la vista y zoom.' },
     archivo: { nom: 'Archivo', tip: 'Abrir, guardar, tus proyectos en la nube, exportar PNG / PDF, Panel Schedule y buscar el lote.' }
   };
   var ARCHIVO_IDS = ['btnOpen', 'btnSave', 'btnProyectos', 'btnPng', 'btnPrint', 'btnPanel', 'btnLot'];
@@ -14004,7 +14003,7 @@
   var DOCK_NOM = { top: 'Arriba', bottom: 'Abajo', left: 'Izquierda', right: 'Derecha' };
   var LAYOUT_DEF = {
     v: 1,
-    docks: { top: ['favs', 'grupos'], bottom: ['nav'], left: ['archivo'], right: [] },
+    docks: { top: ['favs', 'grupos'], bottom: [], left: ['archivo'], right: [] },
     ocultas: [],
     favs: ['text', 'leader', 'wire', 'homerun', 'dim', 'measure', 'rect', 'cloud'],
     ultima: {},
@@ -14040,7 +14039,6 @@
     }
     if (g.ultima && typeof g.ultima === 'object') Object.keys(g.ultima).forEach(function (k) { if (grupoDef(k) && grpDe(g.ultima[k]) === k) L.ultima[k] = g.ultima[k]; });
     if (g.uso && typeof g.uso === 'object') Object.keys(g.uso).forEach(function (k) { var n = +g.uso[k]; if (defDe(k) && n > 0) L.uso[k] = Math.min(n, 99999); });
-    if (!hayFormaDeSeleccionar(L.ocultas, L.favs)) L.ocultas = L.ocultas.filter(function (id) { return id !== 'nav'; });
     return L;
   }
   var layout = cargaLayout();
@@ -14052,15 +14050,11 @@
   function guardaLayoutLuego() { if (!guardaLayoutT) guardaLayoutT = setTimeout(guardaLayout, 600); }
   function dockDe(id) { for (var i = 0; i < DOCKS.length; i++) if (layout.docks[DOCKS[i]].indexOf(id) >= 0) return DOCKS[i]; return null; }
   function barraVisible(id) { return layout.ocultas.indexOf(id) < 0; }
-  /* ¿Queda algún sitio desde donde volver a Select? (en iPad no hay tecla V
-     ni Escape: si se pierde Select, no se puede mover ni borrar nada) */
-  function hayFormaDeSeleccionar(ocultas, favs) {
-    var oc = function (id) { return ocultas.indexOf(id) >= 0; };
-    return !oc('nav') || !oc('grupos') || (!oc('favs') && favs.indexOf('select') >= 0);
-  }
   /* Si "Navegar y zoom" está oculta, el grupo Navegar aparece en Grupos para
      que Select y Pan nunca se pierdan. Si está visible, no se duplican. */
-  function gruposVisibles() { return GRUPOS.filter(function (g) { return g.id !== 'nav' || !barraVisible('nav'); }); }
+  /* Select, Pan y el zoom viven fijos en la barra de abajo (#navFijo), así que
+     el grupo Navegar no hace falta en Grupos y nunca se puede perder Select. */
+  function gruposVisibles() { return GRUPOS.filter(function (g) { return g.id !== 'nav'; }); }
 
   /* ---------- pintar ---------- */
   function btnTool(id) {
@@ -14083,17 +14077,10 @@
     var html = '<span class="grip" title="' + esc(b.nom) + ' — arrastra para mover la barra arriba, abajo o a un lado"><span>⋮⋮</span></span>' +
       '<span class="bLbl" title="' + esc(b.tip) + '">' + esc(b.nom) + '</span><div class="bBtns">';
     if (id === 'favs') {
-      // si Navegar y Grupos están ocultas, Select y Pan viven aquí
-      if (!barraVisible('nav') && !barraVisible('grupos') && layout.favs.indexOf('select') < 0) html += btnTool('select') + btnTool('pan') + '<span class="sep"></span>';
       html += layout.favs.map(btnTool).join('');
       if (!layout.favs.length) html += '<button class="act" data-act="barras" title="Todavía no hay herramientas aquí: toca para elegir las tuyas">＋<label>Elegir</label></button>';
     } else if (id === 'grupos') {
       html += gruposVisibles().map(function (g) { return btnGrupo(g, dock === 'left' || dock === 'right'); }).join('');
-    } else if (id === 'nav') {
-      html += btnTool('select') + btnTool('pan') + '<span class="sep"></span>' +
-        '<button class="act zo" data-act="zoomOut" title="Alejar">−</button><span id="zoomLabel">' + zoomPct() + '%</span>' +
-        '<button class="act zo" data-act="zoomIn" title="Acercar">+</button>' +
-        '<button class="act zo" data-act="zoomFit" title="Ajustar a contenido">⛶</button>';
     }
     div.innerHTML = html + '</div>';
     if (id === 'archivo') {
@@ -14144,7 +14131,7 @@
      enseña el botón del grupo, como el "último usado" de Revu). */
   function marcaBarras(t) {
     if (!layout) return;
-    $$('.dock .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
+    $$('.dock .tool, #navFijo .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
     var g = grpDe(t);
     if (g && layout.ultima[g] !== t) { layout.ultima[g] = t; guardaLayoutLuego(); }
     $$('.dock .grpBtn').forEach(function (b) {
@@ -14180,7 +14167,8 @@
     tm.hidden = false;
     var r = anchor.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
     var dock = anchor.closest ? anchor.closest('.dock') : null;
-    var lado = !dock ? 'down' : dock.id === 'dockLeft' ? 'right' : dock.id === 'dockRight' ? 'left' : dock.id === 'dockBottom' ? 'up' : 'down';
+    var abajo = anchor.closest && anchor.closest('#statusbar');
+    var lado = abajo ? 'up' : !dock ? 'down' : dock.id === 'dockLeft' ? 'right' : dock.id === 'dockRight' ? 'left' : dock.id === 'dockBottom' ? 'up' : 'down';
     var mw = tm.offsetWidth, mh = tm.offsetHeight, x, y;
     if (lado === 'right') { x = r.right + 6; y = r.top; }
     else if (lado === 'left') { x = r.left - mw - 6; y = r.top; }
@@ -14257,7 +14245,7 @@
 
   /* ---------- clics en cualquier muelle (una sola escucha) ---------- */
   document.addEventListener('click', function (ev) {
-    var b = ev.target.closest && ev.target.closest('.dock button');
+    var b = ev.target.closest && ev.target.closest('.dock button, #navFijo button');
     if (!b) return;
     if (b.classList.contains('tool')) {
       var dd = ev.target.closest && ev.target.closest('.dd');
@@ -14472,11 +14460,6 @@
     var bp = t.dataset.bp, fila = t.closest('.bpRow');
     if (bp === 'ver' && fila) {
       var id = fila.dataset.barra, k = layout.ocultas.indexOf(id);
-      if (!t.checked && k < 0 && !hayFormaDeSeleccionar(layout.ocultas.concat([id]), layout.favs)) {
-        t.checked = true;
-        setHint('Deja visible Navegar o Grupos (o pon Select en Mis herramientas) para no quedarte sin Select');
-        return;
-      }
       if (t.checked && k >= 0) layout.ocultas.splice(k, 1);
       else if (!t.checked && k < 0) layout.ocultas.push(id);
       guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
