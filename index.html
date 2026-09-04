@@ -17,6 +17,7 @@
 
   <!-- ======= BARRA SUPERIOR ======= -->
   <header id="toolbar">
+    <div class="tbRow tbRow1">
     <div class="brand"><img id="brandLogo" alt="Max Power" hidden><b>max power</b><span>PLANOS</span></div>
 
     <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos">🧰<label>Símbolos</label></button>
@@ -48,29 +49,6 @@
         <option value="36">Puerta 3'0"</option>
       </select>
     </div>
-    <div class="tgroup" id="toolButtons">
-      <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
-      <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
-      <button class="tool" data-tool="wall" title="Dibujar pared (W)">▬<label>Wall</label><span class="dd" data-menu="wall" title="Elegir tipo de pared">▾</span></button>
-      <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
-      <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
-      <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
-      <button class="tool" data-tool="rect" title="Rectángulo / polígono (2 clics, SHIFT = regular)">▭<label>Rect</label><span class="dd" data-menu="rect" title="Elegir forma: rectángulo, triángulo, pentágono, hexágono...">▾</span></button>
-      <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
-      <button class="tool" data-tool="line" title="Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)">╱<label>Line</label><span class="dd" data-menu="line" title="Elegir tipo de línea y punta">▾</span></button>
-      <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label><span class="dd" data-menu="pline" title="Elegir tipo de línea">▾</span></button>
-      <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label><span class="dd" data-menu="cloud" title="Tamaño de la vuelta: chica, normal o grande">▾</span></button>
-      <button class="tool" data-tool="homerun" title="HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule">⚡<label>Homerun</label></button>
-      <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
-      <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
-      <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
-      <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
-      <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
-      <button class="tool" data-tool="pen" title="Lápiz a mano alzada (P) — Apple Pencil o dedo">✒️<label>Pen</label></button>
-      <button class="tool" data-tool="hi" title="Resaltador (H) — resalta sin tapar">🖍<label>Highlight</label></button>
-      <button class="tool" data-tool="erase" title="Borrador de tinta: pasa por encima de un trazo">🧽<label>Eraser</label></button>
-      <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
-    </div>
 
 
     <div class="tgroup">
@@ -94,6 +72,42 @@
       <button id="btnProyectos" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe.">☁ Proyectos</button>
       <button id="btnPng" title="Exportar imagen PNG">PNG</button>
       <button id="btnPrint" title="Imprimir / Guardar PDF">🖨 PDF</button>
+    </div>
+    </div>
+    <div class="tbRow tbRow2" id="toolButtons">
+      <div class="tg"><span class="tgLbl">Navegar</span><span class="tgBtns">
+        <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
+        <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
+      </span></div>
+      <div class="tg"><span class="tgLbl">Construir</span><span class="tgBtns">
+        <button class="tool" data-tool="wall" title="Dibujar pared (W)">▬<label>Wall</label><span class="dd" data-menu="wall" title="Elegir tipo de pared">▾</span></button>
+        <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
+        <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
+      </span></div>
+      <div class="tg"><span class="tgLbl">Superficies y formas</span><span class="tgBtns">
+        <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
+        <button class="tool" data-tool="rect" title="Rectángulo / polígono (2 clics, SHIFT = regular)">▭<label>Rect</label><span class="dd" data-menu="rect" title="Elegir forma: rectángulo, triángulo, pentágono, hexágono...">▾</span></button>
+        <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
+        <button class="tool" data-tool="line" title="Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)">╱<label>Line</label><span class="dd" data-menu="line" title="Elegir tipo de línea y punta">▾</span></button>
+        <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label><span class="dd" data-menu="pline" title="Elegir tipo de línea">▾</span></button>
+        <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label><span class="dd" data-menu="cloud" title="Tamaño de la vuelta: chica, normal o grande">▾</span></button>
+      </span></div>
+      <div class="tg"><span class="tgLbl">Eléctrico</span><span class="tgBtns">
+        <button class="tool" data-tool="homerun" title="HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule">⚡<label>Homerun</label></button>
+        <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
+      </span></div>
+      <div class="tg"><span class="tgLbl">Medir y anotar</span><span class="tgBtns">
+        <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
+        <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
+        <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
+        <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
+        <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
+      </span></div>
+      <div class="tg"><span class="tgLbl">A mano</span><span class="tgBtns">
+        <button class="tool" data-tool="pen" title="Lápiz a mano alzada (P) — Apple Pencil o dedo">✒️<label>Pen</label></button>
+        <button class="tool" data-tool="hi" title="Resaltador (H) — resalta sin tapar">🖍<label>Highlight</label></button>
+        <button class="tool" data-tool="erase" title="Borrador de tinta: pasa por encima de un trazo">🧽<label>Eraser</label></button>
+      </span></div>
     </div>
     <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" hidden>
     <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>

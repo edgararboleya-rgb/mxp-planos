@@ -34,14 +34,25 @@ body {
 #app { display: flex; flex-direction: column; height: 100vh; }
 
 /* ===== Toolbar (marco oscuro con la firma de gradiente) ===== */
+/* DOS FILAS (Edgar, 04/09: "las barras donde están todas las herramientas
+   no podrían estar ordenadas y diferenciadas… cada vez que quiero buscar un
+   tool se me pierde entre tanto, como está Bluebeam"). Arriba el MANDO
+   (marca, ajustes, deshacer, zoom, archivo); abajo las HERRAMIENTAS en seis
+   grupos con su nombre encima y una raya entre grupo y grupo. */
 #toolbar {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
   background: var(--mp-deep); color: #E8F3FA;
-  padding: 4px 12px; height: 60px; flex: none;
-  overflow-x: auto; overflow-y: hidden;
+  padding: 0; flex: none;
   border-bottom: 3px solid;
   border-image: linear-gradient(96deg,#1B3C8C 0%,#2A5BD7 24%,#22E8E0 58%,#8CF06A 80%,#EFE22E 100%) 1;
 }
+.tbRow { display: flex; align-items: center; gap: 8px; padding: 3px 12px; overflow-x: auto; overflow-y: hidden; }
+.tbRow1 { height: 46px; }
+.tbRow2 { height: 62px; border-top: 1px solid rgba(255,255,255,.09); gap: 0; padding: 0 12px 2px; }
+.tg { display: flex; flex-direction: column; gap: 1px; padding: 0 9px; position: relative; flex: none; }
+.tg + .tg::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 6px; width: 1px; background: rgba(255,255,255,.14); }
+.tgLbl { font-size: 8.5px; letter-spacing: .11em; text-transform: uppercase; color: rgba(232,243,250,.45); padding-left: 3px; white-space: nowrap; }
+.tgBtns { display: flex; align-items: center; gap: 3px; }
 .brand { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .brand img { height: 30px; width: auto; filter: drop-shadow(0 0 8px rgba(34,232,224,.3)); }
 .brand b {
@@ -379,7 +390,9 @@ body.touch, body.touch button, body.touch label {
 body.touch input, body.touch select, body.touch textarea, #askInput { font-size: 16px !important; }
 
 /* barra: botones de dedo (mín 44pt) */
-body.touch #toolbar { height: 68px; }
+body.touch .tbRow1 { height: 52px; }
+body.touch .tbRow2 { height: 72px; }
+body.touch .tgLbl { font-size: 9.5px; }
 body.touch #toolbar button.tool { min-width: 58px; height: 54px; font-size: 18px; }
 body.touch #toolbar button.tool:has(.dd) { padding-right: 30px; padding-left: 8px; min-width: 74px; }
 body.touch #toolbar .tool .dd { width: 22px; font-size: 12px; }
