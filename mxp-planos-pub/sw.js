@@ -1,10 +1,10 @@
 /* MXP Planos — service worker
    Estrategia: RED PRIMERO (siempre busca la versión nueva); la copia en
    caché se usa solo sin internet. Así cada actualización llega sola. */
-var CACHE = 'mxp-v3';
+var CACHE = 'mxp-v4';
 var CORE = [
   './', 'index.html', 'css/app.css', 'js/config.js', 'js/logo.js',
-  'js/symbols.js', 'js/app.js',
+  'js/symbols.js', 'js/icons.js', 'js/app.js',
   'js/vendor/pdf.min.js', 'js/vendor/pdf.worker.min.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png'
 ];

@@ -23,6 +23,9 @@
   }
 
   /* ---------------- utilidades ---------------- */
+  /* Salvavidas: si js/icons.js no llegó a cargar (caché vieja, red a medias),
+     la app NO se queda a oscuras — sigue funcionando sin dibujo de icono. */
+  if (!window.ICO) window.ICO = { svg: function () { return ''; }, pinta: function () {}, tiene: function () { return false; }, claves: [] };
   var $ = function (s) { return document.querySelector(s); };
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
   var _seq = 1;
