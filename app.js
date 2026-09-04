@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.G';
+  var APP_VERSION = 'v30.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -12912,6 +12912,7 @@
     // (7.1) lo abierto queda registrado en la biblioteca, sin subir el rev
     if (!restaurando) { try { guardaEnBiblioteca(false); } catch (e) {} }
     sucio = false;
+    pintaLista(); pintaNube();
     // (7.5) ¿la nube tiene algo más nuevo de este proyecto?
     try { setTimeout(function () { revisaNube('abrir'); }, 800); } catch (e) {}
   }
