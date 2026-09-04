@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.A';
+  var APP_VERSION = 'v30.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -543,7 +543,7 @@
     state.symbols.forEach(function (s) {
       cand(s.x, s.y, 'center');
       var sd = SYMBOLS[s.key];
-      if (!sd || sd.cat !== 'riser') return;
+      if (!sd || (sd.cat !== 'riser' && sd.cat !== 'oneline')) return;
       var cs = symCorners(s);
       if (!cs) return;
       for (var ei = 0; ei < 4; ei++) {
@@ -1232,6 +1232,12 @@
        se traza con Line o Polyline (bajo el gabinete, en la cornisa, en el
        escalón) y el takeoff la cuenta en FT (`ft`: nombre para el estimador). */
     ledstrip: { name: '▭▭▭ LED STRIP — tira LED a la medida (cuenta en FT)', dash: '', lw: 0.7, glifo: 'led', paso: 12, ft: 'LED Strip Light' },   // 03/09 Edgar: "más fino" (era 1.1)
+    /* Edgar, 03/09: "corrida de conduit con tick marks para contar
+       conductores — este es crítico y es el que más se usa". Se traza el
+       recorrido y en la mitad salen las rayas que se cuentan: una larga por
+       fase, una larga con punto por el neutro, una corta con patita por la
+       tierra. Los números se ponen en Propiedades (Conductores). */
+    feeder: { name: '⚡ FEEDER / CONDUIT RUN — con marcas de conductores', dash: '', lw: 1.1, ticks: 1 },
     cloud:    { name: '☁ Nube de revisión', dash: '' },
 
     /* -- lindero y servidumbres -- */
@@ -2383,6 +2389,33 @@
     }
     return d + (closed ? ' Z' : '');
   }
+  /* LAS MARCAS DE CONDUCTORES de un feeder. Van cruzadas a 60° sobre la
+     mitad del recorrido, que es donde las pone todo el mundo. */
+  function condDe(a) {
+    var c = (a && a.cond) || {};
+    function q(v, d, max) { var x = Number(v); return isFinite(x) ? Math.max(0, Math.min(max, Math.round(x))) : d; }
+    return { f: q(c.f, 3, 12), n: q(c.n, 1, 4), g: q(c.g, 1, 4) };
+  }
+  function ticksFeeder(a, col, lw) {
+    var tr = largoTramos(a.pts, !a.open);
+    if (!tr.segs.length || tr.tot < 14) return '';
+    var c = condDe(a), tot = c.f + c.n + c.g;
+    if (!tot) return '';
+    var paso = 4.5, d0 = tr.tot / 2 - (tot - 1) * paso / 2, out = '', i;
+    for (i = 0; i < tot; i++) {
+      var P = puntoEn(tr, d0 + i * paso);
+      if (!P) continue;
+      var tipo = i < c.f ? 'f' : (i < c.f + c.n ? 'n' : 'g');
+      var largo = tipo === 'g' ? 5 : 8;
+      out += '<g transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) + ') rotate(' + (P.ang + 60).toFixed(1) +
+        ')" stroke="' + col + '" stroke-width="' + (lw * 0.9).toFixed(2) + '" fill="none" style="pointer-events:none">' +
+        '<line x1="0" y1="' + (-largo) + '" x2="0" y2="' + largo + '"/>' +
+        (tipo === 'n' ? '<circle cx="0" cy="' + (-largo) + '" r="1.6" fill="' + col + '" stroke="none"/>' : '') +
+        (tipo === 'g' ? '<line x1="-2.6" y1="' + (-largo) + '" x2="2.6" y2="' + (-largo) + '"/>' : '') +
+        '</g>';
+    }
+    return out;
+  }
   function polyPerim(pts, open) {
     var s = 0, n = pts.length, segs = open ? n - 1 : n;
     for (var i = 0; i < segs; i++) {
@@ -2701,6 +2734,7 @@
       }
       out += '<path data-id="' + a.id + '" d="' + d + '" fill="' + fill + '"' + fillOpA + ' stroke="' + col + '" stroke-width="' + lw + '" stroke-linejoin="round"' + dash + opAttr(a) + '/>';
       if (est.glifo) out += glifosLinea(a, est, col, lw);
+      if (est.ticks) out += ticksFeeder(a, col, lw);
       if (a.open && a.circ) out += rotuloHomerun(a, col);
       if (a.open) out += plineCaps(a);
       if (a.showLabel) {
@@ -2762,7 +2796,7 @@
     // el plano de la casa tiene que ocupar lo que ocupa en la pared. Los
     // devices —receptáculos, switches— siguen al 0.7: ésos son símbolos de
     // medida convencional, no cajas a escala.
-    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'siteplan' || def.cat === 'riser')) ? 1 : escSym();
+    return (def && (def.layer === 'furniture' || def.cat === 'site' || def.cat === 'siteplan' || def.cat === 'riser' || def.cat === 'oneline' || def.cat === 'notas')) ? 1 : escSym();
   }
   /* FONDO OPACO DEL EQUIPO (Edgar, 08/30: "cuando yo haga un area, por ejemplo
    * un counter, los equipos que ponga encima —un sink, un dishwasher— que no
@@ -3175,11 +3209,18 @@
      la Lista de marcas y se leen al armar el Panel Schedule. Antes eso eran
      textos sueltos que se desalineaban al mover el receptáculo. El rótulo va
      FUERA del grupo girado para que siempre se lea derecho, arriba-derecha. */
+  /* LO QUE EL SÍMBOLO DICE AL LADO. Edgar, 03/09 (librería del riser): "cada
+     símbolo lleva campos de texto editables: tag, rating, descripción". El
+     TAG va primero y en negrita (P-1, MTR-2, ATS-1); el RATING es lo que
+     define el equipo (200A 3P, 75kVA, 5HP 208V); luego lo de siempre. */
   function attrsTexto(s) {
     var a = s.attrs || {}, out = [];
+    if (a.tag) out.push(String(a.tag));
+    if (a.rating) out.push(String(a.rating));
     if (a.ckt) out.push(String(a.ckt));
     if (a.h) out.push('+' + String(a.h).replace(/^\+/, ''));
     if (a.note) out.push(String(a.note));
+    if (a.desc) out.push(String(a.desc));
     return out;
   }
   function attrsSym(s, def) {
@@ -6433,9 +6474,12 @@
       // atributos (fase 5.1): circuito, altura, nota — viajan con el símbolo
       var at = e.attrs || {};
       html += '<div class="muted small" style="margin-top:6px"><b>Atributos</b> (salen junto al símbolo y en la Lista de marcas)</div>';
+      html += '<div class="row"><label>Tag</label><input id="prAttrTag" placeholder="ej: P-1 · MTR-2 · ATS-1" value="' + esc(at.tag || '') + '"></div>';
+      html += '<div class="row"><label>Rating</label><input id="prAttrRating" placeholder="ej: 200A 3P · 75kVA · 5HP 208V" value="' + esc(at.rating || '') + '"></div>';
       html += '<div class="row"><label>Circuito</label><input id="prAttrCkt" placeholder="ej: A-12" value="' + esc(at.ckt || '') + '"></div>';
       html += '<div class="row"><label>Altura</label><input id="prAttrH" placeholder="ej: 48&quot; AFF" value="' + esc(at.h || '') + '"></div>';
       html += '<div class="row"><label>Nota</label><input id="prAttrNote" placeholder="ej: GFCI · WP · DEDICATED" value="' + esc(at.note || '') + '"></div>';
+      html += '<div class="row"><label>Descripción</label><input id="prAttrDesc" placeholder="ej: BOMBA DE POZO — SERVICE SIZE 1¼&quot;C" value="' + esc(at.desc || '') + '"></div>';
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
       html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
     } else if (sel.kind === 'text') {
@@ -6617,6 +6661,14 @@
             return '<option value="' + o2[0] + '"' + (lwEf === parseFloat(o2[0]) ? ' selected' : '') + '>' + o2[1] + ' (' + o2[0] + ')</option>';
           }).join('');
         })() + '</select></div>';
+      if (e.lineStyle === 'feeder') {
+        var cF = condDe(e);
+        html += '<div class="row" title="Cuántos conductores lleva la corrida: fases, neutro y tierra. Las rayas del dibujo son las que se cuentan."><label>Conductores</label>' +
+          '<input id="prCondF" type="number" min="0" max="12" value="' + cF.f + '" style="flex:1" title="Fases">' +
+          '<input id="prCondN" type="number" min="0" max="4" value="' + cF.n + '" style="flex:1" title="Neutro">' +
+          '<input id="prCondG" type="number" min="0" max="4" value="' + cF.g + '" style="flex:1" title="Tierra (EGC)"></div>';
+        html += '<div class="muted small">Fases · Neutro · Tierra — la raya con punto es el neutro, la corta con patita es la tierra.</div>';
+      }
       if (e.lineStyle === 'ledstrip') {
         html += '<div class="row"><label>Rótulo LED</label><select id="prLedRot">' +
           [['centro', 'Al centro, con fondo (se ve la luz)'], ['encima', 'Encima de la tira'], ['no', 'Sin rótulo']].map(function (o) {
@@ -6780,6 +6832,9 @@
       if (!Object.keys(e.attrs).length) delete e.attrs;
       renderSymbols(); renderSel(); renderMarcas && renderMarcas();
     }
+    on('prAttrTag', 'change', function (n) { attrSet('tag', n.value.toUpperCase()); });
+    on('prAttrRating', 'change', function (n) { attrSet('rating', n.value.toUpperCase()); });
+    on('prAttrDesc', 'change', function (n) { attrSet('desc', n.value.toUpperCase()); });
     on('prAttrCkt', 'change', function (n) { attrSet('ckt', n.value.toUpperCase()); });
     on('prAttrH', 'change', function (n) { attrSet('h', n.value); });
     on('prAttrNote', 'change', function (n) { attrSet('note', n.value.toUpperCase()); });
@@ -6913,6 +6968,17 @@
     });
     var bSC = $('#prSinCurva');
     if (bSC) bSC.addEventListener('click', function () { pushUndo(); e.bul = null; refresh(); showProps(); });
+    function condSet(campo, n) {
+      var v = parseInt(n.value, 10);
+      if (!isFinite(v)) { showProps(); return; }
+      pushUndo();
+      e.cond = Object.assign({}, condDe(e));
+      e.cond[campo] = Math.max(0, Math.min(campo === 'f' ? 12 : 4, v));
+      refresh();
+    }
+    on('prCondF', 'change', function (n) { condSet('f', n); });
+    on('prCondN', 'change', function (n) { condSet('n', n); });
+    on('prCondG', 'change', function (n) { condSet('g', n); });
     on('prLedRot', 'change', function (n) { pushUndo(); if (n.value === 'centro') delete e.ledRot; else e.ledRot = n.value; refresh(); });
     on('prCloudArc', 'change', function (n) { pushUndo(); e.arco = CLOUD_ARCS[n.value] ? n.value : 'media'; curCloudArc = e.arco; refresh(); });
     on('prAreaLine', 'change', function (n) {
@@ -7531,12 +7597,19 @@
     riser_ats: 'ATS (Transfer Switch)', riser_ats400: 'ATS (Transfer Switch)', riser_ev: 'EV Charger', riser_ct: 'CT Cabinet',
     riser_ground: 'Ground Rods (2)', riser_ground_esc: 'Ground Rods (2)', riser_gnd_sym: 'Ground Rods (2)', riser_spd: 'Surge Protector (SPD)',
     // receptáculos conmutados: mismo material que el duplex (ya cruzado en alias_takeoff)
-    recep_half_sw: 'Duplex Receptacle', recep_sw: 'Duplex Receptacle'
+    recep_half_sw: 'Duplex Receptacle', recep_sw: 'Duplex Receptacle',
+    /* One-line: el símbolo esquemático es el MISMO equipo que su cajón real,
+       así que va al estimador con el nombre que los alias ya conocen. OJO: si
+       en la misma hoja se dibuja el cajón Y el símbolo, cuentan dos. */
+    ol_meter: 'Meter Can', ol_meter_kwh: 'Meter Can',
+    ol_panelboard: 'Panel / Load Center', ol_loadcenter: 'Panel / Load Center',
+    ol_disc_nf: 'Disconnect / Safety Switch', ol_disc_f: 'Disconnect / Safety Switch',
+    ol_ats: 'ATS (Transfer Switch)', ol_spd_ol: 'Surge Protector (SPD)'
   };
   function nombreEst(k) { return EST_NOMBRE[k] || (SYMBOLS[k] ? SYMBOLS[k].name : k); }
   // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,
   // paisajismo (engordaban la lista SIN MAPEAR del estimador)
-  function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing'; }
+  function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing' && d.cat !== 'notas'; }
   window.__takeoffDbg = function () { try { return buildTakeoffEntries(true); } catch (e) { return [{ name: 'EXC ' + e.message }]; } };
   function buildTakeoffEntries(soloHoja) {
     syncSheet();
@@ -9681,10 +9754,19 @@
     state.walls = (state.walls || []).filter(function (w) { return w && typeof w === 'object'; });
     state.walls.forEach(function (w) { nums(w, ['x1', 'y1', 'x2', 'y2', 't', 'op']); });
     (state.openings || []).forEach(function (o) { nums(o, ['pos', 'w', 'swing', 'hinge', 'op']); });
-    (state.symbols || []).forEach(function (o) { nums(o, ['x', 'y', 'rot', 'scale', 'sx', 'sy', 'op']); });
+    (state.symbols || []).forEach(function (o) {
+      nums(o, ['x', 'y', 'rot', 'scale', 'sx', 'sy', 'op']);
+      if (o.attrs != null) {
+        if (typeof o.attrs !== 'object') { delete o.attrs; return; }
+        Object.keys(o.attrs).forEach(function (k) {
+          if (['tag', 'rating', 'ckt', 'h', 'note', 'desc'].indexOf(k) < 0) { delete o.attrs[k]; return; }
+          o.attrs[k] = String(o.attrs[k]).slice(0, 120);
+        });
+      }
+    });
     (state.texts || []).forEach(function (o) { nums(o, ['x', 'y', 'size', 'rot', 'op']); col(o); if (o.text != null) o.text = String(o.text); });
     (state.dims || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'off', 'op']); });
-    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK', 'rellenoOp']); col(o); if (o.relleno != null) o.relleno = colorSeguro(o.relleno); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.ledRot != null && o.ledRot !== 'encima' && o.ledRot !== 'no') delete o.ledRot; if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
+    (state.areas || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'rot', 'rc', 'op', 'glifoK', 'rellenoOp']); col(o); if (o.relleno != null) o.relleno = colorSeguro(o.relleno); if (o.arco != null && !CLOUD_ARCS[o.arco]) delete o.arco; if (o.ledRot != null && o.ledRot !== 'encima' && o.ledRot !== 'no') delete o.ledRot; if (o.cond != null) { if (typeof o.cond !== 'object') delete o.cond; else o.cond = condDe(o); } if (o.bul) o.bul = Array.isArray(o.bul) ? o.bul.map(function (b) { return N(b, 0); }) : undefined; });
     (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });

@@ -1120,6 +1120,218 @@
     else if (c === 'site') S[k].lw = 0.7;
   });
 
+  /* ============ ONE-LINE / RISER ESQUEMÁTICO + ETIQUETAS (03/09) ============
+     Edgar trajo la lista de lo que tiene que entregar en un riser de verdad.
+     Lo que ya había en la pestaña 'riser' son los CAJONES A MEDIDA REAL (un
+     meter can de 15"×12", un disconnect de 25"×11½"): eso sirve para dibujar
+     el equipo sobre la pared. Esto otro es la SIMBOLOGÍA del one-line — el
+     círculo con M del meter, el breaker de 1/2/3 polos, el contactor, el
+     motor — que es lo que se dibuja en el diagrama unifilar.
+     Reglas que pidió, y que se cumplen aquí:
+       · línea negra uniforme, sin relleno ni sombra (se imprime en B/N);
+       · puntos de enganche arriba, abajo y a los lados (los da el osnap por
+         ser categoría 'oneline', igual que el equipo del riser);
+       · campos de texto editables tag / rating / descripción, en Propiedades.
+     Medidas en pulgadas de hoja, para que peguen con los cajones reales. */
+  function ol(clave, nombre, corto, w, h, svg, extra) {
+    S[clave] = Object.assign({ name: nombre, short: corto, cat: 'oneline', layer: 'electrical', w: w, h: h, svg: svg }, extra || {});
+  }
+  function PA(d) { return '<path d="' + d + '"/>'; }
+  function Gt(dx, dy, inner) { return '<g transform="translate(' + dx + ' ' + dy + ')">' + inner + '</g>'; }
+  function LD(x1, y1, x2, y2) {   // línea de enlace entre polos (punteada)
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke-dasharray="2 2"/>';
+  }
+  // símbolo de tierra: tres barras que van achicando
+  function gnd(x, y, s) {
+    s = s || 1;
+    return L(x, y, x, y + 3 * s) + L(x - 7 * s, y + 3 * s, x + 7 * s, y + 3 * s) +
+      L(x - 4.5 * s, y + 6 * s, x + 4.5 * s, y + 6 * s) + L(x - 2 * s, y + 9 * s, x + 2 * s, y + 9 * s);
+  }
+  // bobina de transformador: n semicírculos en vertical
+  function bobina(x, y, n, r, izq) {
+    var d = 'M' + x + ',' + (y - n * r);
+    for (var i = 0; i < n; i++) d += ' A' + r + ',' + r + ' 0 0 ' + (izq ? 0 : 1) + ' ' + x + ',' + (y - n * r + (i + 1) * 2 * r);
+    return PA(d);
+  }
+  function delta(cx, cy, r) {
+    return PA('M' + cx + ',' + (cy - r) + ' L' + (cx + r * 0.87).toFixed(1) + ',' + (cy + r * 0.5) +
+      ' L' + (cx - r * 0.87).toFixed(1) + ',' + (cy + r * 0.5) + ' Z');
+  }
+  function wye(cx, cy, r) {
+    return L(cx, cy, cx, cy - r) + L(cx, cy, +(cx - r * 0.87).toFixed(1), cy + r * 0.5) + L(cx, cy, +(cx + r * 0.87).toFixed(1), cy + r * 0.5);
+  }
+  // UN POLO de breaker termomagnético: terminales, cuchilla y el gancho
+  function poloBrk(x) {
+    return L(x, -18, x, -7) + L(x, 18, x, 7) + L(x, 7, x + 7, -5) +
+      PA('M' + (x + 7) + ',-5 A5,5 0 0 0 ' + (x + 1.5) + ',-8.5');
+  }
+  function poloSw(x) { return L(x, -16, x, -6) + L(x, 16, x, 6) + L(x, 6, x + 7, -5); }
+  function poloFus(x) { return L(x, -16, x, -5) + R(x - 3, -5, 6, 10) + L(x, 16, x, 5); }
+  // UN POLO de relé de sobrecarga: la resistencia calefactora con su curva
+  function poloOl(x) {
+    return L(x, -16, x, -6) + R(x - 3.5, -6, 7, 12) + L(x, 16, x, 6) +
+      PA('M' + (x + 3.5) + ',-3 q5,0 5,4 t5,4');
+  }
+  function nPolos(n, fn, paso) {
+    paso = paso || 9;
+    var out = '', x0 = -(n - 1) * paso / 2, i;
+    for (i = 0; i < n; i++) out += fn(x0 + i * paso);
+    if (n > 1) out += LD(x0, 0, x0 + (n - 1) * paso, 0);
+    return out;
+  }
+  function brkN(n) { return nPolos(n, poloBrk); }
+  function swN(n) { return nPolos(n, poloSw); }
+  function fusN(n) { return nPolos(n, poloFus); }
+  function olN(n) { return nPolos(n, poloOl); }
+  // barra de bus con sus derivaciones
+  function bus(y, ancho, n, alto) {
+    var out = L(-ancho / 2, y, ancho / 2, y, 1.8), i, x, paso = ancho / (n + 1);
+    for (i = 1; i <= n; i++) { x = +(-ancho / 2 + i * paso).toFixed(1); out += L(x, y, x, y + alto); }
+    return out;
+  }
+
+  /* --- lado de servicio --- */
+  ol('ol_pole', 'Service Pole / Poste de servicio', 'Poste', 34, 124,
+    L(0, -60, 0, 60) + L(-15, -46, 15, -46) + C(-10, -49.5, 2.4) + C(0, -49.5, 2.4) + C(10, -49.5, 2.4));
+  ol('ol_drop', 'Service Drop / bajante de acometida', 'Service drop', 62, 42,
+    PA('M-29,-15 Q0,5 29,-17') + PA('M-29,-9 Q0,11 29,-11') + PA('M-29,-3 Q0,17 29,-5') +
+    T(0, 19, 6, 'SERVICE DROP', { bold: true }));
+  ol('ol_weatherhead', 'Weatherhead (one-line)', 'Weatherhead', 32, 54,
+    PA('M-11,26 L-11,-8 A11,11 0 0 1 11,-8 L11,0') +          // pared de afuera del cuello
+    PA('M-1,26 L-1,-8 A1,1 0 0 1 1,-8 L1,0') +                // pared de adentro
+    L(2, 0, 2, 10) + L(6, 1, 6, 11) + L(10, 0, 10, 10));      // los conductores que salen
+  ol('ol_meter', 'Meter — círculo con M (one-line)', 'Meter M', 28, 28,
+    C(0, 0, 12) + T(0, 5, 13, 'M', { bold: true }));
+  ol('ol_meter_kwh', 'Meter — círculo con kWh (one-line)', 'Meter kWh', 28, 28,
+    C(0, 0, 12) + T(0, 3.5, 8, 'kWh', { bold: true }));
+  ol('ol_xfmr_util', 'Utility Transformer — dos círculos (one-line)', 'XFMR utility', 42, 28,
+    C(-6, 0, 11) + C(6, 0, 11));
+  ol('ol_xfmr_dy', 'Utility Transformer Δ–Y (delta / wye)', 'XFMR Δ-Y', 46, 32,
+    C(-8, 0, 12) + C(8, 0, 12) + delta(-8, 1, 6) + wye(8, 0, 6));
+
+  /* --- protección y desconexión --- */
+  ol('ol_brk_1p', 'Breaker termomagnético 1P', 'Breaker 1P', 22, 42, brkN(1));
+  ol('ol_brk_2p', 'Breaker termomagnético 2P', 'Breaker 2P', 30, 42, brkN(2));
+  ol('ol_brk_3p', 'Breaker termomagnético 3P', 'Breaker 3P', 40, 42, brkN(3));
+  ol('ol_brk_main', 'Main Breaker 2P', 'Main 2P', 40, 54, brkN(2) + T(0, 27, 8, 'MAIN', { bold: true }));
+  ol('ol_brk_main3', 'Main Breaker 3P', 'Main 3P', 44, 54, brkN(3) + T(0, 27, 8, 'MAIN', { bold: true }));
+  ol('ol_disc_nf', 'Disconnect NO fusible 3P (one-line)', 'Disc. NF 3P', 44, 52,
+    R(-17, -23, 34, 46, 2, ' stroke-dasharray="4 3"') + swN(3));
+  ol('ol_disc_f', 'Disconnect FUSIBLE 3P (one-line)', 'Disc. fusible 3P', 44, 76,
+    R(-17, -35, 34, 70, 2, ' stroke-dasharray="4 3"') + Gt(0, -16, swN(3)) + Gt(0, 16, fusN(3)));
+  ol('ol_fuse', 'Fusible', 'Fusible', 22, 40, poloFus(0));
+  ol('ol_spd_ol', 'SPD / supresor de sobretensión (one-line)', 'SPD', 32, 52,
+    L(0, -22, 0, -12) + R(-10, -12, 20, 20, 2) + T(0, 2.5, 8, 'SPD', { bold: true }) + L(0, 8, 0, 14) + gnd(0, 14));
+
+  /* --- distribución --- */
+  ol('ol_panelboard', 'Panelboard (one-line)', 'Panelboard', 64, 40,
+    R(-28, -16, 56, 32, 1) + bus(-2, 44, 5, 10) + L(0, -16, 0, -8));
+  ol('ol_loadcenter', 'Load Center (one-line)', 'Load center', 50, 34,
+    R(-21, -13, 42, 26, 1) + bus(-1, 32, 4, 8) + L(0, -13, 0, -7));
+  ol('ol_neutral_bar', 'Barra de neutro', 'Barra N', 52, 26,
+    R(-20, -4, 40, 8, 1) + bus(4, 36, 5, 6) + T(-24, 3, 9, 'N', { bold: true, anchor: 'end' }));
+  ol('ol_ground_bar', 'Barra de tierra de equipos', 'Barra G (EGC)', 52, 34,
+    R(-20, -8, 40, 8, 1) + bus(0, 36, 5, 6) + gnd(0, 8, 0.9) + T(-24, -1, 9, 'G', { bold: true, anchor: 'end' }));
+
+  /* --- control de motor --- */
+  ol('ol_contactor', 'Contactor magnético 3P', 'Contactor 3P', 44, 64,
+    Gt(0, -13, swN(3)) + L(0, 3, 0, 14) + C(0, 21, 8) + T(0, 24.5, 9, 'M', { bold: true }));
+  ol('ol_light_contactor', 'Contactor de alumbrado', 'Contactor LC', 44, 64,
+    Gt(0, -13, swN(3)) + L(0, 3, 0, 14) + C(0, 21, 8) + T(0, 24, 7, 'LC', { bold: true }));
+  ol('ol_overload', 'Relé de sobrecarga (OL) 3P', 'Overload OL', 44, 54,
+    olN(3) + T(0, 25, 8, 'OL', { bold: true }));
+  ol('ol_starter', 'Arrancador combinado (disc + contactor + OL)', 'Comb. starter', 72, 132,
+    R(-32, -62, 64, 124, 2, ' stroke-dasharray="5 4"') +
+    Gt(0, -42, swN(3)) + Gt(0, -6, swN(3)) + Gt(21, -2, C(0, 0, 7) + T(0, 3.5, 8, 'M', { bold: true })) +
+    Gt(0, 28, olN(3)) + T(0, 57, 7, 'COMB. STARTER', { bold: true }));
+  ol('ol_motor', 'Motor (one-line) — HP y voltaje en Propiedades', 'Motor M', 34, 34,
+    C(0, 0, 15) + T(0, 5.5, 15, 'M', { bold: true }));
+  ol('ol_motor_sub', 'Motor sumergible de pozo', 'Motor SUB', 36, 50,
+    C(0, -6, 14) + T(0, -1, 13, 'M', { bold: true }) +
+    PA('M-14,13 q3.5,-4 7,0 t7,0 t7,0') + PA('M-14,19 q3.5,-4 7,0 t7,0 t7,0') + T(0, 24, 6, 'SUB', { bold: true }));
+  ol('ol_vmonitor', 'Monitor de voltaje trifásico', 'Volt. monitor', 42, 42,
+    R(-16, -12, 32, 24, 2) + T(0, 3.5, 10, 'VM', { bold: true }) +
+    L(-8, -20, -8, -12) + L(0, -20, 0, -12) + L(8, -20, 8, -12));
+  ol('ol_cpt', 'Transformador de control (CPT)', 'CPT', 48, 44,
+    bobina(-5, 0, 3, 5, 1) + bobina(5, 0, 3, 5, 0) + L(-1.5, -16, -1.5, 16, 0.6) + L(1.5, -16, 1.5, 16, 0.6) +
+    T(0, 21, 8, 'CPT', { bold: true }));
+
+  /* --- transformador y sistema derivado --- */
+  ol('ol_xfmr_1p', 'Transformador seco 1φ — kVA y voltajes en Propiedades', 'XFMR 1φ', 48, 44,
+    bobina(-5, 0, 3, 5, 1) + bobina(5, 0, 3, 5, 0) + L(-1.5, -16, -1.5, 16, 0.6) + L(1.5, -16, 1.5, 16, 0.6) +
+    T(0, 21, 7, 'XFMR', { bold: true }));
+  ol('ol_mbj', 'Main Bonding Jumper (MBJ)', 'MBJ', 46, 26,
+    L(-16, 3, 16, 3) + C(-16, 3, 2.4, DOT) + C(16, 3, 2.4, DOT) + T(0, -4, 8, 'MBJ', { bold: true }));
+  ol('ol_sbj', 'System Bonding Jumper (SBJ)', 'SBJ', 46, 26,
+    L(-16, 3, 16, 3) + C(-16, 3, 2.4, DOT) + C(16, 3, 2.4, DOT) + T(0, -4, 8, 'SBJ', { bold: true }));
+  ol('ol_gec', 'Grounding Electrode Conductor (GEC)', 'GEC', 46, 46,
+    L(0, -20, 0, 8) + C(0, -20, 2.4, DOT) + gnd(0, 8) + T(6, -8, 8, 'GEC', { bold: true, anchor: 'start' }));
+
+  /* --- canalización --- */
+  ol('ol_lb', 'Conduit Body LB', 'LB', 40, 40,
+    PA('M-16,16 L-16,-4 A12,12 0 0 1 -4,-16 L16,-16') + PA('M-6,16 L-6,-4 A2,2 0 0 1 -4,-6 L16,-6') +
+    R(-15, -15, 10, 10, 1.5) + T(2, 10, 8, 'LB', { bold: true }));
+
+  /* --- control y arranque --- */
+  ol('ol_hoa', 'Selector Hand-Off-Auto', 'HOA', 46, 44,
+    C(0, 0, 12) + L(0, 0, -8.5, -8.5) + C(0, 0, 1.8, DOT) +
+    T(-15, -8, 6, 'H', { bold: true, anchor: 'end' }) + T(0, -15, 6, 'O', { bold: true }) +
+    T(15, -8, 6, 'A', { bold: true, anchor: 'start' }) + T(0, 20, 6, 'HOA', { bold: true }));
+  ol('ol_pb_start', 'Botón de arranque START (N.O.)', 'PB START', 40, 36,
+    L(-16, 4, -5, 4) + L(5, 4, 16, 4) + L(-5, 4, 5, 4) + L(0, 4, 0, -6) + L(-7, -6, 7, -6) +
+    T(0, 17, 6, 'START', { bold: true }));
+  ol('ol_pb_stop', 'Botón de paro STOP (N.C.)', 'PB STOP', 40, 36,
+    L(-16, 4, -5, 4) + L(5, 4, 16, 4) + PA('M-5,4 L5,-2') + L(0, -2, 0, -8) + L(-7, -8, 7, -8) +
+    T(0, 17, 6, 'STOP', { bold: true }));
+  ol('ol_pilot', 'Luz piloto', 'Luz piloto', 28, 28,
+    C(0, 0, 11) + L(-7.8, -7.8, 7.8, 7.8) + L(-7.8, 7.8, 7.8, -7.8));
+  ol('ol_press_sw', 'Switch de presión', 'Press. switch', 40, 40,
+    L(-16, 6, -5, 6) + L(5, 6, 16, 6) + L(-5, 6, 6, -1) + PA('M0,-2 q-9,-6 0,-12 q9,6 0,12') +
+    T(0, 19, 6, 'PS', { bold: true }));
+  ol('ol_float_sw', 'Switch de flotador', 'Float switch', 42, 44,
+    L(-16, -6, -5, -6) + L(5, -6, 16, -6) + L(-5, -6, 6, -13) + L(0, -6, 0, 8) +
+    PA('M-9,8 q9,-9 18,0 q-9,9 -18,0') + T(0, 22, 6, 'FS', { bold: true }));
+  ol('ol_timeclock', 'Time Clock', 'Time clock', 38, 38,
+    C(0, 0, 14) + L(0, 0, 0, -8) + L(0, 0, 6, 3) + T(0, 24, 7, 'TC', { bold: true }));
+  ol('ol_vfd', 'Variable Frequency Drive (VFD)', 'VFD', 48, 42,
+    R(-18, -14, 36, 28, 1) + L(-18, 14, 18, -14) + T(-9, 8, 9, 'VFD', { bold: true }));
+  ol('ol_gen', 'Generador (one-line)', 'Gen G', 34, 34,
+    C(0, 0, 15) + T(0, 5.5, 15, 'G', { bold: true }));
+  ol('ol_ats', 'Transfer Switch ATS (one-line)', 'ATS', 52, 56,
+    L(-14, -24, -14, -8) + L(14, -24, 14, -8) + L(-14, -8, 0, 2) + L(14, -8, 8, -3) +
+    C(-14, -8, 2.2, DOT) + C(14, -8, 2.2, DOT) + L(0, 2, 0, 18) + C(0, 2, 2.2, DOT) +
+    T(0, 26, 8, 'ATS', { bold: true }));
+
+  /* ================== ETIQUETAS Y BLOQUES DE ANOTACIÓN ==================
+     Sin estos el plano no pasa revisión. El texto que cambia por obra (el
+     número de tag, los amperios de falla, la fecha) NO va dibujado: se
+     escribe en Propiedades → Tag / Rating / Descripción, y sale al lado. */
+  function nota(clave, nombre, corto, w, h, svg) {
+    S[clave] = { name: nombre, short: corto, cat: 'notas', layer: 'electrical', w: w, h: h, svg: svg };
+  }
+  nota('lbl_tag', 'Burbuja de tag de equipo', 'Tag equipo', 32, 32, C(0, 0, 14) + L(-14, 0, 14, 0));
+  nota('lbl_feeder', 'Tag de alimentador (F-__)', 'Tag feeder', 44, 24,
+    R(-19, -10, 38, 20, 10) + T(0, 4, 10, 'F-', { bold: true }));
+  nota('lbl_keynote', 'Burbuja de keynote', 'Keynote', 38, 28,
+    PA('M-17,0 L-9,-11 L9,-11 L17,0 L9,11 L-9,11 Z'));
+  nota('lbl_delta', 'Delta de revisión', 'Delta rev.', 28, 26,
+    PA('M0,-12 L12,10 L-12,10 Z'));
+  nota('lbl_arcflash', 'Etiqueta ARC FLASH (NFPA 70E / 110.16)', 'Arc flash', 104, 52,
+    R(-50, -24, 100, 48, 2) + L(-50, -12, 50, -12) +
+    T(0, -16, 8, 'WARNING — ARC FLASH HAZARD', { bold: true }) +
+    T(0, -3, 6.5, 'APPROPRIATE PPE REQUIRED') +
+    T(0, 6, 6.5, 'DO NOT OPERATE CONTROLS OR OPEN COVERS') +
+    T(0, 15, 6.5, 'WITHOUT PROPER PROTECTIVE EQUIPMENT'));
+  nota('lbl_fault', 'Etiqueta AVAILABLE FAULT CURRENT (NEC 110.24)', 'Fault current', 104, 42,
+    R(-50, -19, 100, 38, 2) + L(-50, -7, 50, -7) +
+    T(0, -11, 8, 'AVAILABLE FAULT CURRENT', { bold: true }) +
+    T(-46, 2, 6.5, 'SHORT-CIRCUIT CURRENT: ______ A', { anchor: 'start' }) +
+    T(-46, 12, 6.5, 'DATE OF CALCULATION: __________', { anchor: 'start' }));
+  nota('lbl_two_volt', 'Etiqueta CAUTION — TWO VOLTAGES', 'Dos voltajes', 104, 36,
+    R(-50, -16, 100, 32, 2) + L(-50, -4, 50, -4) +
+    T(0, -8, 8, 'CAUTION — TWO VOLTAGES', { bold: true }) +
+    T(0, 8, 6.5, 'DISCONNECT BOTH SOURCES BEFORE SERVICING'));
+
   window.SYMBOLS = S;
 
 
@@ -1357,6 +1569,8 @@
     electrical: '⚡ Electrical',
     lighting: '💡 Lighting',
     riser: '🔌 Riser / One-line',
+    oneline: '⚡ One-line esquemático',
+    notas: '🏷 Etiquetas / Notas',
     elev: '🗄 Elevation / Cabinets',
     plumbing: '🚿 Plumbing / Appliances',
     furniture: '🛋 Furniture',
