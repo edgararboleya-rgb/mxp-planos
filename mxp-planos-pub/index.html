@@ -56,59 +56,23 @@
       <button id="btnRedo" title="Rehacer (Ctrl+Y)">↪</button>
     </div>
 
-    <div class="tgroup">
-      <button id="btnZoomOut" title="Alejar">−</button>
-      <span id="zoomLabel">100%</span>
-      <button id="btnZoomIn" title="Acercar">+</button>
-      <button id="btnZoomFit" title="Ajustar a contenido">⛶</button>
-    </div>
-
     <div class="tgroup right">
       <button id="btnProps" class="touch-only" title="Abrir / cerrar propiedades y capas">⚙<label>Panel</label></button>
-      <button id="btnLot" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎 Lot</button>
-      <button id="btnPanel" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋 Panel Schedule</button>
-      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">📂 Abrir</button>
-      <button id="btnSave" title="Guardar el proyecto como archivo">💾 Guardar</button>
-      <button id="btnProyectos" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe.">☁ Proyectos</button>
-      <button id="btnPng" title="Exportar imagen PNG">PNG</button>
-      <button id="btnPrint" title="Imprimir / Guardar PDF">🖨 PDF</button>
+      <button id="btnBarras" title="Organizar las barras: cuáles ves, dónde van (arriba, abajo, a un lado) y qué herramientas tienes a mano">⋮⋮<label>Barras</label></button>
+    </div>
+    <!-- Acciones de archivo: viven en la barra movible "Archivo" (el JS las
+         coloca en su muelle). Aquí solo se guardan cuando no están puestas. -->
+    <div id="archivoHolder" hidden>
+      <button id="btnOpen" class="act" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">📂<label>Abrir</label></button>
+      <button id="btnSave" class="act" title="Guardar el proyecto como archivo">💾<label>Guardar</label></button>
+      <button id="btnProyectos" class="act" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe.">☁<label>Proyectos</label></button>
+      <button id="btnPng" class="act" title="Exportar imagen PNG">PNG<label>Imagen</label></button>
+      <button id="btnPrint" class="act" title="Imprimir / Guardar PDF">🖨<label>PDF</label></button>
+      <button id="btnPanel" class="act" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋<label>Panel Sch.</label></button>
+      <button id="btnLot" class="act" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎<label>Lot</label></button>
     </div>
     </div>
-    <div class="tbRow tbRow2" id="toolButtons">
-      <div class="tg"><span class="tgLbl">Navegar</span><span class="tgBtns">
-        <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚<label>Select</label></button>
-        <button class="tool" data-tool="pan" title="Mover vista (H)">✋<label>Pan</label></button>
-      </span></div>
-      <div class="tg"><span class="tgLbl">Construir</span><span class="tgBtns">
-        <button class="tool" data-tool="wall" title="Dibujar pared (W)">▬<label>Wall</label><span class="dd" data-menu="wall" title="Elegir tipo de pared">▾</span></button>
-        <button class="tool" data-tool="door" title="Colocar puerta (D)">◟<label>Door</label><span class="dd" data-menu="door" title="Elegir tipo de puerta">▾</span></button>
-        <button class="tool" data-tool="window" title="Colocar ventana (N)">≡<label>Window</label><span class="dd" data-menu="window" title="Elegir tipo de ventana">▾</span></button>
-      </span></div>
-      <div class="tg"><span class="tgLbl">Superficies y formas</span><span class="tgBtns">
-        <button class="tool" data-tool="area" title="Superficie / techo: polígono con patrón (A)">▦<label>Area</label><span class="dd" data-menu="area" title="Elegir superficie">▾</span></button>
-        <button class="tool" data-tool="rect" title="Rectángulo / polígono (2 clics, SHIFT = regular)">▭<label>Rect</label><span class="dd" data-menu="rect" title="Elegir forma: rectángulo, triángulo, pentágono, hexágono...">▾</span></button>
-        <button class="tool" data-tool="ellipse" title="Elipse / círculo (2 clics, SHIFT = círculo)">◯<label>Ellipse</label></button>
-        <button class="tool" data-tool="line" title="Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)">╱<label>Line</label><span class="dd" data-menu="line" title="Elegir tipo de línea y punta">▾</span></button>
-        <button class="tool" data-tool="pline" title="Polilínea: línea de varios tramos (doble clic o Enter termina)">⌐<label>Polyline</label><span class="dd" data-menu="pline" title="Elegir tipo de línea">▾</span></button>
-        <button class="tool" data-tool="cloud" title="Nube de revisión (2 clics)">☁<label>Cloud</label><span class="dd" data-menu="cloud" title="Tamaño de la vuelta: chica, normal o grande">▾</span></button>
-      </span></div>
-      <div class="tg"><span class="tgLbl">Eléctrico</span><span class="tgBtns">
-        <button class="tool" data-tool="homerun" title="HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule">⚡<label>Homerun</label></button>
-        <button class="tool" data-tool="wire" title="Cableado / línea de circuito curva (X)">⌇<label>Wire</label></button>
-      </span></div>
-      <div class="tg"><span class="tgLbl">Medir y anotar</span><span class="tgBtns">
-        <button class="tool" data-tool="dim" title="Cota / dimensión (C)">⇤⇥<label>Dim</label></button>
-        <button class="tool" data-tool="measure" title="Medir (M)">📏<label>Measure</label><span class="dd" data-menu="measure" title="Tipo de medición: distancia, área o perímetro">▾</span></button>
-        <button class="tool" data-tool="text" title="Texto (T)">A<label>Text</label></button>
-        <button class="tool" data-tool="leader" title="Nota con flecha (L)">↖A<label>Callout</label></button>
-        <button class="tool" data-tool="calibrate" title="Calibrar plano de fondo (K)">⌖<label>Calibrate</label></button>
-      </span></div>
-      <div class="tg"><span class="tgLbl">A mano</span><span class="tgBtns">
-        <button class="tool" data-tool="pen" title="Lápiz a mano alzada (P) — Apple Pencil o dedo">✒️<label>Pen</label></button>
-        <button class="tool" data-tool="hi" title="Resaltador (H) — resalta sin tapar">🖍<label>Highlight</label></button>
-        <button class="tool" data-tool="erase" title="Borrador de tinta: pasa por encima de un trazo">🧽<label>Eraser</label></button>
-      </span></div>
-    </div>
+    <div class="dock horiz" id="dockTop"></div>
     <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" hidden>
     <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>
     <input type="file" id="fileOpen" accept=".json,application/json,application/pdf,.pdf,image/*" hidden>
@@ -116,6 +80,7 @@
   </header>
 
   <div id="toolMenu" hidden></div>
+  <div id="barrasPanel" hidden></div>
 
   <div id="main">
 
@@ -123,7 +88,7 @@
     <aside id="palette">
       <input type="search" id="symSearch" placeholder="Search symbol…">
       <div id="catTabs">
-        <button class="cat" data-cat="fav">★ My Tools</button>
+        <button class="cat" data-cat="fav" title="Tus símbolos de siempre">★ Favoritos</button>
         <button class="cat active" data-cat="electrical">⚡ Electrical</button>
         <button class="cat" data-cat="lighting">💡 Lighting</button>
         <button class="cat" data-cat="riser">🔌 Riser</button>
@@ -141,6 +106,7 @@
     </aside>
 
     <!-- ======= LIENZO ======= -->
+    <div class="dock vert" id="dockLeft"></div>
     <div id="canvasWrap">
       <svg id="canvas" class="mxp" xmlns="http://www.w3.org/2000/svg">
         <style id="mxpStyle">
@@ -208,6 +174,7 @@
       </svg>
       <div id="sheetTabs"></div>
     </div>
+    <div class="dock vert" id="dockRight"></div>
 
     <!-- ======= PANEL DERECHO ======= -->
     <aside id="rightPanel">
@@ -334,6 +301,7 @@
   </div>
 
   <!-- ======= BARRA DE ESTADO ======= -->
+  <div class="dock horiz abajo" id="dockBottom"></div>
   <footer id="statusbar">
     <span id="hint">Selecciona una herramienta para comenzar</span>
     <span id="coords"></span>

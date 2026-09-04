@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.N';
+  var APP_VERSION = 'v30.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -1222,7 +1222,7 @@
   }
   function applyView() {
     G.world.setAttribute('transform', 'translate(' + view.tx + ' ' + view.ty + ') scale(' + view.z + ')');
-    $('#zoomLabel').textContent = zoomPct() + '%';
+    var zl = $('#zoomLabel'); if (zl) zl.textContent = zoomPct() + '%';
     if (typeof scheduleHires === 'function') scheduleHires();
   }
 
@@ -4785,7 +4785,7 @@
     if (t !== 'place') placingKey = null;
     pendingAreaLabel = false;
     drawing = null; G.prev.innerHTML = '';
-    $$('#toolButtons .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
+    marcaBarras(t);
     $$('.symBtn').forEach(function (b) { b.classList.toggle('active', t === 'place' && b.dataset.key === placingKey); });
     svg.className.baseVal = 'mxp tool-' + t + (eqNameOff ? ' sinEqName' : '');
     if (!sel && !selGroup) showProps();   // Cable muestra su lista de materiales
@@ -6090,7 +6090,7 @@
       var isFav = favs.indexOf(k) >= 0;
       html += '<button class="symBtn' + (tool === 'place' && placingKey === k ? ' active' : '') + '" data-key="' + k + '">' +
         symPreviewSvg(d) + '<span class="nm">' + esc(d.short || d.name) + '</span>' +
-        '<span class="favstar' + (isFav ? ' on' : '') + '" data-fav="' + k + '" title="★ My Tools">★</span></button>';
+        '<span class="favstar' + (isFav ? ' on' : '') + '" data-fav="' + k + '" title="★ Favoritos: tus símbolos de siempre">★</span></button>';
     });
     $('#symList').innerHTML = html || '<span class="muted" style="grid-column:1/-1">' +
       (activeCat === 'fav' ? 'Sin favoritos aún — toca la ★ de cualquier símbolo para agregarlo aquí.' : 'Sin resultados') + '</span>';
@@ -9390,12 +9390,14 @@
     var b = document.getElementById('chatBurbuja'); if (b) b.classList.add('oculto');
     try { localStorage.setItem('mxpChatOpen', '1'); } catch (e) {}
     chatPinta();
+    if (typeof chatEsquiva === 'function') chatEsquiva();
     if (foco !== false) { var t = document.getElementById('chatTxt'); if (t) t.focus(); }
   }
   function chatCierra() {
     var d = chatEl(); if (d) d.classList.add('oculto');
     var b = document.getElementById('chatBurbuja'); if (b) b.classList.remove('oculto');
     try { localStorage.setItem('mxpChatOpen', '0'); } catch (e) {}
+    if (typeof chatEsquiva === 'function') chatEsquiva();
   }
 
   function chatCoste() {
@@ -13068,9 +13070,6 @@
     applyView();
   }
   $('#btnCsv').addEventListener('click', exportTakeoffCsv);
-  $('#btnZoomIn').addEventListener('click', function () { zoomBy(1.25); });
-  $('#btnZoomOut').addEventListener('click', function () { zoomBy(0.8); });
-  $('#btnZoomFit').addEventListener('click', zoomFit);
   $('#btnUndo').addEventListener('click', undo);
   $('#btnRedo').addEventListener('click', redo);
 
@@ -13878,6 +13877,9 @@
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd') { ev.preventDefault(); copySel(); pasteClip(null, 24); return; }
     switch (ev.key) {
       case 'Escape':
+        // un desplegable de grupo o el panel Barras abiertos se cierran primero
+        var tmE = $('#toolMenu'), bpE = $('#barrasPanel');
+        if ((tmE && !tmE.hidden) || (bpE && !bpE.hidden)) { cierraToolMenu(); if (bpE) bpE.hidden = true; break; }
         // primero cierra cualquier modal abierto (Panel Schedule, Lot…)
         var askM = document.getElementById('askModal');
         if (askM && !askM.hidden) { askClose(false); break; }   // (robustez 03/09) el foco pudo salir del input
@@ -13950,20 +13952,539 @@
     }
   });
 
-  $$('#toolButtons .tool').forEach(function (b) {
-    b.addEventListener('click', function (ev) {
-      // Calibrate al estilo Bluebeam: al tocarlo salen las dos vías
-      // (medir una distancia conocida, o aplicar la escala escrita en el plano)
-      if (b.dataset.tool === 'calibrate' && state.bg) {
-        setTool('calibrate');
-        showToolMenu('calibrate', b);
+  /* ==================================================================
+     BARRAS MOVIBLES (v30.O) — estilo Bluebeam
+     Tres barras: "Mis herramientas" (las que más usas, a un toque),
+     "Grupos" (tocas un grupo y se despliega con todas sus opciones) y
+     "Navegar y zoom" (Select, Pan, zoom — abajo por defecto, como Revu).
+     Cada barra vive en uno de cuatro muelles: arriba, abajo, izquierda,
+     derecha. Se mueven arrastrando la agarradera ⋮⋮ o desde ⋮⋮ Barras.
+     Todo se guarda en localStorage 'mxp_barras' (es del aparato, no del
+     proyecto: cada PC / iPad puede tener su propia disposición).
+     ================================================================== */
+  var TOOL_DEFS = [
+    { id: 'select', grp: 'nav', ico: '⬚', nom: 'Select', key: 'V', tip: 'Seleccionar (V)' },
+    { id: 'pan', grp: 'nav', ico: '✋', nom: 'Pan', key: 'H', tip: 'Mover vista (H)' },
+    { id: 'wall', grp: 'build', ico: '▬', nom: 'Wall', key: 'W', tip: 'Dibujar pared (W)', menu: 'wall', menuTip: 'Elegir tipo de pared' },
+    { id: 'door', grp: 'build', ico: '◟', nom: 'Door', key: 'D', tip: 'Colocar puerta (D)', menu: 'door', menuTip: 'Elegir tipo de puerta' },
+    { id: 'window', grp: 'build', ico: '≡', nom: 'Window', key: 'N', tip: 'Colocar ventana (N)', menu: 'window', menuTip: 'Elegir tipo de ventana' },
+    { id: 'area', grp: 'shape', ico: '▦', nom: 'Area', key: 'A', tip: 'Superficie / techo: polígono con patrón (A)', menu: 'area', menuTip: 'Elegir superficie' },
+    { id: 'rect', grp: 'shape', ico: '▭', nom: 'Rect', tip: 'Rectángulo / polígono (2 clics, SHIFT = regular)', menu: 'rect', menuTip: 'Elegir forma: rectángulo, triángulo, pentágono, hexágono...' },
+    { id: 'ellipse', grp: 'shape', ico: '◯', nom: 'Ellipse', tip: 'Elipse / círculo (2 clics, SHIFT = círculo)' },
+    { id: 'line', grp: 'shape', ico: '╱', nom: 'Line', tip: 'Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)', menu: 'line', menuTip: 'Elegir tipo de línea y punta' },
+    { id: 'pline', grp: 'shape', ico: '⌐', nom: 'Polyline', tip: 'Polilínea: línea de varios tramos (doble clic o Enter termina)', menu: 'pline', menuTip: 'Elegir tipo de línea' },
+    { id: 'cloud', grp: 'shape', ico: '☁', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
+    { id: 'homerun', grp: 'elec', ico: '⚡', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
+    { id: 'wire', grp: 'elec', ico: '⌇', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
+    { id: 'dim', grp: 'note', ico: '⇤⇥', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
+    { id: 'measure', grp: 'note', ico: '📏', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
+    { id: 'text', grp: 'note', ico: 'A', nom: 'Text', key: 'T', tip: 'Texto (T)' },
+    { id: 'leader', grp: 'note', ico: '↖A', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
+    { id: 'calibrate', grp: 'note', ico: '⌖', nom: 'Calibrate', key: 'K', tip: 'Calibrar plano de fondo (K)', menuTip: 'Medir una distancia conocida o aplicar la escala escrita en el plano' },
+    { id: 'pen', grp: 'ink', ico: '✒️', nom: 'Pen', key: 'P', tip: 'Lápiz a mano alzada (P) — Apple Pencil o dedo' },
+    { id: 'hi', grp: 'ink', ico: '🖍', nom: 'Highlight', tip: 'Resaltador — resalta sin tapar' },
+    { id: 'erase', grp: 'ink', ico: '🧽', nom: 'Eraser', tip: 'Borrador de tinta: pasa por encima de un trazo' }
+  ];
+  var GRUPOS = [
+    { id: 'nav', nom: 'Navegar', largo: 'Navegar' },
+    { id: 'build', nom: 'Construir', largo: 'Construir: paredes, puertas y ventanas' },
+    { id: 'shape', nom: 'Formas', largo: 'Superficies y formas' },
+    { id: 'elec', nom: 'Eléctrico', largo: 'Eléctrico: circuitos y cableado' },
+    { id: 'note', nom: 'Medir y anotar', corto: 'Medir', largo: 'Medir y anotar' },
+    { id: 'ink', nom: 'A mano', largo: 'A mano: lápiz, resaltador, borrador' }
+  ];
+  var BARRAS = {
+    favs: { nom: 'Mis herramientas', tip: 'Las herramientas que más usas, a un toque. Añade o quita con la ☆ de cada grupo, o en ⋮⋮ Barras.' },
+    grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' },
+    nav: { nom: 'Navegar y zoom', tip: 'Seleccionar, mover la vista y zoom.' },
+    archivo: { nom: 'Archivo', tip: 'Abrir, guardar, tus proyectos en la nube, exportar PNG / PDF, Panel Schedule y buscar el lote.' }
+  };
+  var ARCHIVO_IDS = ['btnOpen', 'btnSave', 'btnProyectos', 'btnPng', 'btnPrint', 'btnPanel', 'btnLot'];
+  var DOCKS = ['top', 'bottom', 'left', 'right'];
+  var DOCK_NOM = { top: 'Arriba', bottom: 'Abajo', left: 'Izquierda', right: 'Derecha' };
+  var LAYOUT_DEF = {
+    v: 1,
+    docks: { top: ['favs', 'grupos'], bottom: ['nav'], left: ['archivo'], right: [] },
+    ocultas: [],
+    favs: ['text', 'leader', 'wire', 'homerun', 'dim', 'measure', 'rect', 'cloud'],
+    ultima: {},
+    uso: {}
+  };
+  function defDe(id) { for (var i = 0; i < TOOL_DEFS.length; i++) if (TOOL_DEFS[i].id === id) return TOOL_DEFS[i]; return null; }
+  function grpDe(id) { var d = defDe(id); return d ? d.grp : null; }
+  function toolsDe(grp) { return TOOL_DEFS.filter(function (d) { return d.grp === grp; }); }
+  function grupoDef(id) { for (var i = 0; i < GRUPOS.length; i++) if (GRUPOS[i].id === id) return GRUPOS[i]; return null; }
+  function clonaLayoutDef() { return JSON.parse(JSON.stringify(LAYOUT_DEF)); }
+  /* Lee la disposición guardada y la SANEA: una barra que falte vuelve a su
+     sitio por defecto, una que sobre se ignora, una herramienta que ya no
+     exista se quita de favoritos. Así una versión vieja nunca rompe la barra. */
+  function cargaLayout() {
+    var L = clonaLayoutDef(), g = null;
+    try { g = JSON.parse(localStorage.getItem('mxp_barras') || 'null'); } catch (e) { g = null; }
+    if (!g || typeof g !== 'object') return L;
+    var vistas = {};
+    DOCKS.forEach(function (d) {
+      L.docks[d] = [];
+      var arr = (g.docks && Array.isArray(g.docks[d])) ? g.docks[d] : [];
+      arr.forEach(function (id) { if (BARRAS[id] && !vistas[id]) { vistas[id] = 1; L.docks[d].push(id); } });
+    });
+    Object.keys(BARRAS).forEach(function (id) {
+      if (vistas[id]) return;
+      DOCKS.forEach(function (d) { if (LAYOUT_DEF.docks[d].indexOf(id) >= 0) L.docks[d].push(id); });
+    });
+    L.ocultas = (Array.isArray(g.ocultas) ? g.ocultas : []).filter(function (id) { return !!BARRAS[id]; });
+    if (Array.isArray(g.favs)) {
+      var f = [];
+      g.favs.forEach(function (id) { if (defDe(id) && f.indexOf(id) < 0) f.push(id); });
+      L.favs = f;
+    }
+    if (g.ultima && typeof g.ultima === 'object') Object.keys(g.ultima).forEach(function (k) { if (grupoDef(k) && grpDe(g.ultima[k]) === k) L.ultima[k] = g.ultima[k]; });
+    if (g.uso && typeof g.uso === 'object') Object.keys(g.uso).forEach(function (k) { var n = +g.uso[k]; if (defDe(k) && n > 0) L.uso[k] = Math.min(n, 99999); });
+    if (!hayFormaDeSeleccionar(L.ocultas, L.favs)) L.ocultas = L.ocultas.filter(function (id) { return id !== 'nav'; });
+    return L;
+  }
+  var layout = cargaLayout();
+  var guardaLayoutT = null;
+  function guardaLayout() {
+    clearTimeout(guardaLayoutT); guardaLayoutT = null;
+    try { localStorage.setItem('mxp_barras', JSON.stringify(layout)); } catch (e) {}
+  }
+  function guardaLayoutLuego() { if (!guardaLayoutT) guardaLayoutT = setTimeout(guardaLayout, 600); }
+  function dockDe(id) { for (var i = 0; i < DOCKS.length; i++) if (layout.docks[DOCKS[i]].indexOf(id) >= 0) return DOCKS[i]; return null; }
+  function barraVisible(id) { return layout.ocultas.indexOf(id) < 0; }
+  /* ¿Queda algún sitio desde donde volver a Select? (en iPad no hay tecla V
+     ni Escape: si se pierde Select, no se puede mover ni borrar nada) */
+  function hayFormaDeSeleccionar(ocultas, favs) {
+    var oc = function (id) { return ocultas.indexOf(id) >= 0; };
+    return !oc('nav') || !oc('grupos') || (!oc('favs') && favs.indexOf('select') >= 0);
+  }
+  /* Si "Navegar y zoom" está oculta, el grupo Navegar aparece en Grupos para
+     que Select y Pan nunca se pierdan. Si está visible, no se duplican. */
+  function gruposVisibles() { return GRUPOS.filter(function (g) { return g.id !== 'nav' || !barraVisible('nav'); }); }
+
+  /* ---------- pintar ---------- */
+  function btnTool(id) {
+    var d = defDe(id); if (!d) return '';
+    var tieneDd = !!d.menu;
+    return '<button class="tool' + (tool === id ? ' active' : '') + '" data-tool="' + id + '" title="' + esc(d.tip) + '">' + d.ico + '<label>' + esc(d.nom) + '</label>' +
+      (tieneDd ? '<span class="dd" data-menu="' + d.menu + '" title="' + esc(d.menuTip) + '">▾</span>' : '') + '</button>';
+  }
+  function btnGrupo(g, vert) {
+    var ult = defDe(layout.ultima[g.id]) || toolsDe(g.id)[0];
+    var abierto = false;
+    try { abierto = !$('#toolMenu').hidden && $('#toolMenu').dataset.grp === g.id; } catch (e) {}
+    return '<button class="grpBtn' + (grpDe(tool) === g.id ? ' active' : '') + (abierto ? ' abierto' : '') + '" data-grp="' + g.id + '" title="' + esc(g.largo) + ' — toca para ver todas sus herramientas">' +
+      '<span class="gIco">' + (ult ? ult.ico : '') + '</span><label>' + esc(vert && g.corto ? g.corto : g.nom) + '</label></button>';
+  }
+  function elBarra(id, dock) {
+    var div = document.createElement('div');
+    div.className = 'barra'; div.dataset.barra = id; div.dataset.dock = dock;
+    var b = BARRAS[id];
+    var html = '<span class="grip" title="' + esc(b.nom) + ' — arrastra para mover la barra arriba, abajo o a un lado"><span>⋮⋮</span></span>' +
+      '<span class="bLbl" title="' + esc(b.tip) + '">' + esc(b.nom) + '</span><div class="bBtns">';
+    if (id === 'favs') {
+      // si Navegar y Grupos están ocultas, Select y Pan viven aquí
+      if (!barraVisible('nav') && !barraVisible('grupos') && layout.favs.indexOf('select') < 0) html += btnTool('select') + btnTool('pan') + '<span class="sep"></span>';
+      html += layout.favs.map(btnTool).join('');
+      if (!layout.favs.length) html += '<button class="act" data-act="barras" title="Todavía no hay herramientas aquí: toca para elegir las tuyas">＋<label>Elegir</label></button>';
+    } else if (id === 'grupos') {
+      html += gruposVisibles().map(function (g) { return btnGrupo(g, dock === 'left' || dock === 'right'); }).join('');
+    } else if (id === 'nav') {
+      html += btnTool('select') + btnTool('pan') + '<span class="sep"></span>' +
+        '<button class="act zo" data-act="zoomOut" title="Alejar">−</button><span id="zoomLabel">' + zoomPct() + '%</span>' +
+        '<button class="act zo" data-act="zoomIn" title="Acercar">+</button>' +
+        '<button class="act zo" data-act="zoomFit" title="Ajustar a contenido">⛶</button>';
+    }
+    div.innerHTML = html + '</div>';
+    if (id === 'archivo') {
+      // los botones de archivo son elementos fijos (tienen sus escuchas
+      // puestas al arrancar): se MUEVEN al muelle, no se vuelven a crear
+      var bb = div.querySelector('.bBtns');
+      ARCHIVO_IDS.forEach(function (bid) { var b = document.getElementById(bid); if (b) bb.appendChild(b); });
+    }
+    return div;
+  }
+  /* muelle vertical con más botones de los que caben: una flecha abajo lo dice */
+  function actualizaMas() {
+    $$('.dock.vert').forEach(function (d) { d.classList.toggle('mas', d.scrollTop + d.clientHeight < d.scrollHeight - 2); });
+  }
+  $$('.dock.vert').forEach(function (d) { d.addEventListener('scroll', actualizaMas); });
+  window.addEventListener('resize', function () { actualizaMas(); chatEsquiva(); });
+  /* el chat flotante y su burbuja no se ponen encima de una barra: si el muelle
+     de abajo o el de la derecha los pisan, se corren (solo cuando se pisan) */
+  function chatEsquiva() {
+    var bub = document.getElementById('chatBurbuja'), ch = document.getElementById('chatFlot');
+    var db = $('#dockBottom'), dr = $('#dockRight');
+    var rb = db && getComputedStyle(db).display !== 'none' ? db.getBoundingClientRect() : null;
+    var rr = dr && getComputedStyle(dr).display !== 'none' ? dr.getBoundingClientRect() : null;
+    // la burbuja sube hasta quedar por encima del muelle (y de la barra de estado que hay debajo)
+    if (bub) bub.style.bottom = rb && rb.height ? (window.innerHeight - rb.top + 18) + 'px' : '';
+    if (!ch || ch.classList.contains('oculto')) return;
+    var r = ch.getBoundingClientRect(); if (!r.width) return;
+    var x = r.left, y = r.top, mov = false;
+    if (rb && rb.height && r.bottom > rb.top && r.top < rb.bottom) { y = rb.top - r.height - 8; mov = true; }
+    if (rr && rr.width && r.right > rr.left && r.left < rr.right && r.bottom > rr.top && r.top < rr.bottom) { x = rr.left - r.width - 8; mov = true; }
+    if (mov) { ch.style.left = Math.max(4, x) + 'px'; ch.style.top = Math.max(4, y) + 'px'; ch.style.right = 'auto'; ch.style.bottom = 'auto'; }
+  }
+  function pintaBarras() {
+    var holder = $('#archivoHolder');
+    if (holder) ARCHIVO_IDS.forEach(function (bid) { var b = document.getElementById(bid); if (b && b.parentElement !== holder) holder.appendChild(b); });
+    DOCKS.forEach(function (d) {
+      var el = $('#dock' + d.charAt(0).toUpperCase() + d.slice(1));
+      if (!el) return;
+      el.innerHTML = '';
+      layout.docks[d].forEach(function (id) { if (barraVisible(id)) el.appendChild(elBarra(id, d)); });
+    });
+    marcaBarras(tool);
+    actualizaMas();
+    chatEsquiva();
+  }
+  /* setTool llama aquí: enciende el botón de la herramienta, el grupo al que
+     pertenece, y recuerda la última usada de cada grupo (es el icono que
+     enseña el botón del grupo, como el "último usado" de Revu). */
+  function marcaBarras(t) {
+    if (!layout) return;
+    $$('.dock .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
+    var g = grpDe(t);
+    if (g && layout.ultima[g] !== t) { layout.ultima[g] = t; guardaLayoutLuego(); }
+    $$('.dock .grpBtn').forEach(function (b) {
+      var d = defDe(layout.ultima[b.dataset.grp]) || toolsDe(b.dataset.grp)[0];
+      var ic = b.querySelector('.gIco'); if (ic && d) ic.textContent = d.ico;
+      b.classList.toggle('active', b.dataset.grp === g);
+    });
+    $$('#toolMenu .tmTool').forEach(function (it) { it.classList.toggle('cur', it.dataset.tool === t); });
+  }
+  function cuentaUso(id) { if (!defDe(id)) return; layout.uso[id] = (layout.uso[id] || 0) + 1; guardaLayoutLuego(); }
+  /* Elegir una herramienta desde una barra o un desplegable. Devuelve true si
+     dejó un menú abierto (Calibrate con plano de fondo saca sus dos vías). */
+  function eligeTool(id, anchor) {
+    cuentaUso(id);
+    if (id === 'calibrate' && state.bg) {
+      var tmC = $('#toolMenu');
+      if (!tmC.hidden && tmC.dataset.kind === 'calibrate' && tool === 'calibrate') { cierraToolMenu(); return true; }
+      setTool('calibrate'); showToolMenu('calibrate', anchor); return true;
+    }
+    setTool(id);
+    return false;
+  }
+
+  /* ---------- menú desplegable de un grupo ---------- */
+  function cierraToolMenu() {
+    var tm = $('#toolMenu');
+    tm.hidden = true; tm.dataset.grp = '';
+    $$('.dock .grpBtn.abierto').forEach(function (b) { b.classList.remove('abierto'); });
+  }
+  /* Coloca #toolMenu pegado a su botón, del lado que tenga sitio: debajo si
+     la barra está arriba, encima si está abajo, al lado si es vertical. */
+  function colocaMenu(tm, anchor, grp) {
+    tm.hidden = false;
+    var r = anchor.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
+    var dock = anchor.closest ? anchor.closest('.dock') : null;
+    var lado = !dock ? 'down' : dock.id === 'dockLeft' ? 'right' : dock.id === 'dockRight' ? 'left' : dock.id === 'dockBottom' ? 'up' : 'down';
+    var mw = tm.offsetWidth, mh = tm.offsetHeight, x, y;
+    if (lado === 'right') { x = r.right + 6; y = r.top; }
+    else if (lado === 'left') { x = r.left - mw - 6; y = r.top; }
+    else if (lado === 'up') { x = r.left; y = r.top - mh - 6; }
+    else { x = r.left; y = r.bottom + 4; }
+    x = Math.max(4, Math.min(x, W - mw - 4));
+    y = Math.max(4, Math.min(y, H - mh - 4));
+    tm.style.left = x + 'px'; tm.style.top = y + 'px';
+    tm.dataset.grp = grp || '';
+    $$('.dock .grpBtn').forEach(function (b) { b.classList.toggle('abierto', !!grp && b === anchor); });
+  }
+  function itemTool(d) {
+    var esFav = layout.favs.indexOf(d.id) >= 0;
+    var conSub = !!d.menu || (d.id === 'calibrate' && !!state.bg);
+    return '<div class="tmItem tmTool' + (tool === d.id ? ' cur' : '') + '" data-tool="' + d.id + '" title="' + esc(d.tip) + '">' +
+      '<span class="tIco">' + d.ico + '</span><span class="tNom">' + esc(d.nom) + '</span>' +
+      (d.key ? '<span class="tKey">' + d.key + '</span>' : '') +
+      (conSub ? '<span class="tSub" title="' + esc(d.menuTip || '') + '">▸</span>' : '') +
+      '<span class="tPin' + (esFav ? ' on' : '') + '" title="' + (esFav ? 'Quitar de Mis herramientas' : 'Poner en Mis herramientas') + '">' + (esFav ? '★' : '☆') + '</span></div>';
+  }
+  function menuGrupo(grp, anchor) {
+    var tm = $('#toolMenu'), g = grupoDef(grp);
+    if (!g) return;
+    var html = '<div class="tmHead">' + esc(g.largo) + '</div>';
+    toolsDe(grp).forEach(function (d) { html += itemTool(d); });
+    html += '<div class="tmPie">☆ la pone en Mis herramientas · ▸ abre sus tipos</div>';
+    tm.innerHTML = html;
+    tm.dataset.kind = 'grupo';
+    colocaMenu(tm, anchor, grp);
+    $$('#toolMenu .tmTool').forEach(function (it) {
+      it.addEventListener('click', function (ev) {
+        var id = it.dataset.tool, d = defDe(id);
+        if (!d) return;
+        if (ev.target.closest && ev.target.closest('.tPin')) {
+          togglePin(id);
+          var nuevo = document.createElement('div');
+          nuevo.innerHTML = itemTool(d);
+          var pin = it.querySelector('.tPin'), pin2 = nuevo.querySelector('.tPin');
+          pin.className = pin2.className; pin.textContent = pin2.textContent; pin.title = pin2.title;
+          // la barra de favoritos cambió de ancho: el botón del grupo pudo moverse
+          var a2 = $('.dock .grpBtn[data-grp="' + grp + '"]');
+          if (a2) colocaMenu(tm, a2, grp);
+          return;
+        }
+        var sub = ev.target.closest && ev.target.closest('.tSub');
+        var a = $('.dock .grpBtn[data-grp="' + grp + '"]') || anchor;
+        if (sub) {
+          cuentaUso(id);
+          setTool(id);
+          showToolMenu(d.menu || 'calibrate', a);
+          return;
+        }
+        if (!eligeTool(id, a)) cierraToolMenu();
+      });
+    });
+  }
+  function toggleGrupo(b) {
+    var tm = $('#toolMenu');
+    if (!tm.hidden && tm.dataset.grp === b.dataset.grp) { cierraToolMenu(); return; }
+    menuGrupo(b.dataset.grp, b);
+  }
+  function togglePin(id) {
+    var i = layout.favs.indexOf(id), msg;
+    if (i >= 0) { layout.favs.splice(i, 1); msg = defDe(id).nom + ' quitada de Mis herramientas'; }
+    else {
+      layout.favs.push(id); msg = defDe(id).nom + ' puesta en Mis herramientas';
+      var k = layout.ocultas.indexOf('favs');
+      if (k >= 0) { layout.ocultas.splice(k, 1); msg += ' — la barra estaba oculta y se volvió a mostrar'; }
+      else if (layout.favs.length > 12) msg += ' · ya son ' + layout.favs.length + ': la barra se hace de dos filas';
+    }
+    guardaLayout(); pintaBarras();
+    setHint(msg);
+  }
+
+  /* ---------- clics en cualquier muelle (una sola escucha) ---------- */
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('.dock button');
+    if (!b) return;
+    if (b.classList.contains('tool')) {
+      var dd = ev.target.closest && ev.target.closest('.dd');
+      if (eligeTool(b.dataset.tool, b)) return;
+      if (dd) showToolMenu(dd.dataset.menu, b);
+    } else if (b.classList.contains('grpBtn')) {
+      toggleGrupo(b);
+    } else if (b.dataset.act) {
+      accionBarra(b.dataset.act, b);
+    }
+  });
+  function accionBarra(act, b) {
+    if (act === 'zoomIn') zoomBy(1.25);
+    else if (act === 'zoomOut') zoomBy(0.8);
+    else if (act === 'zoomFit') zoomFit();
+    else if (act === 'barras') abrePanelBarras();
+  }
+
+  /* ---------- arrastrar una barra por su agarradera ---------- */
+  var dragBarra = null;
+  function dockBajo(x, y) {
+    var el = document.elementFromPoint(x, y);
+    var d = el && el.closest ? el.closest('.dock:not(.fantasma)') : null;
+    if (d) return d;
+    // tolerancia: cerca del borde de un muelle cuenta como soltarla ahí
+    for (var i = 0; i < DOCKS.length; i++) {
+      var k = $('#dock' + DOCKS[i].charAt(0).toUpperCase() + DOCKS[i].slice(1));
+      if (!k) continue;
+      var r = k.getBoundingClientRect();
+      if (x >= r.left - 28 && x <= r.right + 28 && y >= r.top - 28 && y <= r.bottom + 28) return k;
+    }
+    return null;
+  }
+  function idDock(el) { return el.id.replace('dock', '').toLowerCase(); }
+  function mueveBarra(id, dock, idx) {
+    DOCKS.forEach(function (d) { layout.docks[d] = layout.docks[d].filter(function (b) { return b !== id; }); });
+    var arr = layout.docks[dock];
+    if (idx == null || idx < 0 || idx > arr.length) idx = arr.length;
+    arr.splice(idx, 0, id);
+    guardaLayout(); pintaBarras();
+    if (!$('#barrasPanel').hidden) pintaPanelBarras();
+  }
+  function sueltaDrag() {
+    if (!dragBarra) return;
+    var db = dragBarra; dragBarra = null;
+    document.body.classList.remove('moviendoBarra');
+    if (db.ghost) db.ghost.remove();
+    $$('.dock.fantasma').forEach(function (f) { f.remove(); });
+    $$('.dock.drop').forEach(function (k) { k.classList.remove('drop'); });
+    return db;
+  }
+  document.addEventListener('pointerdown', function (ev) {
+    var g = ev.target.closest && ev.target.closest('.barra .grip, .barra .bLbl');
+    if (!g) return;
+    // un solo arrastre a la vez, solo con el puntero principal y sin botón derecho
+    if (dragBarra || ev.isPrimary === false || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+    var barra = g.closest('.barra');
+    dragBarra = { id: barra.dataset.barra, pid: ev.pointerId, sx: ev.clientX, sy: ev.clientY, on: false, ghost: null, dx: 0, dy: 0 };
+    try { g.setPointerCapture(ev.pointerId); } catch (e) {}
+    ev.preventDefault();
+  });
+  document.addEventListener('pointermove', function (ev) {
+    if (!dragBarra || ev.pointerId !== dragBarra.pid) return;
+    if (!dragBarra.on) {
+      if (Math.hypot(ev.clientX - dragBarra.sx, ev.clientY - dragBarra.sy) < 6) return;
+      var src = $('.barra[data-barra="' + dragBarra.id + '"]');
+      if (!src) { dragBarra = null; return; }
+      dragBarra.on = true;
+      document.body.classList.add('moviendoBarra');
+      cierraToolMenu();
+      var r = src.getBoundingClientRect(), dockSrc = src.closest('.dock');
+      var gh = document.createElement('div');
+      gh.className = (dockSrc ? dockSrc.className : 'dock horiz') + ' fantasma';
+      gh.appendChild(src.cloneNode(true));
+      gh.style.width = r.width + 'px'; gh.style.height = r.height + 'px';
+      document.body.appendChild(gh);
+      dragBarra.ghost = gh; dragBarra.dx = ev.clientX - r.left; dragBarra.dy = ev.clientY - r.top;
+      setHint('Suelta la barra arriba, abajo o a un lado del plano');
+    }
+    dragBarra.ghost.style.left = (ev.clientX - dragBarra.dx) + 'px';
+    dragBarra.ghost.style.top = (ev.clientY - dragBarra.dy) + 'px';
+    var d = dockBajo(ev.clientX, ev.clientY);
+    $$('.dock').forEach(function (k) { k.classList.toggle('drop', k === d); });
+  });
+  document.addEventListener('pointerup', function (ev) {
+    if (!dragBarra || ev.pointerId !== dragBarra.pid) return;
+    // el muelle destino se mira ANTES de limpiar: un muelle vacío solo es
+    // visible (y medible) mientras dura el arrastre
+    var d = dragBarra.on ? dockBajo(ev.clientX, ev.clientY) : null;
+    var db = sueltaDrag();
+    if (!db.on) return;
+    if (!d) { setHint('La barra se queda donde estaba'); return; }
+    var dock = idDock(d), vert = d.classList.contains('vert');
+    var otros = layout.docks[dock].filter(function (b) { return b !== db.id; });
+    var idx = otros.length;
+    var els = Array.from(d.querySelectorAll('.barra')).filter(function (e) { return e.dataset.barra !== db.id; });
+    for (var i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect(), antes;
+      if (vert) antes = ev.clientY < (r.top + r.bottom) / 2;
+      // muelle horizontal partido en filas: primero la fila, después la X
+      else if (ev.clientY < r.top) antes = true;
+      else if (ev.clientY > r.bottom) antes = false;
+      else antes = ev.clientX < (r.left + r.right) / 2;
+      if (antes) { idx = otros.indexOf(els[i].dataset.barra); break; }
+    }
+    mueveBarra(db.id, dock, idx);
+    var aviso = BARRAS[db.id].nom + ' → ' + DOCK_NOM[dock].toLowerCase();
+    if (d.scrollHeight > d.clientHeight + 2) aviso += ' · no cabe todo de un vistazo: desliza la barra hacia arriba para ver el resto';
+    setHint(aviso);
+  });
+  document.addEventListener('pointercancel', function (ev) { if (dragBarra && ev.pointerId === dragBarra.pid) sueltaDrag(); });
+  document.addEventListener('contextmenu', function (ev) { if (ev.target.closest && ev.target.closest('.barra .grip, .barra .bLbl')) ev.preventDefault(); });
+
+  /* ---------- panel ⋮⋮ Barras: organizar sin arrastrar (cómodo en iPad) ---------- */
+  function ordenBarras() {
+    var out = [];
+    DOCKS.forEach(function (d) { layout.docks[d].forEach(function (id) { out.push({ id: id, dock: d }); }); });
+    return out;
+  }
+  function masUsadas(n) {
+    return Object.keys(layout.uso)
+      .filter(function (k) { return defDe(k) && grpDe(k) !== 'nav'; })
+      .sort(function (a, b) { return layout.uso[b] - layout.uso[a]; })
+      .slice(0, n);
+  }
+  function pintaPanelBarras() {
+    var p = $('#barrasPanel'), st = p.scrollTop;
+    var html = '<h4>Organizar barras <button class="x" data-bp="cerrar" title="Cerrar">✕</button></h4>';
+    html += '<div class="bpSec">Barras — cuáles ves y dónde van</div>';
+    ordenBarras().forEach(function (o) {
+      var arr = layout.docks[o.dock], i = arr.indexOf(o.id), vis = barraVisible(o.id);
+      html += '<div class="bpRow" data-barra="' + o.id + '">' +
+        '<label class="nm" title="' + esc(BARRAS[o.id].tip) + '"><input type="checkbox" data-bp="ver"' + (vis ? ' checked' : '') + ' title="Ver u ocultar esta barra">' + esc(BARRAS[o.id].nom) + '</label>' +
+        '<select data-bp="dock" title="Dónde va la barra">' + DOCKS.map(function (d) { return '<option value="' + d + '"' + (d === o.dock ? ' selected' : '') + '>' + DOCK_NOM[d] + '</option>'; }).join('') + '</select>' +
+        '<button data-bp="mv" data-n="-1" title="Antes"' + (i <= 0 ? ' disabled' : '') + '>◀</button>' +
+        '<button data-bp="mv" data-n="1" title="Después"' + (i >= arr.length - 1 ? ' disabled' : '') + '>▶</button></div>';
+    });
+    html += '<p class="bpNota">También puedes agarrar la ⋮⋮ de cualquier barra y soltarla arriba, abajo o a un lado del plano.</p>';
+    html += '<div class="bpSec">Mis herramientas — las que quieres a un toque</div>';
+    if (!layout.favs.length) html += '<p class="bpNota">Ninguna todavía. Añade abajo, o toca la ☆ de una herramienta dentro de cualquier grupo.</p>';
+    layout.favs.forEach(function (id, i) {
+      var d = defDe(id);
+      html += '<div class="bpRow" data-fav="' + id + '"><span class="ico">' + d.ico + '</span><span class="nm">' + esc(d.nom) + '</span>' +
+        '<button data-bp="fmv" data-n="-1" title="Subir"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+        '<button data-bp="fmv" data-n="1" title="Bajar"' + (i === layout.favs.length - 1 ? ' disabled' : '') + '>▼</button>' +
+        '<button class="quitar" data-bp="fdel" title="Quitar de Mis herramientas">✕</button></div>';
+    });
+    var libres = TOOL_DEFS.filter(function (d) { return layout.favs.indexOf(d.id) < 0; });
+    if (libres.length) {
+      html += '<div class="bpRow"><select data-bp="fadd" style="flex:1"><option value="">＋ Añadir herramienta…</option>' +
+        libres.map(function (d) { return '<option value="' + d.id + '">' + d.ico + '  ' + esc(d.nom) + ' — ' + esc(grupoDef(d.grp).nom) + '</option>'; }).join('') + '</select></div>';
+    }
+    var top = masUsadas(8);
+    if (top.length >= 5) {
+      var iguales = top.every(function (id, i) { return layout.favs[i] === id; });
+      html += '<div class="bpSug">Las que más has usado: <b>' + top.map(function (id) { return esc(defDe(id).nom); }).join(', ') + '</b>' +
+        (iguales ? '<span style="opacity:.6">— ya van primero</span>' : '<button data-bp="usarTop" title="Las más usadas pasan al principio de Mis herramientas; las demás se quedan detrás (hasta ocho en total)">Ponerlas primero</button>') + '</div>';
+    }
+    html += '<div class="bpBtns"><button data-bp="reset" title="Volver a la disposición de fábrica">Restablecer todo</button><button class="pri" data-bp="cerrar">Listo</button></div>';
+    p.innerHTML = html;
+    p.scrollTop = st;
+  }
+  function abrePanelBarras() {
+    var p = $('#barrasPanel');
+    if (!p.hidden) { p.hidden = true; return; }
+    pintaPanelBarras();
+    p.hidden = false;
+    var b = $('#btnBarras'), r = b ? b.getBoundingClientRect() : null;
+    var W = window.innerWidth;
+    if (r) {
+      p.style.top = Math.min(r.bottom + 6, window.innerHeight - 80) + 'px';
+      p.style.left = Math.max(6, Math.min(r.right - p.offsetWidth, W - p.offsetWidth - 6)) + 'px';
+    } else { p.style.top = '60px'; p.style.left = Math.max(6, W - p.offsetWidth - 12) + 'px'; }
+  }
+  $('#btnBarras').addEventListener('click', abrePanelBarras);
+  $('#barrasPanel').addEventListener('click', function (ev) {
+    var t = ev.target.closest && ev.target.closest('[data-bp]');
+    if (!t) return;
+    var bp = t.dataset.bp, fila = t.closest('.bpRow');
+    if (bp === 'cerrar') { $('#barrasPanel').hidden = true; return; }
+    if (bp === 'reset') {
+      var uso = layout.uso;
+      layout = clonaLayoutDef(); layout.uso = uso;
+      guardaLayout(); pintaBarras(); pintaPanelBarras();
+      setHint('Barras como de fábrica');
+      return;
+    }
+    if (bp === 'usarTop') {
+      var top8 = masUsadas(8);
+      layout.favs = top8.concat(layout.favs.filter(function (id) { return top8.indexOf(id) < 0; })).slice(0, 8);
+      guardaLayout(); pintaBarras(); pintaPanelBarras();
+      setHint('Mis herramientas: las más usadas van primero');
+      return;
+    }
+    if (bp === 'mv' && fila) {
+      var id = fila.dataset.barra, dk = dockDe(id), arr = layout.docks[dk], i = arr.indexOf(id), j = i + (+t.dataset.n);
+      if (j < 0 || j >= arr.length) return;
+      arr.splice(i, 1); arr.splice(j, 0, id);
+      guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
+    }
+    if (bp === 'fmv' && fila) {
+      var fid = fila.dataset.fav, fi = layout.favs.indexOf(fid), fj = fi + (+t.dataset.n);
+      if (fi < 0 || fj < 0 || fj >= layout.favs.length) return;
+      layout.favs.splice(fi, 1); layout.favs.splice(fj, 0, fid);
+      guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
+    }
+    if (bp === 'fdel' && fila) { togglePin(fila.dataset.fav); pintaPanelBarras(); return; }
+  });
+  $('#barrasPanel').addEventListener('change', function (ev) {
+    var t = ev.target.closest && ev.target.closest('[data-bp]');
+    if (!t) return;
+    var bp = t.dataset.bp, fila = t.closest('.bpRow');
+    if (bp === 'ver' && fila) {
+      var id = fila.dataset.barra, k = layout.ocultas.indexOf(id);
+      if (!t.checked && k < 0 && !hayFormaDeSeleccionar(layout.ocultas.concat([id]), layout.favs)) {
+        t.checked = true;
+        setHint('Deja visible Navegar o Grupos (o pon Select en Mis herramientas) para no quedarte sin Select');
         return;
       }
-      setTool(b.dataset.tool);
-      var dd = ev.target.closest && ev.target.closest('.dd');
-      if (dd) showToolMenu(dd.dataset.menu, b);
-    });
+      if (t.checked && k >= 0) layout.ocultas.splice(k, 1);
+      else if (!t.checked && k < 0) layout.ocultas.push(id);
+      guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
+    }
+    if (bp === 'dock' && fila) { mueveBarra(fila.dataset.barra, t.value, null); return; }
+    if (bp === 'fadd' && t.value) { togglePin(t.value); pintaPanelBarras(); return; }
   });
+  pintaBarras();
 
   /* --- flyout: elegir tipo de pared / superficie desde el botón de la herramienta --- */
   function patternSwatch(k) {
@@ -14109,10 +14630,8 @@
       });
     }
     tm.innerHTML = html;
-    var r = anchor.getBoundingClientRect();
-    tm.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 240)) + 'px';
-    tm.style.top = (r.bottom + 4) + 'px';
-    tm.hidden = false;
+    tm.dataset.kind = kind;
+    colocaMenu(tm, anchor, '');
     $$('#toolMenu .tmItem').forEach(function (it) {
       it.addEventListener('click', function () {
         var k = it.dataset.k;
@@ -14208,9 +14727,10 @@
     });
   }
   document.addEventListener('pointerdown', function (ev) {
-    var tm = $('#toolMenu');
-    if (!tm.hidden && !tm.contains(ev.target) && !(ev.target.closest && ev.target.closest('.dd'))
-      && !(ev.target.closest && ev.target.closest('[data-tool="calibrate"]'))) tm.hidden = true;
+    var tm = $('#toolMenu'), c = ev.target.closest ? function (s) { return ev.target.closest(s); } : function () { return null; };
+    if (!tm.hidden && !tm.contains(ev.target) && !c('.dd') && !c('[data-tool="calibrate"]') && !c('.grpBtn')) cierraToolMenu();
+    var bp = $('#barrasPanel');
+    if (bp && !bp.hidden && !bp.contains(ev.target) && !c('#btnBarras') && !c('[data-act="barras"]')) bp.hidden = true;
   });
 
   /* ---------------- modo iPad / táctil (estilo Bluebeam Revu iPad) ---------------- */
@@ -14223,10 +14743,10 @@
     var cbtn = document.createElement('button');
     cbtn.id = 'cancelDraw';
     cbtn.textContent = '✕ Cancelar trazo';
-    cbtn.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
+    cbtn.style.cssText = 'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
       'padding:12px 22px;border-radius:24px;border:0;background:#c62828;color:#fff;' +
       'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
-    document.body.appendChild(cbtn);
+    $('#canvasWrap').appendChild(cbtn);
     cbtn.addEventListener('click', function () {
       drawing = null; G.prev.innerHTML = '';
       drag = null; pinch = null; ptrs.clear();
@@ -14236,10 +14756,10 @@
     var dbtn = document.createElement('button');
     dbtn.id = 'touchDel';
     dbtn.textContent = '🗑 Borrar';
-    dbtn.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
+    dbtn.style.cssText = 'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
       'padding:12px 22px;border-radius:24px;border:0;background:#14161a;color:#fff;' +
       'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
-    document.body.appendChild(dbtn);
+    $('#canvasWrap').appendChild(dbtn);
     dbtn.addEventListener('click', function () {
       if (selGroup) deleteGroup();
       else if (sel) deleteSelected();
