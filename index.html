@@ -22,9 +22,26 @@
 
     <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos">🧰<label>Símbolos</label></button>
 
+    <!-- Fila 1 FIJA (pedido de Edgar 04/09): primero deshacer/rehacer, después
+         las acciones de archivo, después los ajustes de dibujo. -->
+    <div class="tgroup" id="grpHist">
+      <button id="btnUndo" title="Deshacer (Ctrl+Z)">↩</button>
+      <button id="btnRedo" title="Rehacer (Ctrl+Y)">↪</button>
+    </div>
+
+    <div class="tgroup" id="grpArchivo">
+      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">📂<label>Abrir</label></button>
+      <button id="btnSave" title="Guardar el proyecto como archivo">💾<label>Guardar</label></button>
+      <button id="btnProyectos" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe.">☁<label>Proyectos</label></button>
+      <button id="btnPng" title="Exportar imagen PNG">PNG<label>Imagen</label></button>
+      <button id="btnPrint" title="Imprimir / Guardar PDF">🖨<label>PDF</label></button>
+      <button id="btnPanel" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋<label>Panel Sch.</label></button>
+      <button id="btnLot" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎<label>Lot</label></button>
+    </div>
+
     <div class="tgroup" id="grpAjustes">
-      <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟ 90°</button>
-      <button id="btnImanes" class="active" title="IMANES: cuando están encendidos, el punto se pega a las esquinas y ejes de lo ya dibujado. Apágalos si quieres poner la línea EXACTAMENTE donde tú tocas — las guías verdes se siguen viendo como referencia.">🧲 Imanes</button>
+      <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟<label>90°</label></button>
+      <button id="btnImanes" class="active" title="IMANES: cuando están encendidos, el punto se pega a las esquinas y ejes de lo ya dibujado. Apágalos si quieres poner la línea EXACTAMENTE donde tú tocas — las guías verdes se siguen viendo como referencia.">🧲<label>Imanes</label></button>
       <select id="wallType" title="Tipo de pared al dibujar (drywall por defecto: en una casa solo el contorno es de bloque)">
         <option value="drywall" selected>Drywall 4½"</option>
         <option value="furr15">Furring 1½" (forro)</option>
@@ -51,25 +68,9 @@
     </div>
 
 
-    <div class="tgroup">
-      <button id="btnUndo" title="Deshacer (Ctrl+Z)">↩</button>
-      <button id="btnRedo" title="Rehacer (Ctrl+Y)">↪</button>
-    </div>
-
     <div class="tgroup right">
       <button id="btnProps" class="touch-only" title="Abrir / cerrar propiedades y capas">⚙<label>Panel</label></button>
       <button id="btnBarras" title="Organizar las barras: cuáles ves, dónde van (arriba, abajo, a un lado) y qué herramientas tienes a mano">⋮⋮<label>Barras</label></button>
-    </div>
-    <!-- Acciones de archivo: viven en la barra movible "Archivo" (el JS las
-         coloca en su muelle). Aquí solo se guardan cuando no están puestas. -->
-    <div id="archivoHolder" hidden>
-      <button id="btnOpen" class="act" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">📂<label>Abrir</label></button>
-      <button id="btnSave" class="act" title="Guardar el proyecto como archivo">💾<label>Guardar</label></button>
-      <button id="btnProyectos" class="act" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe.">☁<label>Proyectos</label></button>
-      <button id="btnPng" class="act" title="Exportar imagen PNG">PNG<label>Imagen</label></button>
-      <button id="btnPrint" class="act" title="Imprimir / Guardar PDF">🖨<label>PDF</label></button>
-      <button id="btnPanel" class="act" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋<label>Panel Sch.</label></button>
-      <button id="btnLot" class="act" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎<label>Lot</label></button>
     </div>
     </div>
     <div class="dock horiz" id="dockTop"></div>
@@ -218,7 +219,8 @@
             <select id="pjLista" style="flex:1;min-width:0"></select>
             <button id="pjNuevo" style="flex:none;padding:4px 8px" title="Empezar un proyecto nuevo — el actual queda guardado en este aparato">🆕</button>
           </div>
-          <div class="row"><label>Nube</label><span id="pjNube" class="nubeBadge off"></span></div>
+          <div class="row"><label>Nube</label><span id="pjNube" class="nubeBadge off"></span>
+            <button id="pjEntrar" title="Entra con tu usuario del panel de Max Power: a partir de ahí los planos suben solos a la nube">Entrar</button></div>
           <input id="pjName" placeholder="Nombre del proyecto">
           <input id="pjClient" placeholder="Cliente">
           <input id="pjAddress" placeholder="Dirección">

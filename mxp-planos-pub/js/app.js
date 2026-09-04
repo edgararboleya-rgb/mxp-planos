@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.P';
+  var APP_VERSION = 'v30.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -656,14 +656,29 @@
     var nPend = Object.keys(nube.pendientes).length;
     n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '') + (nPend > 1 ? ' (' + nPend + ')' : '');
     n.title = (nube.msg ? nube.msg + '\n\n' : '') +
-      (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón 📤 Estimador, abajo en MATERIALES) para que los planos suban solos.'
+      (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón Entrar, aquí al lado) para que los planos suban solos.'
         : 'Toca aquí para subir ahora mismo.' + (nPend ? '\nEn cola: ' + nPend + '.' : ''));
     n.className = 'nubeBadge ' + nube.estado + (nube.estado === 'off' ? '' : ' clic');
+    // el botón Entrar solo hace falta mientras no hay sesión
+    var be = $('#pjEntrar'); if (be) be.hidden = nubeActiva();
   }
+  /* Entrar sin pasar por el Estimador (pedido de Edgar 04/09): misma sesión del
+     panel de Max Power; al entrar, lo pendiente se encola y se revisa la nube. */
+  function nubeEntrar() {
+    if (!SB || !SB.url) { uiAlert('La nube no está configurada en esta copia de la app.'); return; }
+    askLogin(function () {
+      nubeSet('espera', '');
+      pintaNube();
+      try { reanudaSubidas(); revisaNube('entrar'); } catch (e) {}
+      if (!Object.keys(nube.pendientes).length) nubeSet('ok', '');
+      setHint('✔ Sesión iniciada — los planos suben solos a la nube');
+    });
+  }
+  (function () { var be = document.getElementById('pjEntrar'); if (be) be.addEventListener('click', nubeEntrar); })();
   /* Tocar el badge = subir AHORA. Sirve para no esperar, y para ver el error de
      verdad si algo no sube (Edgar, 04/09: se le quedó en "pendiente de subir"). */
   function nubeAhora() {
-    if (!nubeActiva()) { uiAlert('Todavía no has entrado con tu usuario del panel.\n\nUsa el botón 📤 Estimador (abajo, en MATERIALES) y entra; a partir de ahí los planos suben solos.'); return; }
+    if (!nubeActiva()) { nubeEntrar(); return; }
     if (navigator.onLine === false) { nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); return; }
     nube.pospuestos = {};
     if (nube.subiendo && Date.now() - nube.desde > NUBE_COLGADA) nube.subiendo = false;
@@ -8288,7 +8303,7 @@
       uiPrompt('Contraseña:', '', function (pw) {
         var inp0 = $('#askInput'); if (inp0) inp0.type = 'text';
         if (pw === null || pw === '') return;
-        setHint('Entrando al estimador…');
+        setHint('Entrando…');
         sbLogin(em.trim(), pw).then(function () { setHint('✔ Sesión iniciada'); done(); })
           .catch(function (e) { uiAlert('No se pudo entrar: ' + e.message); setHint(''); });
       });
@@ -9600,7 +9615,8 @@
     b.id = 'chatBurbuja'; b.textContent = '💬';
     b.title = 'Preguntarle a Claude sin salir del plano';
     b.addEventListener('click', function () { chatAbre(true); });
-    document.body.appendChild(b);
+    // vive DENTRO del lienzo: así nunca tapa el panel derecho (Entrar, Nube…) ni la barra de abajo
+    ($('#canvasWrap') || document.body).appendChild(b);
     var abierto = false;
     try { abierto = localStorage.getItem('mxpChatOpen') === '1'; } catch (e) {}
     if (abierto && cerebroCfg().url) setTimeout(function () { chatAbre(false); }, 300);
@@ -13995,15 +14011,13 @@
   ];
   var BARRAS = {
     favs: { nom: 'Mis herramientas', tip: 'Las herramientas que más usas, a un toque. Añade o quita con la ☆ de cada grupo, o en ⋮⋮ Barras.' },
-    grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' },
-    archivo: { nom: 'Archivo', tip: 'Abrir, guardar, tus proyectos en la nube, exportar PNG / PDF, Panel Schedule y buscar el lote.' }
+    grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' }
   };
-  var ARCHIVO_IDS = ['btnOpen', 'btnSave', 'btnProyectos', 'btnPng', 'btnPrint', 'btnPanel', 'btnLot'];
   var DOCKS = ['top', 'bottom', 'left', 'right'];
   var DOCK_NOM = { top: 'Arriba', bottom: 'Abajo', left: 'Izquierda', right: 'Derecha' };
   var LAYOUT_DEF = {
     v: 1,
-    docks: { top: ['favs', 'grupos'], bottom: [], left: ['archivo'], right: [] },
+    docks: { top: ['favs', 'grupos'], bottom: [], left: [], right: [] },
     ocultas: [],
     favs: ['text', 'leader', 'wire', 'homerun', 'dim', 'measure', 'rect', 'cloud'],
     ultima: {},
@@ -14083,12 +14097,6 @@
       html += gruposVisibles().map(function (g) { return btnGrupo(g, dock === 'left' || dock === 'right'); }).join('');
     }
     div.innerHTML = html + '</div>';
-    if (id === 'archivo') {
-      // los botones de archivo son elementos fijos (tienen sus escuchas
-      // puestas al arrancar): se MUEVEN al muelle, no se vuelven a crear
-      var bb = div.querySelector('.bBtns');
-      ARCHIVO_IDS.forEach(function (bid) { var b = document.getElementById(bid); if (b) bb.appendChild(b); });
-    }
     return div;
   }
   /* muelle vertical con más botones de los que caben: una flecha abajo lo dice */
@@ -14100,12 +14108,11 @@
   /* el chat flotante y su burbuja no se ponen encima de una barra: si el muelle
      de abajo o el de la derecha los pisan, se corren (solo cuando se pisan) */
   function chatEsquiva() {
-    var bub = document.getElementById('chatBurbuja'), ch = document.getElementById('chatFlot');
+    var ch = document.getElementById('chatFlot');
     var db = $('#dockBottom'), dr = $('#dockRight');
     var rb = db && getComputedStyle(db).display !== 'none' ? db.getBoundingClientRect() : null;
     var rr = dr && getComputedStyle(dr).display !== 'none' ? dr.getBoundingClientRect() : null;
     // la burbuja sube hasta quedar por encima del muelle (y de la barra de estado que hay debajo)
-    if (bub) bub.style.bottom = rb && rb.height ? (window.innerHeight - rb.top + 18) + 'px' : '';
     if (!ch || ch.classList.contains('oculto')) return;
     var r = ch.getBoundingClientRect(); if (!r.width) return;
     var x = r.left, y = r.top, mov = false;
@@ -14114,8 +14121,6 @@
     if (mov) { ch.style.left = Math.max(4, x) + 'px'; ch.style.top = Math.max(4, y) + 'px'; ch.style.right = 'auto'; ch.style.bottom = 'auto'; }
   }
   function pintaBarras() {
-    var holder = $('#archivoHolder');
-    if (holder) ARCHIVO_IDS.forEach(function (bid) { var b = document.getElementById(bid); if (b && b.parentElement !== holder) holder.appendChild(b); });
     DOCKS.forEach(function (d) {
       var el = $('#dock' + d.charAt(0).toUpperCase() + d.slice(1));
       if (!el) return;

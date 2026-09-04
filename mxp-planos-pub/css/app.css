@@ -46,8 +46,9 @@ body {
   border-bottom: 3px solid;
   border-image: linear-gradient(96deg,#1B3C8C 0%,#2A5BD7 24%,#22E8E0 58%,#8CF06A 80%,#EFE22E 100%) 1;
 }
-.tbRow { display: flex; align-items: center; gap: 8px; padding: 3px 12px; overflow-x: auto; overflow-y: hidden; }
-.tbRow1 { height: 46px; }
+.tbRow { display: flex; align-items: center; gap: 8px; padding: 3px 12px; }
+/* la fila 1 es fija: si no cabe, se parte en dos líneas (nunca se corta ni se desliza) */
+.tbRow1 { min-height: 46px; flex-wrap: wrap; row-gap: 2px; }
 /* ===== BARRAS MOVIBLES (v30.O, estilo Bluebeam) =====
    Tres barras — Mis herramientas, Grupos, Navegar y zoom — que viven en uno
    de cuatro "muelles" (docks): arriba (bajo la fila 1), abajo (sobre la barra
@@ -111,11 +112,19 @@ body.moviendoBarra .dock.drop { outline-color: var(--mp-cyan); background: rgba(
 /* Los selectores de tipo de pared y tamaño de puerta se quedaban FUERA de la
    pantalla en portátil (medido: x=1496 con ventana de 1290) — invisibles, y
    con ellos el arreglo del tamaño de puerta. Ahora van al frente y pegados. */
-#grpAjustes { position: sticky; left: 0; z-index: 3; background: var(--mp-deep); border-left: none; padding-left: 0; }
 /* en iPad el grupo pegajoso tapaba las herramientas al deslizar la barra (auditoría 31/08) */
-body.touch #grpAjustes { position: static; }
-body.touch #grpAjustes select { max-width: 136px; }
-#grpAjustes select { max-width: 168px; }
+body.touch #grpAjustes select { max-width: 108px; }
+#grpAjustes select { max-width: 150px; }
+/* deshacer/rehacer y archivo: cajitas de icono + nombre, parejas con las herramientas */
+#grpHist { border-left: none; padding-left: 0; gap: 3px; }
+#grpHist button { flex-direction: column !important; min-width: 40px; height: 44px; padding: 3px 8px !important; font-size: 16px !important; }
+#grpArchivo { gap: 3px; }
+#grpAjustes { gap: 3px; }
+#grpAjustes button { flex-direction: column !important; gap: 0 !important; min-width: 46px; height: 44px; padding: 3px 7px !important; font-size: 15px !important; }
+#grpAjustes button label { font-size: 9px; margin-top: 2px; }
+#grpArchivo button { flex-direction: column !important; gap: 0 !important; min-width: 50px; height: 44px; padding: 3px 7px !important; font-size: 15px !important; }
+#grpArchivo button label { font-size: 9px; margin-top: 2px; }
+#btnPng { font-weight: 650; font-size: 12.5px !important; letter-spacing: .02em; }
 .tgroup.right { margin-left: auto; }
 
 #toolbar button, .dock button, #toolbar label.tbtn {
@@ -366,6 +375,14 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 .pbody button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.42); }
 .muted { color: var(--mp-ink-2); font-size: 12px; }
 .small { font-size: 10px; text-transform: none; letter-spacing: 0; }
+/* Entrar a la nube: tecla primaria pequeña, al lado del badge */
+#pjEntrar { flex: none; margin-left: 6px; padding: 4px 11px; font-size: 11.5px; font-weight: 600; border-radius: 9px; cursor: pointer;
+  background: linear-gradient(180deg, #2E62E0 0%, var(--mp-navy) 100%); color: #F4FBFF; border: 1px solid rgba(27,60,140,.55);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(7,26,46,.25), 0 3px 8px rgba(27,60,140,.28); }
+#pjEntrar:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 3px 8px rgba(27,60,140,.28), 0 0 12px rgba(34,232,224,.28); }
+#pjEntrar:active { transform: translateY(1px); }
+#pjEntrar[hidden] { display: none; }
+body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 .lay { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 0; }
 .sub { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--mp-ink-2); padding-left: 20px; }
 .sub input[type="range"] { flex: 1; }
@@ -485,6 +502,14 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 #printSheet .e2foot { font-size: 8.5px; margin-top: 4px; line-height: 1.6; }
 #printSheet .e2foot .amp { font-weight: 800; }
 
+/* portátil estrecho: la fila 1 cabe en una línea hasta 1100 px */
+@media (max-width: 1200px) {
+  .brand span { display: none; }
+  #grpAjustes select { max-width: 118px; }
+  #grpArchivo button { min-width: 46px; padding: 3px 5px !important; }
+  .tbRow1 { gap: 5px; }
+}
+
 /* Mobile / tablet adjustments */
 @media (max-width: 900px) {
   #palette { width: 168px; }
@@ -513,7 +538,17 @@ body.touch, body.touch button, body.touch label {
 body.touch input, body.touch select, body.touch textarea, #askInput { font-size: 16px !important; }
 
 /* barra: botones de dedo (mín 44pt) */
-body.touch .tbRow1 { height: 52px; }
+body.touch .tbRow1 { min-height: 52px; }
+body.touch #grpHist button, body.touch #grpArchivo button, body.touch #grpAjustes button { height: 50px; }
+body.touch #grpArchivo button, body.touch #grpAjustes button { min-width: 45px; padding: 3px 3px !important; }
+body.touch #grpHist button { min-width: 34px; padding: 3px 4px !important; }
+body.touch #grpArchivo button label, body.touch #grpAjustes button label { font-size: 8.5px; }
+/* en el iPad la fila 1 cabe en una línea: solo el logo, sin el nombre escrito */
+body.touch .brand b, body.touch .brand span { display: none; }
+body.touch #btnPal, body.touch #btnProps, body.touch #btnBarras { min-width: 44px; padding: 3px 3px !important; }
+body.touch #btnPal label, body.touch #btnProps label, body.touch #btnBarras label { font-size: 9px; }
+body.touch .tbRow1 { gap: 3px; padding-left: 8px; padding-right: 8px; }
+body.touch .tgroup { padding-left: 4px; gap: 3px; }
 body.touch .barra { grid-template-rows: 14px auto; }
 body.touch .barra .bLbl { font-size: 9.5px; }
 body.touch .barra .grip { width: 32px; }
@@ -602,7 +637,7 @@ body.touch #sheetTabs .stab .sx { padding: 6px 8px; font-size: 16px; }
    Pedido de Edgar: poder preguntar sin salir del plano. Va FUERA del lienzo,
    así que arrastrar paredes por debajo sigue funcionando igual. */
 #chatBurbuja {
-  position: fixed; right: 18px; bottom: 46px; z-index: 60;
+  position: absolute; right: 18px; bottom: 18px; z-index: 45;
   width: 52px; height: 52px; border-radius: 50%;
   border: 1px solid rgba(27,60,140,.55); background: linear-gradient(180deg,#2E62E0 0%,var(--mp-navy) 100%); color: #F4FBFF;
   font-size: 23px; line-height: 1; cursor: pointer;
@@ -657,7 +692,7 @@ body.touch #sheetTabs .stab .sx { padding: 6px 8px; font-size: 16px; }
 #chatEnv:hover { box-shadow: 0 0 12px rgba(34,232,224,.28); }
 
 /* con el dedo: más grande y sin que la burbuja tape los botones de abajo */
-body.touch #chatBurbuja { width: 58px; height: 58px; font-size: 25px; bottom: 62px; }
+body.touch #chatBurbuja { width: 58px; height: 58px; font-size: 25px; bottom: 22px; }
 body.touch #chatCab button { width: 34px; height: 34px; }
 body.touch #chatEnv { width: 46px; }
 body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
