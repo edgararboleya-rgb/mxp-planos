@@ -231,6 +231,10 @@
       <section class="panel">
         <h3>Proyecto</h3>
         <div class="pbody">
+          <div class="row" title="Los proyectos guardados en este aparato. Cambia de uno a otro sin buscar archivos; el que dejas queda guardado."><label>Proyectos</label>
+            <select id="pjLista" style="flex:1;min-width:0"></select>
+            <button id="pjNuevo" style="flex:none;padding:4px 8px" title="Empezar un proyecto nuevo — el actual queda guardado en este aparato">🆕</button>
+          </div>
           <input id="pjName" placeholder="Nombre del proyecto">
           <input id="pjClient" placeholder="Cliente">
           <input id="pjAddress" placeholder="Dirección">
@@ -240,7 +244,7 @@
           </div>
           <input id="pjSheetTitle" placeholder="Título de hoja (POWER RISER DIAGRAM)">
           <input id="pjDrawn" placeholder="Dibujado por" value="">
-          <button id="btnPurgar" style="margin-top:8px;padding:5px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px;width:100%" title="Limpia el autosave, los PDF importados, la sesión del estimador y el token del cerebro de ESTE aparato (iPad compartido o prestado)">🧹 Borrar todo lo guardado en este aparato</button>
+          <button id="btnPurgar" style="margin-top:8px;padding:5px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px;width:100%" title="Borra TODOS los proyectos guardados en este aparato, los PDF importados, la sesión del estimador y el token del cerebro (iPad compartido o prestado). Lo que bajaste como .mxp.json no se toca.">🧹 Borrar todo lo guardado en este aparato</button>
           <div class="row"><label>Precision</label>
             <select id="pjPrec" style="flex:1">
               <option value="8">1/8"</option>

@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.B';
+  var APP_VERSION = 'v30.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -321,7 +321,7 @@
   var autosaveTimer = null;
   var restaurando = false;        // mientras se lee el autosave al arrancar, NO se guarda encima
   var autosaveAvisado = false;
-  function scheduleAutosave() { if (restaurando) return; clearTimeout(autosaveTimer); autosaveTimer = setTimeout(doAutosave, 1500); }
+  function scheduleAutosave() { if (restaurando) return; sucio = true; clearTimeout(autosaveTimer); autosaveTimer = setTimeout(doAutosave, 1500); }
   /* FASE 7.0 — EL FONDO VIAJA UNA SOLA VEZ. El .mxp.json y el autosave
      llevaban la imagen del plano de fondo (la parte pesada, megas) DOS veces:
      en `state.bg` (la hoja viva) y dentro de `sheets[cur].data` (la copia de
@@ -338,24 +338,312 @@
     return JSON.stringify({ app: 'mxp-planos', version: 1, state: st, view: view });
   }
   window.__payloadDbg = function () { return payloadProyecto(); };
+  /* FASE 7.1 — BIBLIOTECA LOCAL DE PROYECTOS. Hasta aquí había UNA ranura
+     ('autosave') por navegador: abrir otro plano pisaba el anterior, y para
+     volver a Caroline había que ir a buscar el .mxp.json a Downloads. Ahora:
+       · cada proyecto tiene IDENTIDAD: project.id (fijo de por vida, viaja en
+         el .mxp.json), project.rev (sube en cada guardado con cambios) y
+         project.updatedAt — lo que la nube (7.3–7.5) necesita para saber cuál
+         copia es la nueva;
+       · cada proyecto vive en su propia clave proj_<id> de IndexedDB, con un
+         índice proj_index (ficha: nombre, cliente, job, rev, fecha, tamaño) y
+         una clave 'ultimo' con el que estaba abierto;
+       · la ranura vieja 'autosave' se migra al arrancar y se vacía;
+       · navigator.storage.persist() pide al navegador que no borre esto
+         cuando ande corto de espacio (el iPad lo hace sin avisar).
+     Lo que ve Edgar: la lista "Proyectos" en el panel Proyecto y el botón 🆕.
+     La pantalla completa (duplicar, borrar, importar varios) es 7.4. */
+  var libIndex = [];          // [{id, nombre, cliente, job, direccion, rev, updatedAt, hojas, tam, pdfs}]
+  var libListo = false;       // el índice ya se leyó de IndexedDB (si no, no se escribe encima)
+  var sucio = false;          // hubo cambios desde el último guardado: el rev sube
+  var persistido = null;
+  var soloLectura = false;    // (B) el almacenamiento no contestó al arrancar: no se escribe nada encima
+  var abriendoTok = 0;        // (M) un cambio de proyecto en curso invalida al anterior
+  function nuevoIdProyecto() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  /* Un .mxp.json viejo no trae id. Si tiene nombre/cliente/job, el id sale de
+     ahí (djb2): abrir dos veces el mismo archivo de Caroline da el MISMO
+     proyecto, no dos. Sin datos, id nuevo al azar. Si dos archivos distintos
+     colisionan, el diálogo de "ya está guardado y es distinto" (abrirArchivo-
+     Proyecto) evita que uno pise al otro. */
+  function idDeterminista(pj) {
+    var s = [pj.name, pj.client, pj.job, pj.address].map(function (v) { return String(v || '').trim().toLowerCase(); }).join('|');
+    if (!s.replace(/\|/g, '')) return null;
+    var hsh = 5381, i;
+    for (i = 0; i < s.length; i++) hsh = ((hsh * 33) ^ s.charCodeAt(i)) >>> 0;
+    return 'f' + hsh.toString(36);
+  }
+  function idValido(id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id); }
+  function aseguraIdProyecto() {
+    var pj = state.project;
+    if (!idValido(pj.id)) pj.id = idDeterminista(pj) || nuevoIdProyecto();
+    if (!(Number.isInteger(pj.rev) && pj.rev >= 0)) pj.rev = 0;
+    if (!pj.creado) pj.creado = new Date().toISOString();
+    return pj.id;
+  }
+  function metaDe(m) {
+    return m && typeof m === 'object' && idValido(m.id) ? {
+      id: m.id, nombre: String(m.nombre || ''), cliente: String(m.cliente || ''), job: String(m.job || ''), direccion: String(m.direccion || ''),
+      rev: Number.isInteger(+m.rev) ? +m.rev : 0, updatedAt: String(m.updatedAt || ''), hojas: +m.hojas || 1, tam: +m.tam || 0,
+      pdfs: Array.isArray(m.pdfs) ? m.pdfs.filter(function (x) { return typeof x === 'string'; }) : []
+    } : null;
+  }
+  // los pdfId de un proyecto (objeto ya parseado): fondo de cada hoja
+  function pdfsDe(o) {
+    var ids = {};
+    function mete(bg) { if (bg && bg.pdfId) ids[bg.pdfId] = 1; }
+    var st = o && o.state ? o.state : o;
+    if (!st) return [];
+    mete(st.bg); mete(st.bg2);
+    (st.sheets || []).forEach(function (sh) {
+      if (!sh || typeof sh.data !== 'string') return;
+      try { var d = JSON.parse(sh.data); mete(d.bg); mete(d.bg2); } catch (e) {}
+    });
+    return Object.keys(ids);
+  }
+  function fichaDe(pj, st, tam) {
+    return metaDe({ id: pj.id, nombre: pj.name, cliente: pj.client, job: pj.job, direccion: pj.address, rev: pj.rev, updatedAt: pj.updatedAt,
+      hojas: (st.sheets || []).length, tam: tam, pdfs: pdfsDe({ state: st }) });
+  }
+  // ¿hay algo que valga la pena registrar? (J) un proyecto en blanco y sin nombre, no
+  function hayAlgoQueGuardar() {
+    var pj = state.project || {};
+    if (hayContenido() || !!(pj.name || pj.client || pj.job || pj.address)) return true;
+    return (state.sheets || []).some(function (sh, i) {
+      if (i === state.curSheet || !sh || typeof sh.data !== 'string') return false;
+      try { var d = JSON.parse(sh.data); return !!d.bg || COLECCIONES.some(function (k) { return Array.isArray(d[k]) && d[k].length > 0; }); } catch (e) { return false; }
+    });
+  }
+  function leeIndice(cb) {
+    idbGet('proj_index', function (raw, to) {
+      var arr = null;
+      try { arr = raw ? JSON.parse(raw) : null; } catch (e) { arr = null; }
+      cb(Array.isArray(arr) ? arr.map(metaDe).filter(Boolean) : [], to);
+    });
+  }
+  function ordenaIndice() { libIndex.sort(function (x, y) { return String(y.updatedAt || '').localeCompare(String(x.updatedAt || '')); }); }
+  function cargaIndice(cb) {
+    leeIndice(function (arr, to) {
+      if (to) {
+        // IndexedDB no contestó a tiempo: NO se escribe el índice hasta leerlo
+        // de verdad (si no, un índice vacío tapaba los proyectos guardados)
+        libListo = false; setTimeout(function () { cargaIndice(); }, 4000); pintaLista(); if (cb) cb(true); return;
+      }
+      libIndex = arr; libListo = true;
+      if (!libIndex.length) reconstruirIndice(function () { if (cb) cb(false); });
+      else { pintaLista(); if (cb) cb(false); }
+    });
+  }
+  // el índice se perdió pero los proyectos están: se vuelve a armar leyendo cada proj_<id>
+  function reconstruirIndice(cb) {
+    idbKeys('proj_', function (keys, toK) {
+      keys = keys.filter(function (k) { return k !== 'proj_index'; });
+      if (!keys.length) { pintaLista(); if (cb) cb(); return; }
+      var falta = keys.length, hubo = !!toK, fichas = {};
+      libIndex.forEach(function (m) { fichas[m.id] = m; });
+      keys.forEach(function (k) {
+        idbGet(k, function (pl, to) {
+          if (to) hubo = true;
+          try {
+            var o = pl ? JSON.parse(pl) : null, pj = o && o.state && o.state.project;
+            if (pj && idValido(pj.id) && 'proj_' + pj.id === k) fichas[pj.id] = fichaDe(pj, o.state, pl.length);
+          } catch (e) {}
+          if (--falta === 0) {
+            libIndex = Object.keys(fichas).map(function (id) { return fichas[id]; });
+            ordenaIndice();
+            // (H) con lecturas vencidas el índice quedaría cojo: se muestra pero no se escribe
+            if (libListo && !hubo && !soloLectura) idbSet('proj_index', JSON.stringify(libIndex));
+            pintaLista(); if (cb) cb();
+          }
+        });
+      });
+    });
+  }
+  // (H) upsert sobre el índice FRESCO de IndexedDB, no sobre la copia en memoria:
+  // otra pestaña pudo haber agregado proyectos entre medias
+  function actualizaIndice(meta, done) {
+    if (!meta) { if (done) done(false); return; }
+    leeIndice(function (arr, to) {
+      var base = to ? libIndex.slice() : arr, i = -1, k;
+      for (k = 0; k < base.length; k++) if (base[k].id === meta.id) { i = k; break; }
+      if (i >= 0) base[i] = meta; else base.push(meta);
+      libIndex = base; ordenaIndice(); pintaLista();
+      if (libListo && !to && !soloLectura) idbSet('proj_index', JSON.stringify(libIndex), done);
+      else if (done) done(false);
+    });
+  }
+  function quitaDelIndice(id, done) {
+    leeIndice(function (arr, to) {
+      libIndex = (to ? libIndex : arr).filter(function (m) { return m.id !== id; });
+      ordenaIndice(); pintaLista();
+      if (libListo && !to && !soloLectura) idbSet('proj_index', JSON.stringify(libIndex), done);
+      else if (done) done(false);
+    });
+  }
+  /* Guarda el proyecto ABIERTO en la biblioteca. (F) 'ultimo' y el índice se
+     escriben solo cuando proj_<id> quedó escrito de verdad: si la primera
+     escritura falla, nada apunta a algo que no existe. Devuelve el payload. */
+  function guardaEnBiblioteca(bump, done, opts) {
+    opts = opts || {};
+    var id = aseguraIdProyecto(), pj = state.project;
+    if (bump) pj.rev = (pj.rev || 0) + 1;
+    if (bump || !pj.updatedAt) pj.updatedAt = new Date().toISOString();
+    var payload = payloadProyecto();
+    if (soloLectura) { if (done) setTimeout(function () { done(false); }, 0); return payload; }
+    if (!bump && !opts.forzar && !hayAlgoQueGuardar()) { if (done) setTimeout(function () { done(true); }, 0); return payload; }
+    var ficha = fichaDe(pj, state, payload.length);
+    idbSet('proj_' + id, payload, function (ok) {
+      if (ok) { idbSet('ultimo', id); actualizaIndice(ficha); }
+      if (done) done(ok);
+    });
+    return payload;
+  }
+  /* (C) Mete en la biblioteca un proyecto que NO está abierto (la ranura vieja
+     cuando Edgar prefirió seguir con lo que dibujó): no toca state ni 'ultimo'. */
+  function registraSinAbrir(o, done) {
+    try {
+      var pj = o.state.project = Object.assign({ name: '', client: '', address: '', job: '' }, o.state.project || {});
+      if (!idValido(pj.id)) pj.id = idDeterminista(pj) || nuevoIdProyecto();
+      if (!(Number.isInteger(pj.rev) && pj.rev >= 0)) pj.rev = 0;
+      if (!pj.updatedAt) pj.updatedAt = new Date().toISOString();
+      var payload = JSON.stringify(o), ficha = fichaDe(pj, o.state, payload.length);
+      if (soloLectura) { if (done) done(false); return; }
+      idbSet('proj_' + pj.id, payload, function (ok) {
+        if (ok) actualizaIndice(ficha);
+        if (done) done(ok);
+      });
+    } catch (e) { if (done) done(false); }
+  }
+  function pintaLista() {
+    var sel = $('#pjLista'); if (!sel) return;
+    var cur = state.project && state.project.id, html = '', hayCur = false;
+    libIndex.forEach(function (m) {
+      var f = m.updatedAt ? new Date(m.updatedAt) : null;
+      // (P) fecha y hora del último guardado; el rev es interno y no le dice nada a Edgar
+      var fecha = f && !isNaN(f) ? (f.getMonth() + 1) + '/' + f.getDate() + ' ' + ('0' + f.getHours()).slice(-2) + ':' + ('0' + f.getMinutes()).slice(-2) : '';
+      var nom = m.nombre || m.job || m.cliente || '(sin nombre)';
+      if (m.id === cur) hayCur = true;
+      html += '<option value="' + esc(m.id) + '"' + (m.id === cur ? ' selected' : '') + '>' + esc(nom) +
+        (m.nombre && m.cliente ? ' — ' + esc(m.cliente) : '') + (fecha ? ' · ' + fecha : '') + '</option>';
+    });
+    if (!hayCur) html = '<option value="" selected>' + (libIndex.length ? '(este proyecto aún no se ha guardado)' : '(sin proyectos guardados todavía)') + '</option>' + html;
+    sel.innerHTML = html;
+  }
+  function estadoVacio() {
+    return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
+      walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [],
+      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
+      project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '', id: nuevoIdProyecto(), rev: 0, creado: new Date().toISOString() }
+    } };
+  }
+  /* (G) Lo pendiente se guarda ANTES de cambiar de proyecto, y se espera a
+     saber si quedó escrito: si no, no se cambia y se avisa. */
+  function cierraPendiente(cb) {
+    clearTimeout(autosaveTimer);
+    if (!sucio || restaurando) { cb(); return; }
+    guardaEnBiblioteca(true, function (ok) {
+      if (ok) { sucio = false; cb(); }
+      else { uiAlert('No se pudo guardar lo pendiente en este aparato.\n\nUsa 💾 Guardar para bajar el archivo antes de cambiar de proyecto.'); setHint(''); pintaLista(); }
+    });
+  }
+  function nuevoProyecto() {
+    cierraPendiente(function () {
+      restoreProject(estadoVacio());
+      renderSheetTabs();
+      setHint('🆕 Proyecto nuevo — el anterior quedó guardado en este aparato (lista Proyectos)');
+    });
+  }
+  function abrirDeBiblioteca(id) {
+    if (!idValido(id) || id === state.project.id) { pintaLista(); return; }
+    var tok = ++abriendoTok;
+    cierraPendiente(function () {
+      if (tok !== abriendoTok) return;
+      setHint('⏳ Abriendo…');
+      idbGet('proj_' + id, function (pl, to) {
+        if (tok !== abriendoTok) return;   // (M) hubo otro cambio después: este resultado ya no vale
+        if (to) { uiAlert('El almacenamiento del aparato tardó demasiado en responder. Inténtalo otra vez.'); setHint(''); pintaLista(); return; }
+        var o = null; try { o = pl ? JSON.parse(pl) : null; } catch (e) {}
+        if (!o || o.app !== 'mxp-planos' || validaProyecto(o)) { uiAlert('Ese proyecto no se pudo leer de este aparato (dañado o incompleto).'); setHint(''); pintaLista(); return; }
+        try { restoreProject(o); } catch (e) { uiAlert('No se pudo abrir: ' + (e && e.message || 'error')); setHint(''); pintaLista(); return; }
+        renderSheetTabs();
+        setHint('📂 ' + (state.project.name || 'Proyecto') + ' abierto');
+      });
+    });
+  }
+  /* (A) Abrir un .mxp.json cuando en este aparato YA hay una copia de ese
+     proyecto (mismo id, o id determinista coincidente) y es DISTINTA: no se
+     pisa. Edgar decide: lo del aparato, o el archivo como proyecto aparte. */
+  function abrirArchivoProyecto(o, nombreArchivo) {
+    cierraPendiente(function () {
+      var pjA = o.state.project || {};
+      var idA = idValido(pjA.id) ? pjA.id : idDeterminista(pjA);
+      function seguir() {
+        var previo = null;
+        try { syncSheet(); previo = JSON.parse(payloadProyecto()); } catch (eP) {}
+        try { restoreProject(o); }
+        catch (eR) {
+          if (previo) { try { restoreProject(previo); } catch (e4) {} }
+          uiAlert('No se pudo abrir ese proyecto (' + (eR && eR.message || 'error') + ').\n\nEl proyecto anterior se dejó como estaba.');
+          return;
+        }
+        renderSheetTabs();
+        setHint('Proyecto abierto: ' + (state.project.name || nombreArchivo));
+      }
+      function comoCopia() {
+        o.state.project = o.state.project || {};
+        o.state.project.id = nuevoIdProyecto(); o.state.project.rev = 0; delete o.state.project.updatedAt;
+        seguir();
+      }
+      if (!idA) return seguir();
+      idbGet('proj_' + idA, function (pl, to) {
+        if (to) return comoCopia();                       // no se sabe qué hay: mejor no pisar
+        var g = null; try { g = pl ? JSON.parse(pl) : null; } catch (e) {}
+        if (!g || !g.state) return seguir();
+        var distinto = JSON.stringify(g.state) !== JSON.stringify(o.state);
+        if (!distinto) return seguir();
+        var pjG = g.state.project || {}, f = pjG.updatedAt ? new Date(pjG.updatedAt) : null;
+        var cuando = f && !isNaN(f) ? (f.getMonth() + 1) + '/' + f.getDate() + ' ' + ('0' + f.getHours()).slice(-2) + ':' + ('0' + f.getMinutes()).slice(-2) : '';
+        uiConfirm('En este aparato ya está guardado «' + (pjG.name || pjA.name || 'este proyecto') + '»' + (cuando ? ' (guardado el ' + cuando + ')' : '') + ' y es DISTINTO del archivo que abres.\n\nOK = quedarme con lo guardado en el aparato (el archivo no se toca)\nCancelar = abrir el archivo como un proyecto aparte (copia nueva)', function (ok) {
+          if (ok) {
+            if (idA === state.project.id) setHint('Se mantiene lo guardado en este aparato');
+            else abrirDeBiblioteca(idA);
+          } else comoCopia();
+        });
+      });
+    });
+  }
+  function pedirPersistencia() {
+    try {
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then(function (ok) { persistido = !!ok; }, function () { persistido = false; });
+    } catch (e) {}
+  }
+  window.__libDbg = { indice: function () { return libIndex.slice(); }, guarda: guardaEnBiblioteca, nuevo: nuevoProyecto, abrir: abrirDeBiblioteca, abrirArchivo: abrirArchivoProyecto, carga: cargaIndice, registra: registraSinAbrir,
+    persistido: function () { return persistido; }, sucio: function () { return sucio; }, soloLectura: function () { return soloLectura; }, listo: function () { return libListo; } };
   function doAutosave() {
     if (restaurando) return;
     try {
-      var payload = payloadProyecto();
-      // IndexedDB primero: localStorage se queda corto (~5MB) con varios planos
-      // de fondo y fallaba en silencio — se perdían las medidas al salir
       var lsOk = true;
+      var payload = guardaEnBiblioteca(sucio, function (ok) {
+        // (L) se evalúa DESPUÉS del espejo de localStorage, aunque IndexedDB
+        // haya fallado de forma síncrona
+        setTimeout(function () {
+          if (!ok) sucio = true;   // (G) que el próximo autosave / cambio de proyecto lo reintente
+          // (auditoría robustez 03/09) si NI IndexedDB NI localStorage guardan
+          // (Safari privado, almacenamiento restringido) el usuario creía que
+          // todo se guardaba solo y perdía el plano al recargar
+          if (!ok && !lsOk && !autosaveAvisado) { autosaveAvisado = true; uiAlert(soloLectura
+            ? '⚠️ En esta sesión NO se está guardando automáticamente (el almacenamiento del aparato no respondió al arrancar).\n\nUsa 💾 Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.'
+            : '⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa 💾 Guardar para bajar el archivo antes de cerrar.'); }
+          if (ok || lsOk) autosaveAvisado = false;
+        }, 0);
+      });
+      sucio = false;
+      // espejo chico en localStorage: respaldo del proyecto ABIERTO si IndexedDB
+      // falla (se queda corto ~5MB). (B) > 4 MB: se BORRA el espejo viejo, que si
+      // no sería de otro proyecto o de una versión anterior
       if (payload.length < 4000000) {
         try { localStorage.setItem('mxp_autosave', payload); }
         catch (e) { lsOk = false; try { localStorage.removeItem('mxp_autosave'); } catch (e2) {} }
-      } else lsOk = false;   // > 4 MB: ni lo intenta (lanzaba y se tragaba el error en cada autosave)
-      idbSet('autosave', payload, function (ok) {
-        // (auditoría robustez 03/09) si NI IndexedDB NI localStorage guardan
-        // (Safari privado, almacenamiento restringido) el usuario creía que
-        // todo se guardaba solo y perdía el plano al recargar
-        if (!ok && !lsOk && !autosaveAvisado) { autosaveAvisado = true; uiAlert('⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa 💾 Guardar para bajar el archivo antes de cerrar.'); }
-        if (ok || lsOk) autosaveAvisado = false;
-      });
+      } else { lsOk = false; try { localStorage.removeItem('mxp_autosave'); } catch (e3) {} }
     } catch (e) {}
   }
   function idbKV(mode, cb) {
@@ -397,7 +685,11 @@
     return ids;
   }
   function purgaPdfBin(done) {
+    // (7.1-D) los PDF crudos de los OTROS proyectos guardados también están en
+    // uso: el índice lleva sus pdfIds. Sin índice fiable no se borra nada.
+    if (!libListo) { if (done) done(0); return; }
     var enUso = pdfIdsEnUso(), borrados = 0;
+    libIndex.forEach(function (m) { (m.pdfs || []).forEach(function (id) { enUso[id] = 1; }); });
     idbKV('readwrite', function (st) {
       if (!st || !st.getAllKeys) { if (done) done(0); return; }
       try {
@@ -414,7 +706,7 @@
   }
   function idbGet(k, done) {
     var called = false;
-    function fin(v) { if (!called) { called = true; done(v); } }
+    function fin(v, to) { if (!called) { called = true; done(v, !!to); } }
     idbKV('readonly', function (st) {
       if (!st) return fin(null);
       try {
@@ -424,7 +716,26 @@
       } catch (e) { fin(null); }
     });
     // un PDF de 30MB en un iPad puede tardar varios segundos la primera vez
-    setTimeout(function () { fin(null); }, 6000);
+    setTimeout(function () { fin(null, true); }, 6000);
+  }
+  // todas las claves del almacén que empiezan por un prefijo (para reconstruir el índice)
+  function idbKeys(prefijo, done) {
+    var out = [], called = false;
+    function fin(to) { if (!called) { called = true; done(out, !!to); } }
+    idbKV('readonly', function (st) {
+      if (!st) return fin();
+      try {
+        var rq = st.openKeyCursor ? st.openKeyCursor() : st.openCursor();
+        rq.onsuccess = function () {
+          var c = rq.result;
+          if (!c) return fin();
+          if (typeof c.key === 'string' && c.key.indexOf(prefijo) === 0) out.push(c.key);
+          c.continue();
+        };
+        rq.onerror = function () { fin(); };
+      } catch (e) { fin(); }
+    });
+    setTimeout(function () { fin(true); }, 6000);
   }
   function applySnap(snap) {
     var o = JSON.parse(snap);
@@ -9698,6 +10009,11 @@
   $('#pjScale').addEventListener('change', function () {
     state.printScale = this.value; scheduleAutosave();
   });
+  $('#pjLista').addEventListener('change', function () { abrirDeBiblioteca(this.value); });
+  $('#pjNuevo').addEventListener('click', function () {
+    if (!hayAlgoQueGuardar()) { setHint('Este proyecto ya está vacío'); return; }
+    nuevoProyecto();
+  });
   var PJ_FIELDS = { pjName: 'name', pjClient: 'client', pjAddress: 'address', pjJob: 'job', pjSheetNo: 'sheetNo', pjSheetTitle: 'sheetTitle', pjDrawn: 'drawn' };
   Object.keys(PJ_FIELDS).forEach(function (id) {
     $('#' + id).addEventListener('input', function () {
@@ -10137,7 +10453,8 @@
   $('#btnSave').addEventListener('click', function () {
     syncSheet(); limpiaMarcas();
     try { purgaPdfBin(); } catch (e) {}
-    var data = payloadProyecto();
+    clearTimeout(autosaveTimer);
+    var data = guardaEnBiblioteca(sucio); sucio = false;   // el archivo y la biblioteca llevan el mismo rev
     var baseN = (state.project.name || '').replace(/[^\w\-. ]+/g, '').trim().slice(0, 80) || 'proyecto';
     saveFile(baseN + '.mxp.json', data);
     setHint('Proyecto guardado (archivo descargado)');
@@ -12002,6 +12319,11 @@
       });
     }
     if (st.project != null && typeof st.project !== 'object') st.project = {};
+    if (st.project) {
+      if (st.project.id != null && !idValido(st.project.id)) delete st.project.id;
+      var rv = +st.project.rev; st.project.rev = (Number.isInteger(rv) && rv >= 0) ? rv : 0;
+      ['updatedAt', 'creado'].forEach(function (k) { if (st.project[k] != null && (typeof st.project[k] !== 'string' || isNaN(Date.parse(st.project[k])))) delete st.project[k]; });
+    }
     if (st.bg != null && (typeof st.bg !== 'object' || !st.bg.url)) st.bg = null;
     if (st.bg2 != null && (typeof st.bg2 !== 'object' || !st.bg2.url)) st.bg2 = null;
     var cs = st.curSheet;
@@ -12078,6 +12400,9 @@
     renderSheetTabs(); updateBgLinesBtn();
     applyView(); refresh();
     try { purgaPdfBin(); } catch (e) {}   // lo que el proyecto nuevo no usa, fuera
+    // (7.1) lo abierto queda registrado en la biblioteca, sin subir el rev
+    if (!restaurando) { try { guardaEnBiblioteca(false); } catch (e) {} }
+    sucio = false;
   }
   $('#btnOpen').addEventListener('click', function () { $('#fileOpen').click(); });
   $('#fileOpen').addEventListener('change', function () {
@@ -12095,18 +12420,9 @@
         if (o.app === 'mxp-planos') {
           var errP = validaProyecto(o);
           if (errP) { uiAlert('Ese archivo está dañado (' + errP + ').\n\nEl proyecto que tenías abierto sigue intacto.'); return; }
-          // red de seguridad: si algo revienta a medias, vuelve lo de antes
-          var previo = null;
-          try { syncSheet(); previo = JSON.parse(JSON.stringify({ app: 'mxp-planos', version: 1, state: state, view: view })); } catch (eP) {}
-          try {
-            // sin pushUndo: abrir es un documento nuevo y la pila se vacia dentro
-            restoreProject(o);
-          } catch (eR) {
-            if (previo) { try { restoreProject(previo); } catch (e4) {} }
-            uiAlert('No se pudo abrir ese proyecto (' + (eR && eR.message || 'error') + ').\n\nEl proyecto anterior se dejó como estaba.');
-            return;
-          }
-          setHint('Proyecto abierto: ' + (state.project.name || f.name));
+          // (7.1) guarda lo pendiente, y si en el aparato ya hay una copia
+          // distinta de este mismo proyecto, pregunta antes de pisarla
+          abrirArchivoProyecto(o, f.name);
           return;
         }
         // escaneo de casa: formato MXP Scan o el JSON nativo de Apple RoomPlan
@@ -12981,7 +13297,7 @@
      los PDF crudos, la sesión de Supabase y el token del cerebro, sin manera
      de limpiarlo de golpe. */
   if ($('#btnPurgar')) $('#btnPurgar').addEventListener('click', function () {
-    uiConfirm('¿Borrar TODO lo guardado en este aparato?\n\nSe van: el plano en memoria (autosave), los PDF importados, la sesión del estimador y el token del cerebro. Lo que ya descargaste o mandaste por AirDrop no se toca.\n\nEsto no se puede deshacer.', function (ok) {
+    uiConfirm('¿Borrar TODO lo guardado en este aparato?\n\nSe van: TODOS los proyectos guardados en este aparato (lista Proyectos), los PDF importados, la sesión del estimador y el token del cerebro. Lo que ya descargaste (.mxp.json) o mandaste por AirDrop no se toca.\n\nEsto no se puede deshacer.', function (ok) {
       if (!ok) return;
       try { localStorage.clear(); } catch (e) {}
       try { sessionStorage.clear(); } catch (e) {}
@@ -13454,11 +13770,43 @@
   // planos pesados), localStorage como respaldo de versiones viejas
   restaurando = true;
   setHint('⏳ Cargando tu trabajo guardado…');
-  idbGet('autosave', function (payload) {
+  pedirPersistencia();
+  /* (7.1) primero el índice, luego el último proyecto abierto; si no hay
+     (primera vez con esta versión) se lee la ranura vieja 'autosave' y se
+     migra a la biblioteca. (B) Un timeout de IndexedDB NO es "no existe": se
+     reintenta, y si el aparato no contesta se arranca en blanco SIN escribir
+     nada encima (soloLectura). */
+  var arranqueIntentos = 0;
+  function reintentaArranque(cb) {
+    if (++arranqueIntentos < 3) {
+      setHint('⏳ El almacenamiento del aparato está tardando… (' + arranqueIntentos + '/3)');
+      setTimeout(function () { arrancaBiblioteca(cb); }, 1500);
+      return;
+    }
+    soloLectura = true;
+    cb(null, false, null, true);
+  }
+  function arrancaBiblioteca(cb) {
+    cargaIndice(function (toIdx) {
+      idbGet('ultimo', function (ultimoId, to1) {
+        if (to1 || toIdx) return reintentaArranque(cb);
+        if (idValido(ultimoId)) {
+          idbGet('proj_' + ultimoId, function (pl, to2) {
+            if (to2) return reintentaArranque(cb);
+            if (pl) cb(pl, false, ultimoId, false);
+            else idbGet('autosave', function (p2, to3) { if (to3) return reintentaArranque(cb); cb(p2, true, null, false); });   // el puntero apuntaba a algo que ya no está
+          });
+        } else idbGet('autosave', function (p2, to3) { if (to3) return reintentaArranque(cb); cb(p2, true, null, false); });
+      });
+    });
+  }
+  arrancaBiblioteca(function (payload, legacy, ultimoId, sinLectura) {
     var restored = false, roto = null;
     restaurando = false;
     try {
-      var as = payload || localStorage.getItem('mxp_autosave');
+      // el espejo de localStorage solo vale como último recurso de la ranura
+      // vieja, y NUNCA cuando IndexedDB simplemente no contestó (B)
+      var as = sinLectura ? null : (payload || (legacy ? localStorage.getItem('mxp_autosave') : null));
       if (as) {
         var ao = null;
         try { ao = JSON.parse(as); } catch (eJ) { roto = as; }
@@ -13468,27 +13816,48 @@
           else if (hayContenido()) {
             // (auditoría robustez 03/09) el usuario dibujó mientras IndexedDB
             // respondía: no se le pisa sin preguntar
-            var aoKeep = ao;
-            uiConfirm('Hay un trabajo guardado de la sesión anterior y ya dibujaste algo aquí.\n\nOK = abrir el trabajo guardado (lo de ahora se pierde)\nCancelar = seguir con lo de ahora', function (ok) { if (ok) { restoreProject(aoKeep); renderSheetTabs(); setHint('🔄 Trabajo restaurado'); } else scheduleAutosave(); });
+            var aoKeep = ao, legacyKeep = legacy;
+            uiConfirm('Hay un trabajo guardado de la sesión anterior y ya dibujaste algo aquí.\n\nOK = abrir el trabajo guardado (lo de ahora se pierde)\nCancelar = seguir con lo de ahora (lo guardado queda en la lista Proyectos)', function (ok) {
+              if (ok) { restoreProject(aoKeep); renderSheetTabs(); setHint('🔄 Trabajo restaurado'); if (legacyKeep) guardaEnBiblioteca(false, function (okW) { if (okW) idbSet('autosave', ''); }, { forzar: true }); }
+              else {
+                // (C) lo guardado no se pierde: entra a la biblioteca sin abrirse
+                if (legacyKeep) registraSinAbrir(aoKeep, function (okR) { if (okR) idbSet('autosave', ''); });
+                scheduleAutosave();
+              }
+            });
           } else { restoreProject(ao); restored = true; }
         }
       }
-    } catch (e) { roto = roto || (payload || localStorage.getItem('mxp_autosave')); }
+    } catch (e) { roto = roto || (payload || (legacy && !sinLectura ? localStorage.getItem('mxp_autosave') : null)); }
     if (roto) {
       // (auditoría robustez 03/09) antes se descartaba en silencio: ahora se
       // ofrece bajarlo como texto (un JSON truncado suele conservar casi todo)
-      var rotoTxt = roto;
+      var rotoTxt = roto, rotoLegacy = legacy, rotoId = ultimoId;
       uiConfirm('Había un trabajo guardado que no se pudo leer (dañado o incompleto).\n\nOK = descargarlo como texto para rescatarlo después\nCancelar = descartarlo', function (ok) {
         if (ok) saveFile('autosave-danado-' + new Date().toISOString().slice(0, 10) + '.txt', rotoTxt);
-        try { localStorage.removeItem('mxp_autosave'); } catch (e3) {}
-        idbSet('autosave', '');
+        if (rotoLegacy) { try { localStorage.removeItem('mxp_autosave'); } catch (e3) {} idbSet('autosave', ''); }
+        else if (rotoId) { idbSet('ultimo', ''); idbSet('proj_' + rotoId, ''); quitaDelIndice(rotoId); }   // (I) el culpable era proj_<ultimo>, no la ranura vieja
       });
     }
+    // (7.1-E) la ranura vieja se vacía solo cuando proj_<id> quedó escrito de verdad
+    if (legacy && restored) guardaEnBiblioteca(false, function (okW) { if (okW) { try { idbSet('autosave', ''); } catch (e5) {} } }, { forzar: true });
+    // (7.1-C) llegamos por 'ultimo' pero la ranura vieja sigue ahí con algo: se migra sin abrirla
+    if (!legacy && !sinLectura) idbGet('autosave', function (p2, to4) {
+      if (to4 || !p2) return;
+      try { var o2 = JSON.parse(p2); if (o2 && o2.app === 'mxp-planos' && o2.state && !validaProyecto(o2)) registraSinAbrir(o2, function (okR) { if (okR) idbSet('autosave', ''); }); } catch (e6) {}
+    });
+    // aparato recién estrenado: el primer proyecto nace con id propio (el id
+    // sacado del nombre queda solo para archivos viejos que no traen uno)
+    if (!restored && !roto && !idValido(state.project.id)) { state.project.id = nuevoIdProyecto(); state.project.creado = new Date().toISOString(); }
+    pintaLista();
     // precalentar el PDF guardado: el zoom nítido queda listo sin esperar al primer zoom
     try { if (restored && state.bg && state.bg.pdfId) loadPdfLive(state.bg); } catch (e) {}
     renderSheetTabs();
     updateOvUI();
-    setHint(restored
+    if (sinLectura) {
+      uiAlert('No se pudo leer lo guardado en este aparato: el almacenamiento no respondió.\n\nPara no pisar nada, en esta sesión NO se guarda automáticamente. Usa 💾 Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.');
+      setHint('⚠️ Sin guardado automático en esta sesión (el almacenamiento no respondió) — usa 💾 Guardar');
+    } else setHint(restored
       ? '🔄 Tu trabajo se restauró automáticamente — todo se guarda solo mientras dibujas (💾 Guardar para tener el archivo)'
       : 'Bienvenido a MXP Planos — dibuja paredes (W), coloca símbolos desde la paleta, o importa un plano con "Fondo" y calíbralo (K)');
   });
