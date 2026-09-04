@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.E';
+  var APP_VERSION = 'v30.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -98,6 +98,10 @@
     inp.value = opts.area ? '' : (opts.def || '');
     if (ar) ar.value = opts.area ? (opts.def || '') : '';
     document.getElementById('askCancel').style.display = opts.alert ? 'none' : '';
+    document.getElementById('askCancel').textContent = opts.cancelTxt || 'Cancelar';
+    document.getElementById('askOk').textContent = opts.okTxt || 'OK';
+    var b3 = document.getElementById('askTercero');
+    if (b3) { b3.style.display = opts.tercero ? '' : 'none'; b3.textContent = opts.tercero || ''; }
     document.getElementById('askModal').hidden = false;
     if (opts.input) setTimeout(function () {
       var n = (opts.area && ar) ? ar : inp;
@@ -124,6 +128,7 @@
   function uiConfirm(title, cb) { uiDialog(title, {}, cb); }
   function uiAlert(title) { uiDialog(title, { alert: true }, null); }
   document.getElementById('askOk').addEventListener('click', function () { askClose(true); });
+  (function () { var b3 = document.getElementById('askTercero'); if (b3) b3.addEventListener('click', function () { askClose('tercero'); }); })();
   document.getElementById('askCancel').addEventListener('click', function () { askClose(false); });
   document.getElementById('askInput').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); askClose(true); }
@@ -384,6 +389,7 @@
     return m && typeof m === 'object' && idValido(m.id) ? {
       id: m.id, nombre: String(m.nombre || ''), cliente: String(m.cliente || ''), job: String(m.job || ''), direccion: String(m.direccion || ''),
       rev: Number.isInteger(+m.rev) ? +m.rev : 0, updatedAt: String(m.updatedAt || ''), hojas: +m.hojas || 1, tam: +m.tam || 0,
+      revNube: (m.revNube != null && Number.isInteger(+m.revNube) && +m.revNube >= 0) ? +m.revNube : null,
       pdfs: Array.isArray(m.pdfs) ? m.pdfs.filter(function (x) { return typeof x === 'string'; }) : []
     } : null;
   }
@@ -402,7 +408,7 @@
   }
   function fichaDe(pj, st, tam) {
     return metaDe({ id: pj.id, nombre: pj.name, cliente: pj.client, job: pj.job, direccion: pj.address, rev: pj.rev, updatedAt: pj.updatedAt,
-      hojas: (st.sheets || []).length, tam: tam, pdfs: pdfsDe({ state: st }) });
+      revNube: pj.revNube, hojas: (st.sheets || []).length, tam: tam, pdfs: pdfsDe({ state: st }) });
   }
   // ¿hay algo que valga la pena registrar? (J) un proyecto en blanco y sin nombre, no
   function hayAlgoQueGuardar() {
@@ -630,7 +636,7 @@
      planos_proyectos. Nada bloquea el dibujo: se encola, se sube en segundo
      plano y el badge ☁ dice en qué anda. Sin sesión del estimador no hace
      nada; sin red, espera a que vuelva. */
-  var nube = { estado: 'off', msg: '', intentos: 0, timer: null, subiendo: false, pendientes: {}, ultimoOk: '' };
+  var nube = { estado: 'off', msg: '', intentos: 0, timer: null, subiendo: false, pendientes: {}, ultimoOk: '', conflictoAbierto: false, pospuestos: {} };
   var NUBE_ESPERA = 6000, NUBE_REINTENTO = [8000, 25000, 60000];
   function nubeUid() { var s = sbAuth(); return s && s.uid ? s.uid : null; }
   function nubeActiva() { return !!(SB && SB.url && nubeUid()); }
@@ -645,7 +651,7 @@
   }
   function pintaNube() {
     var n = $('#pjNube'); if (!n) return;
-    var txt = { off: '☁ sin conexión al panel', espera: '☁ pendiente de subir', subiendo: '☁ subiendo…', ok: '☁ al día', error: '⚠ no subió', sinred: '☁ sin internet' }[nube.estado] || '';
+    var txt = { off: '☁ sin conexión al panel', espera: '☁ pendiente de subir', subiendo: '☁ subiendo…', ok: '☁ al día', error: '⚠ no subió', sinred: '☁ sin internet', conflicto: '⚠ conflicto con otro aparato', nuevo: '☁ hay una versión más nueva' }[nube.estado] || '';
     n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '');
     n.title = nube.msg || (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón 💲 Estimador) para que los planos suban solos.' : '');
     n.className = 'nubeBadge ' + nube.estado;
@@ -677,12 +683,14 @@
     nube.timer = setTimeout(subeCola, NUBE_ESPERA);
   }
   function subeCola() {
-    if (nube.subiendo) return;
+    if (nube.subiendo || nube.conflictoAbierto) return;
     var ids = Object.keys(nube.pendientes);
     if (!ids.length) { nubeSet(nubeActiva() ? 'ok' : 'off'); return; }
     if (!nubeActiva()) { nubeSet('off'); return; }
     if (navigator.onLine === false) { nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); return; }
-    var id = ids[0];
+    var libres = ids.filter(function (x) { return !pospuesto(x); });
+    if (!libres.length) { nubeSet('conflicto', 'Hay un conflicto sin decidir; lo demás está al día.'); return; }
+    var id = libres[0];
     nube.subiendo = true; nubeSet('subiendo');
     subeProyecto(id, function (ok, msg) {
       nube.subiendo = false;
@@ -693,6 +701,8 @@
         nube.ultimoOk = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
         nubeSet(Object.keys(nube.pendientes).length ? 'espera' : 'ok');
         if (Object.keys(nube.pendientes).length) { clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400); }
+      } else if (msg === 'conflicto') {
+        // lo resuelve el diálogo; la cola sigue después
       } else {
         // reintento con espera creciente; no se pierde nada: sigue en la cola
         var esp = NUBE_REINTENTO[Math.min(nube.intentos, NUBE_REINTENTO.length - 1)];
@@ -702,7 +712,86 @@
       }
     });
   }
-  function subeProyecto(id, done) {
+  /* ================= FASE 7.5 — CONFLICTO iPad / PC =================
+     Dos aparatos pueden tocar el mismo proyecto. La regla: NUNCA se pisa a
+     ciegas lo que hay en la nube. Cada copia local recuerda `revNube`, el rev
+     de la nube con el que se sincronizó por última vez (lo que subió o lo que
+     bajó). Antes de subir se lee la ficha de la nube:
+       · rev de la nube == revNube → nadie más tocó: se sube.
+       · rev de la nube  > revNube → OTRO aparato subió después: conflicto.
+     Y al abrir un proyecto (o al volver a la pestaña) se mira lo mismo: si la
+     nube tiene algo más nuevo y aquí no hay cambios sin subir, se trae solo
+     (fast-forward); si aquí también hay cambios, se pregunta. En el conflicto
+     nadie pierde: la versión que no gana queda como REVISIÓN (rev/… en la nube,
+     o copia «X (PC)» en el aparato). Se conservan las 5 revisiones más nuevas. */
+  var NUBE_REVISIONES = 5;
+  function pjRevNube(pj) { var v = +(pj && pj.revNube); return Number.isInteger(v) && v >= 0 ? v : null; }
+  function filaNube(id, done) {
+    sbFetch('/rest/v1/planos_proyectos?id=eq.' + encodeURIComponent(id) + '&select=id,nombre,rev,updated_at,aparato,path,borrado')
+      .then(function (rows) { done(Array.isArray(rows) && rows.length ? rows[0] : null, null); })
+      .catch(function (e) { done(null, e && e.message === 'login' ? 'login' : ((e && e.message) || 'red')); });
+  }
+  function cuandoFila(fila) {
+    var f = fila && fila.updated_at ? new Date(fila.updated_at) : null;
+    return f && !isNaN(f) ? (f.getMonth() + 1) + '/' + f.getDate() + ' ' + ('0' + f.getHours()).slice(-2) + ':' + ('0' + f.getMinutes()).slice(-2) : '';
+  }
+  function nombreRevision(rev, aparato) {
+    // la fecha va PRIMERO: la poda ordena por nombre, y así borra las más viejas de verdad
+    var d = new Date(), ts = d.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    return ts + '-r' + ('000000' + (rev || 0)).slice(-6) + '-' + String(aparato || 'x').replace(/[^A-Za-z0-9]/g, '') + '.mxp.json.gz';
+  }
+  /* La 'latest' de la nube pasa a rev/ antes de que otra la reemplace. Solo
+     "no existe" (404) se toma como "no había nada que archivar": cualquier otro
+     fallo (red, sesión, servidor) devuelve false y el que llama NO debe pisar. */
+  function archivaLatest(uid, id, fila, done) {
+    var dest = uid + '/' + id + '/rev/' + nombreRevision(fila.rev, fila.aparato);
+    sbFetch('/storage/v1/object/copy', { method: 'POST', body: { bucketId: NUBE_BUCKET, sourceKey: fila.path || rutaNube(uid, id), destinationKey: dest } })
+      .then(function () { podaRevisiones(uid, id); done(true); },
+            function (e) { done(/not.?found|404/i.test((e && e.message) || '')); });
+  }
+  function podaRevisiones(uid, id) {
+    sbFetch('/storage/v1/object/list/' + NUBE_BUCKET, { method: 'POST', body: { prefix: uid + '/' + id + '/rev', limit: 100, offset: 0, sortBy: { column: 'name', order: 'asc' } } })
+      .then(function (items) {
+        if (!Array.isArray(items) || items.length <= NUBE_REVISIONES) return;
+        var sobran = items.slice(0, items.length - NUBE_REVISIONES).map(function (it) { return uid + '/' + id + '/rev/' + it.name; });
+        return sbFetch('/storage/v1/object/' + NUBE_BUCKET, { method: 'DELETE', body: { prefixes: sobran } });
+      }).catch(function () {});
+  }
+  // sube el blob y la ficha; al terminar, la copia local recuerda con qué rev quedó sincronizada
+  function subeBlob(uid, id, o, blob, payloadLen, done) {
+    var pj = (o.state && o.state.project) || {}, path = rutaNube(uid, id);
+    sbFetch(urlObjeto(path), { method: 'POST', rawBody: blob, blob: false, headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
+      .then(function () {
+        return sbFetch('/rest/v1/planos_proyectos', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
+          body: [{ id: id, nombre: pj.name || '', cliente: pj.client || '', direccion: pj.address || '', job: pj.job || '',
+            rev: pj.rev || 0, aparato: nombreAparato(), path: path, tamano: blob.size, pdf_ids: pdfsDe(o), borrado: false }] });
+      })
+      .then(function () { marcaSincronizado(id, pj.rev || 0, o); done(true); })
+      .catch(function (e) { done(false, e && e.message === 'login' ? 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.' : (e && e.message) || 'Error de red'); });
+  }
+  /* revNube = rev que quedó en la nube. En el proyecto abierto va a state (y se
+     persiste sin subir el rev); en uno cerrado se corrige dentro de proj_<id>. */
+  function marcaSincronizado(id, rev, o) {
+    if (id === state.project.id) {
+      state.project.revNube = rev;
+      try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e) {}
+      return;
+    }
+    // proyecto cerrado: se relee lo que hay en disco y se toca SOLO revNube, y
+    // solo si sigue siendo la misma versión que se subió (si Edgar lo editó
+    // mientras subía, la próxima subida lo cuadra; no se pisa nada)
+    idbGet('proj_' + id, function (pl, to) {
+      if (to || !pl) return;
+      try {
+        var g = JSON.parse(pl), pjG = g && g.state && g.state.project;
+        if (!pjG || (pjG.rev || 0) !== rev) return;
+        pjG.revNube = rev;
+        idbSet('proj_' + id, JSON.stringify(g), function (ok) { if (ok) actualizaIndice(fichaDe(pjG, g.state, pl.length)); });
+      } catch (e) {}
+    });
+  }
+  function subeProyecto(id, done, opts) {
+    opts = opts || {};
     var uid = nubeUid();
     if (!uid) return done(false, 'Sin sesión');
     function conPayload(payload) {
@@ -711,21 +800,168 @@
       var pj = (o.state && o.state.project) || {};
       gzipTexto(payload, function (blob) {
         if (blob.size > 50 * 1024 * 1024) return done(false, 'El proyecto pesa más de 50 MB comprimido: no cabe en la nube. Quita algún PDF de fondo.');
-        var path = rutaNube(uid, id);
-        sbFetch(urlObjeto(path), { method: 'POST', rawBody: blob, blob: false,
-          headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
-          .then(function () {
-            return sbFetch('/rest/v1/planos_proyectos', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
-              body: [{ id: id, nombre: pj.name || '', cliente: pj.client || '', direccion: pj.address || '', job: pj.job || '',
-                rev: pj.rev || 0, aparato: nombreAparato(), path: path, tamano: blob.size, pdf_ids: pdfsDe(o), borrado: false }] });
-          })
-          .then(function () { done(true); })
-          .catch(function (e) { done(false, e && e.message === 'login' ? 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.' : (e && e.message) || 'Error de red'); });
+        if (opts.forzar) return subeBlob(uid, id, o, blob, payload.length, done);
+        // (7.5) ¿alguien subió algo después de mi última sincronización?
+        filaNube(id, function (fila, err) {
+          if (err) return done(false, err === 'login' ? 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.' : 'No se pudo consultar la nube (' + err + ')');
+          var base = pjRevNube(pj);
+          // distinto de mi base = alguien más subió (mayor O menor: un rev menor
+          // en la nube también es otra versión, no "nada nuevo")
+          var choque = fila && !fila.borrado && (base === null || fila.rev !== base);
+          if (!choque) return subeBlob(uid, id, o, blob, payload.length, done);
+          if (id === state.project.id) {
+            // el proyecto está abierto: Edgar decide (el diálogo para la cola mientras tanto)
+            nube.conflictoAbierto = true;
+            done(false, 'conflicto');
+            dialogoConflicto(fila);
+          } else {
+            // proyecto cerrado: mi versión se guarda como revisión en la nube y
+            // 'latest' no se toca; al abrirlo se pregunta con calma
+            var destL = uid + '/' + id + '/rev/' + nombreRevision(pj.rev, nombreAparato() + 'local');
+            sbFetch(urlObjeto(destL), { method: 'POST', rawBody: blob, blob: false, headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
+              .then(function () { podaRevisiones(uid, id); done(true); }, function (e) { done(false, (e && e.message) || 'Error de red'); });
+          }
+        });
       });
     }
     if (id === state.project.id) conPayload(payloadProyecto());
     else idbGet('proj_' + id, function (pl, to) { conPayload(to ? null : pl); });
   }
+  /* El diálogo del choque. Las dos salidas conservan TODO. */
+  /* Tres salidas, las dos fuertes conservan TODO; y la suave (Cancelar/Escape)
+     no decide nada: pospone. Antes Escape equivalía a "subir la mía". */
+  function dialogoConflicto(fila) {
+    var pj = state.project, id = pj.id;
+    var aqui = nombreAparato(), alla = fila.aparato || 'otro aparato', cuando = cuandoFila(fila);
+    nubeSet('conflicto', 'La nube tiene otra versión de este proyecto.');
+    uiDialog('⚠ Este proyecto también se cambió en OTRO aparato.\n\nEn la nube: «' + (fila.nombre || pj.name || 'Proyecto') + '» guardado desde ' + alla + (cuando ? ' el ' + cuando : '') + '.\nAquí (' + aqui + '): cambios que todavía no se han subido.\n\n• Quedarme con la de la nube: lo de aquí se guarda aparte como «' + (pj.name || 'Proyecto') + ' (' + aqui + ')».\n• Subir la de aquí: la de la nube queda guardada como revisión anterior.\n• Decidir luego: no se toca nada; se vuelve a preguntar en unos minutos o al reabrir.',
+      { okTxt: '☁ Quedarme con la de la nube', tercero: '⬆ Subir la de aquí', cancelTxt: 'Decidir luego' },
+      function (r) {
+        if (r === true) resuelveTomarNube(fila);
+        else if (r === 'tercero') resuelveSubirMia(fila);
+        else posponeConflicto(id, 'Decidiste luego: se vuelve a preguntar en unos minutos o al reabrir el proyecto.');
+      });
+  }
+  function posponeConflicto(id, msg) {
+    nube.conflictoAbierto = false;
+    nube.pospuestos[id] = Date.now();
+    nubeSet('conflicto', msg || 'Conflicto sin resolver.');
+    clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400);   // que sigan los demás proyectos
+  }
+  var NUBE_POSPONER = 3 * 60 * 1000;
+  function pospuesto(id) { var t = nube.pospuestos[id]; if (!t) return false; if (Date.now() - t > NUBE_POSPONER) { delete nube.pospuestos[id]; return false; } return true; }
+  function resuelveSubirMia(fila) {
+    var uid = nubeUid(), id = state.project.id;
+    setHint('☁ Guardando la de la nube como revisión y subiendo la de aquí…');
+    archivaLatest(uid, id, fila, function (okA) {
+      if (!okA) {
+        // el respaldo de la nube NO se pudo hacer: no se pisa nada; se vuelve a preguntar
+        posponeConflicto(id, 'No se pudo guardar la versión de la nube como revisión; no se subió la tuya. Se vuelve a intentar.');
+        setHint('⚠ No se pudo respaldar la versión de la nube; tu versión sigue aquí sin subir');
+        return;
+      }
+      // el rev de la nube tiene que ir SIEMPRE hacia arriba: si aquí iba más
+      // atrás (menos guardados que el otro aparato), se salta por encima
+      state.project.rev = Math.max(state.project.rev || 0, fila.rev || 0) + 1;
+      state.project.updatedAt = new Date().toISOString();
+      try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e) {}
+      nube.subiendo = true; nubeSet('subiendo');
+      subeProyecto(id, function (ok, msg) {
+        nube.subiendo = false; nube.conflictoAbierto = false;
+        if (ok) { delete nube.pendientes[id]; delete nube.pospuestos[id]; nubeSet('ok'); setHint('☁ Subida la versión de este aparato; la anterior quedó como revisión en la nube'); }
+        else { nubeSet('error', msg); setHint('⚠ No se pudo subir: ' + (msg || '')); }
+        clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400);
+      }, { forzar: true });
+    });
+  }
+  // ¿hay trabajo aquí que valga una copia? (incluye el cuadro de paneles, que hayContenido no cuenta)
+  function hayTrabajo() { return hayAlgoQueGuardar() || (state.panels || []).length > 0 || (state.huecos || []).length > 0; }
+  function resuelveTomarNube(fila) {
+    var id = state.project.id, aqui = nombreAparato(), tok = ++abriendoTok;
+    setHint('☁ Bajando la versión de la nube…');
+    bajaProyecto(fila, function (o, err) {
+      if (!o || validaProyecto(o)) { nube.conflictoAbierto = false; nubeSet('error', err || 'La versión de la nube llegó dañada'); uiAlert('No se pudo bajar la versión de la nube (' + (err || 'dañada') + '). Lo de aquí sigue intacto.'); return; }
+      // mientras bajaba pudo pasar de todo: si ya no es este proyecto o hay
+      // otro cambio de proyecto en curso, no se toca nada
+      if (state.project.id !== id || tok !== abriendoTok) { posponeConflicto(id, 'Cambiaste de proyecto mientras bajaba; se vuelve a preguntar.'); return; }
+      // 1) lo de aquí (CON lo dibujado mientras bajaba) se guarda como proyecto aparte…
+      var mia = null;
+      try { mia = JSON.parse(payloadProyecto()); } catch (e) {}
+      function seguir() {
+        // 2) …y solo entonces la de la nube pasa a ser este proyecto
+        delete nube.pendientes[id]; delete nube.pospuestos[id];
+        try { restoreProject(o); } catch (e2) { nube.conflictoAbierto = false; uiAlert('No se pudo abrir la versión de la nube: ' + (e2 && e2.message || 'error') + '. Lo de aquí sigue intacto.'); return; }
+        state.project.revNube = fila.rev;
+        try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e3) {}
+        renderSheetTabs();
+        nube.conflictoAbierto = false; nubeSet('ok');
+        setHint('☁ Se trajo la versión de la nube (' + (fila.aparato || 'otro aparato') + ')' + (mia ? '; lo de aquí quedó como «' + mia.state.project.name + '»' : ''));
+        clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400);
+      }
+      if (!(mia && mia.state && hayTrabajo())) { mia = null; seguir(); return; }
+      mia.state.project.id = nuevoIdProyecto();
+      mia.state.project.name = (mia.state.project.name || 'Proyecto') + ' (' + aqui + ')';
+      mia.state.project.rev = 1; delete mia.state.project.revNube; delete mia.state.project.updatedAt;
+      registraSinAbrir(mia, function (okR) {
+        if (!okR) {
+          // la copia NO se pudo escribir: la de la nube NO se trae. Nada se pierde.
+          nube.conflictoAbierto = false; nubeSet('error', 'No se pudo guardar tu versión aparte en este aparato.');
+          uiAlert('No se pudo guardar tu versión aparte en este aparato, así que la de la nube NO se trajo. Lo de aquí sigue intacto.\n\nUsa 💾 Guardar para bajar tu archivo y vuelve a intentar.');
+          return;
+        }
+        encolaSubida(mia.state.project.id);
+        seguir();
+      });
+    });
+  }
+  /* Al abrir / volver a la pestaña: ¿la nube tiene algo más nuevo de ESTE proyecto? */
+  var revisando = false;
+  function revisaNube(motivo) {
+    if (!nubeActiva() || navigator.onLine === false || nube.conflictoAbierto || revisando || restaurando) return;
+    var id = state.project.id, pj = state.project;
+    if (!idValido(id)) return;
+    if (motivo === 'abrir') delete nube.pospuestos[id];   // al reabrir se vuelve a preguntar
+    if (pospuesto(id)) return;
+    revisando = true;
+    if (nube.estado === 'off') nubeSet('ok');   // hay sesión: el badge deja de decir "sin conexión"
+    filaNube(id, function (fila) {
+      revisando = false;
+      if (!fila || fila.borrado) return;
+      var base = pjRevNube(pj);
+      if (base !== null && fila.rev === base) return;                    // la nube es lo que ya tengo
+      var sinCambiosAqui = base !== null && pj.rev === base && !sucio && !nube.pendientes[id];
+      if (base === null && !hayTrabajo()) sinCambiosAqui = true;         // aquí no hay nada: la nube manda
+      if (!sinCambiosAqui) { nube.conflictoAbierto = true; dialogoConflicto(fila); return; }
+      if (drawing || drag) { nubeSet('nuevo', 'Hay una versión más nueva en la nube; se trae cuando termines.'); return; }
+      var tok = ++abriendoTok, revAntes = pj.rev;
+      setHint('☁ Trayendo la versión más nueva (' + (fila.aparato || 'otro aparato') + ')…');
+      bajaProyecto(fila, function (o, err) {
+        if (!o || validaProyecto(o)) { nubeSet('error', err || 'La versión de la nube llegó dañada'); return; }
+        // mientras bajaba: ¿Edgar dibujó, cambió de proyecto, o hay un trazo a medias? entonces NO se pisa
+        if (state.project.id !== id || tok !== abriendoTok || sucio || drawing || drag || state.project.rev !== revAntes || undoStack.length) {
+          nubeSet('nuevo', 'Hay una versión más nueva en la nube; hubo cambios aquí mientras bajaba.'); return;
+        }
+        try { restoreProject(o); } catch (e) { nubeSet('error', e && e.message); return; }
+        state.project.revNube = fila.rev;
+        try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e2) {}
+        renderSheetTabs(); nubeSet('ok');
+        setHint('☁ Se trajo la versión más nueva de «' + (state.project.name || 'Proyecto') + '» (' + (fila.aparato || 'otro aparato') + (cuandoFila(fila) ? ', ' + cuandoFila(fila) : '') + ')');
+      });
+    });
+  }
+  /* (7.5) Lo que quedó sin subir en otra sesión (sin señal en la obra, Safari
+     cerrado) se reanuda al arrancar: toda ficha con rev por delante de revNube
+     vuelve a la cola. */
+  function reanudaSubidas() {
+    if (!nubeActiva()) return;
+    libIndex.forEach(function (m) {
+      if (m.rev > 0 && (m.revNube == null || m.rev !== m.revNube)) encolaSubida(m.id);
+    });
+  }
+  try {
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') setTimeout(function () { revisaNube('visible'); }, 600); });
+    setInterval(function () { if (document.visibilityState === 'visible') revisaNube('reloj'); }, 5 * 60 * 1000);
+  } catch (e) {}
   function bajaProyecto(fila, done) {
     var path = fila.path || rutaNube(nubeUid(), fila.id);
     sbFetch(urlObjeto(path), { blob: true })
@@ -746,7 +982,7 @@
     window.addEventListener('online', function () { if (Object.keys(nube.pendientes).length) { nube.intentos = 0; clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 800); } });
     window.addEventListener('offline', function () { if (Object.keys(nube.pendientes).length) nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); });
   } catch (e) {}
-  window.__nubeDbg = { estado: function () { return { estado: nube.estado, pendientes: Object.keys(nube.pendientes), intentos: nube.intentos, ultimoOk: nube.ultimoOk }; },
+  window.__nubeDbg = { estado: function () { return { estado: nube.estado, pendientes: Object.keys(nube.pendientes), intentos: nube.intentos, ultimoOk: nube.ultimoOk, conflicto: nube.conflictoAbierto, pospuestos: Object.keys(nube.pospuestos) }; }, revisa: function (m) { revisaNube(m || 'test'); }, fila: filaNube, despospone: function () { nube.pospuestos = {}; }, reanuda: reanudaSubidas,
     encola: encolaSubida, sube: subeProyecto, baja: bajaProyecto, lista: listaNube, ruta: rutaNube, gzip: gzipTexto, gunzip: gunzipBlob, cola: subeCola, activa: nubeActiva };
 
   function pedirPersistencia() {
@@ -10213,6 +10449,8 @@
         if (validaProyecto(o)) { uiAlert('El proyecto de la nube llegó dañado.'); setHint(''); return; }
         cierraPendiente(function () {
           try { restoreProject(o); } catch (e) { uiAlert('No se pudo abrir: ' + (e && e.message || 'error')); return; }
+          state.project.revNube = f.revNube != null ? f.revNube : (f.rev || 0);   // (7.5) sincronizado con lo que bajó
+          try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e5) {}
           renderSheetTabs(); pmCerrar();
           setHint('☁ ' + (state.project.name || 'Proyecto') + ' bajado de la nube');
         });
@@ -12592,6 +12830,7 @@
     if (st.project) {
       if (st.project.id != null && !idValido(st.project.id)) delete st.project.id;
       var rv = +st.project.rev; st.project.rev = (Number.isInteger(rv) && rv >= 0) ? rv : 0;
+      if (st.project.revNube != null) { var rn = +st.project.revNube; if (!(Number.isInteger(rn) && rn >= 0)) delete st.project.revNube; }
       ['updatedAt', 'creado'].forEach(function (k) { if (st.project[k] != null && (typeof st.project[k] !== 'string' || isNaN(Date.parse(st.project[k])))) delete st.project[k]; });
     }
     if (st.bg != null && (typeof st.bg !== 'object' || !st.bg.url)) st.bg = null;
@@ -12673,6 +12912,8 @@
     // (7.1) lo abierto queda registrado en la biblioteca, sin subir el rev
     if (!restaurando) { try { guardaEnBiblioteca(false); } catch (e) {} }
     sucio = false;
+    // (7.5) ¿la nube tiene algo más nuevo de este proyecto?
+    try { setTimeout(function () { revisaNube('abrir'); }, 800); } catch (e) {}
   }
   $('#btnOpen').addEventListener('click', function () { $('#fileOpen').click(); });
   $('#fileOpen').addEventListener('change', function () {
@@ -14120,6 +14361,7 @@
     // sacado del nombre queda solo para archivos viejos que no traen uno)
     if (!restored && !roto && !idValido(state.project.id)) { state.project.id = nuevoIdProyecto(); state.project.creado = new Date().toISOString(); }
     pintaLista(); pintaNube();
+    try { setTimeout(function () { reanudaSubidas(); revisaNube('arranque'); }, 1500); } catch (e7) {}
     // precalentar el PDF guardado: el zoom nítido queda listo sin esperar al primer zoom
     try { if (restored && state.bg && state.bg.pdfId) loadPdfLive(state.bg); } catch (e) {}
     renderSheetTabs();
