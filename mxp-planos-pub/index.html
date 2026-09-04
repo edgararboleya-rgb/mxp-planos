@@ -20,28 +20,28 @@
     <div class="tbRow tbRow1">
     <div class="brand"><img id="brandLogo" alt="Max Power" hidden><b>max power</b><span>PLANOS</span></div>
 
-    <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos">🧰<label>Símbolos</label></button>
+    <button id="btnPal" class="touch-only" title="Abrir / cerrar la paleta de símbolos" data-ico="symbols"><label>Símbolos</label></button>
 
     <!-- Fila 1 FIJA (pedido de Edgar 04/09): primero deshacer/rehacer, después
          las acciones de archivo, después los ajustes de dibujo. -->
     <div class="tgroup" id="grpHist">
-      <button id="btnUndo" title="Deshacer (Ctrl+Z)">↩</button>
-      <button id="btnRedo" title="Rehacer (Ctrl+Y)">↪</button>
+      <button id="btnUndo" title="Deshacer (Ctrl+Z)" data-ico="undo"></button>
+      <button id="btnRedo" title="Rehacer (Ctrl+Y)" data-ico="redo"></button>
     </div>
 
     <div class="tgroup" id="grpArchivo">
-      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)">📂<label>Abrir</label></button>
-      <button id="btnSave" title="Guardar el proyecto como archivo">💾<label>Guardar</label></button>
-      <button id="btnProyectos" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe.">☁<label>Proyectos</label></button>
-      <button id="btnPng" title="Exportar imagen PNG">PNG<label>Imagen</label></button>
-      <button id="btnPrint" title="Imprimir / Guardar PDF">🖨<label>PDF</label></button>
-      <button id="btnPanel" title="Panel Schedule &amp; Load Calculation (hoja E-2)">📋<label>Panel Sch.</label></button>
-      <button id="btnLot" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)">🔎<label>Lot</label></button>
+      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)" data-ico="open"><label>Abrir</label></button>
+      <button id="btnSave" title="Guardar el proyecto como archivo" data-ico="save"><label>Guardar</label></button>
+      <button id="btnProyectos" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe." data-ico="projects"><label>Proyectos</label></button>
+      <button id="btnPng" title="Exportar imagen PNG" data-ico="png"><label>PNG</label></button>
+      <button id="btnPrint" title="Imprimir / Guardar PDF" data-ico="pdf"><label>PDF</label></button>
+      <button id="btnPanel" title="Panel Schedule &amp; Load Calculation (hoja E-2)" data-ico="panelsch"><label>Panel Sch.</label></button>
+      <button id="btnLot" title="Buscar propiedad / lote (Property Appraiser, FEMA, Maps)" data-ico="lot"><label>Lot</label></button>
     </div>
 
     <div class="tgroup" id="grpAjustes">
-      <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido.">∟<label>90°</label></button>
-      <button id="btnImanes" class="active" title="IMANES: cuando están encendidos, el punto se pega a las esquinas y ejes de lo ya dibujado. Apágalos si quieres poner la línea EXACTAMENTE donde tú tocas — las guías verdes se siguen viendo como referencia.">🧲<label>Imanes</label></button>
+      <button id="btnOrtho" title="ORTHO 90°: dibuja Y arrastra siempre recto, sin apretar Shift (F8). En el iPad déjalo encendido." data-ico="ortho"><label>90°</label></button>
+      <button id="btnImanes" class="active" title="IMANES: cuando están encendidos, el punto se pega a las esquinas y ejes de lo ya dibujado. Apágalos si quieres poner la línea EXACTAMENTE donde tú tocas — las guías verdes se siguen viendo como referencia." data-ico="magnet"><label>Imanes</label></button>
       <select id="wallType" title="Tipo de pared al dibujar (drywall por defecto: en una casa solo el contorno es de bloque)">
         <option value="drywall" selected>Drywall 4½"</option>
         <option value="furr15">Furring 1½" (forro)</option>
@@ -69,8 +69,8 @@
 
 
     <div class="tgroup right">
-      <button id="btnProps" class="touch-only" title="Abrir / cerrar propiedades y capas">⚙<label>Panel</label></button>
-      <button id="btnBarras" title="Organizar las barras: cuáles ves, dónde van (arriba, abajo, a un lado) y qué herramientas tienes a mano">⋮⋮<label>Barras</label></button>
+      <button id="btnProps" class="touch-only" title="Abrir / cerrar propiedades y capas" data-ico="props"><label>Panel</label></button>
+      <button id="btnBarras" title="Organizar las barras: cuáles ves, dónde van (arriba, abajo, a un lado) y qué herramientas tienes a mano" data-ico="bars">⋮⋮<label>Barras</label></button>
     </div>
     </div>
     <div class="dock horiz" id="dockTop"></div>
@@ -89,19 +89,19 @@
     <aside id="palette">
       <input type="search" id="symSearch" placeholder="Search symbol…">
       <div id="catTabs">
-        <button class="cat" data-cat="fav" title="Tus símbolos de siempre">★ Favoritos</button>
-        <button class="cat active" data-cat="electrical">⚡ Electrical</button>
-        <button class="cat" data-cat="lighting">💡 Lighting</button>
-        <button class="cat" data-cat="riser">🔌 Riser</button>
-        <button class="cat" data-cat="oneline">⚡ One-line</button>
-        <button class="cat" data-cat="notas">🏷 Etiquetas</button>
-        <button class="cat" data-cat="elev">🗄 Elevation</button>
-        <button class="cat" data-cat="plumbing">🚿 Plumbing</button>
-        <button class="cat" data-cat="furniture">🛋 Furniture</button>
-        <button class="cat" data-cat="lutron">🎛 Lutron</button>
-        <button class="cat" data-cat="outdoor">🔥 Outdoor Kitchen</button>
-        <button class="cat" data-cat="site">🌴 Landscape</button>
-        <button class="cat" data-cat="siteplan">🗺 Site Plan</button>
+        <button class="cat" data-cat="fav" title="Tus símbolos de siempre" data-ico="fav">Favoritos</button>
+        <button class="cat active" data-cat="electrical" data-ico="electrical">Electrical</button>
+        <button class="cat" data-cat="lighting" data-ico="lighting">Lighting</button>
+        <button class="cat" data-cat="riser" data-ico="riser">Riser</button>
+        <button class="cat" data-cat="oneline" data-ico="oneline">One-line</button>
+        <button class="cat" data-cat="notas" data-ico="etiquetas">Etiquetas</button>
+        <button class="cat" data-cat="elev" data-ico="elevation">Elevation</button>
+        <button class="cat" data-cat="plumbing" data-ico="plumbing">Plumbing</button>
+        <button class="cat" data-cat="furniture" data-ico="furniture">Furniture</button>
+        <button class="cat" data-cat="lutron" data-ico="lutron">Lutron</button>
+        <button class="cat" data-cat="outdoor" data-ico="outdoor">Outdoor Kitchen</button>
+        <button class="cat" data-cat="site" data-ico="landscape">Landscape</button>
+        <button class="cat" data-cat="siteplan" data-ico="siteplan">Site Plan</button>
       </div>
       <div id="symList"></div>
     </aside>
@@ -189,19 +189,19 @@
         <div class="pbody" id="layersBody">
           <label class="lay"><input type="checkbox" data-layer="background" checked> Background (imported plan)</label>
           <div class="sub"><span>Opacity</span><input type="range" id="bgOpacity" min="10" max="100" value="70"></div>
-          <div class="sub"><button id="btnBgScale" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Aplica la escala escrita en el plano (ej: 1/4&quot; = 1'-0&quot;) sin calibrar">📐 Escala del plano</button></div>
-          <div class="sub"><button id="btnBgLines" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px">✂ Solo líneas (fondo transparente)</button></div>
-          <div class="sub"><button id="btnBgDel" style="flex:1;padding:4px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px" title="Borra la imagen del plano importado y deja SOLO lo que dibujaste. No se puede deshacer.">🗑 Quitar el plano de fondo</button></div>
-          <div class="sub"><button id="btnOv" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara 2 pisos: el plano base se pone AZUL y el otro ROJO — donde no cuadran, algo cambió">🔴 Overlay: comparar con otro plano</button></div>
+          <div class="sub"><button id="btnBgScale" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Aplica la escala escrita en el plano (ej: 1/4&quot; = 1'-0&quot;) sin calibrar" data-ico="escala">Escala del plano</button></div>
+          <div class="sub"><button id="btnBgLines" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" data-ico="tijera">Solo líneas (fondo transparente)</button></div>
+          <div class="sub"><button id="btnBgDel" style="flex:1;padding:4px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px" title="Borra la imagen del plano importado y deja SOLO lo que dibujaste. No se puede deshacer." data-ico="papelera">Quitar el plano de fondo</button></div>
+          <div class="sub"><button id="btnOv" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara 2 pisos: el plano base se pone AZUL y el otro ROJO — donde no cuadran, algo cambió" data-ico="overlay">Overlay: comparar con otro plano</button></div>
           <div class="sub" id="ovRow" hidden><span>Rojo</span><input type="range" id="ov2Op" min="10" max="100" value="70"></div>
           <div class="sub" id="ovRow2" hidden>
-            <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos">🎯 Alinear (2 puntos)</button>
-            <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color">✖</button>
+            <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos" data-ico="diana">Alinear (2 puntos)</button>
+            <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color" data-ico="close"></button>
           </div>
-          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Pregúntale a Claude sobre este plano. No toca nada: contesta.">💬 Preguntarle a Claude</button></div>
-          <div class="sub"><button id="btnPlanoIA" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="El cerebro lee la imagen del plano (el fondo, o una foto que escojas) y arma los cuartos como piezas editables">🪄 IA: plano desde imagen</button></div>
-          <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí">📋 Recibo del último escaneo importado</button></div>
-          <div class="sub"><button id="btnGuiaDel" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Borrar el contorno de guia calcado del survey (las piezas se quedan donde estan)">🧭</button><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)">🧲 Soldar armado (unir piezas del escaneo)</button></div>
+          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Pregúntale a Claude sobre este plano. No toca nada: contesta." data-ico="chat">Preguntarle a Claude</button></div>
+          <div class="sub"><button id="btnPlanoIA" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="El cerebro lee la imagen del plano (el fondo, o una foto que escojas) y arma los cuartos como piezas editables" data-ico="varita">IA: plano desde imagen</button></div>
+          <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí" data-ico="recibo">Recibo del último escaneo importado</button></div>
+          <div class="sub"><button id="btnGuiaDel" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Borrar el contorno de guia calcado del survey (las piezas se quedan donde estan)" data-ico="brujula"></button><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)" data-ico="magnet">Soldar armado (unir piezas del escaneo)</button></div>
           <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
           <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
           <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
@@ -230,7 +230,7 @@
           </div>
           <input id="pjSheetTitle" placeholder="Título de hoja (POWER RISER DIAGRAM)">
           <input id="pjDrawn" placeholder="Dibujado por" value="">
-          <button id="btnPurgar" style="margin-top:8px;padding:5px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px;width:100%" title="Borra TODOS los proyectos guardados en este aparato, los PDF importados, la sesión del estimador y el token del cerebro (iPad compartido o prestado). Lo que bajaste como .mxp.json no se toca.">🧹 Borrar todo lo guardado en este aparato</button>
+          <button id="btnPurgar" style="margin-top:8px;padding:5px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px;width:100%" title="Borra TODOS los proyectos guardados en este aparato, los PDF importados, la sesión del estimador y el token del cerebro (iPad compartido o prestado). Lo que bajaste como .mxp.json no se toca." data-ico="escoba">Borrar todo lo guardado en este aparato</button>
           <div class="row"><label>Precision</label>
             <select id="pjPrec" style="flex:1">
               <option value="8">1/8"</option>
@@ -268,7 +268,7 @@
       </section>
 
       <section class="panel">
-        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV">📋 Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)">📤 Estimador</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)">⬇ CSV</button></h3>
+        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Estimador</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV</button></h3>
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
       </section>
     </aside>
@@ -279,8 +279,8 @@
     <div id="marcasCab">
       <span id="marcasTit">📋 LISTA DE MARCAS</span>
       <span id="marcasN" class="muted small"></span>
-      <button id="marcasCsv" title="Exportar esta lista (con el filtro puesto) a CSV">⬇</button>
-      <button id="marcasCerrar" title="Cerrar">✕</button>
+      <button id="marcasCsv" title="Exportar esta lista (con el filtro puesto) a CSV" data-ico="download"></button>
+      <button id="marcasCerrar" title="Cerrar" data-ico="close"></button>
     </div>
     <div id="marcasFiltro">
       <input type="search" id="marcasBusca" placeholder="Buscar… (texto, etiqueta, tipo)">
@@ -309,13 +309,13 @@
   <footer id="statusbar">
     <span id="hint">Selecciona una herramienta para comenzar</span>
     <div id="navFijo">
-      <button class="tool active" data-tool="select" title="Seleccionar (V)">⬚</button>
-      <button class="tool" data-tool="pan" title="Mover vista (H)">✋</button>
+      <button class="tool active" data-tool="select" data-ico="select" title="Seleccionar (V)"></button>
+      <button class="tool" data-tool="pan" data-ico="pan" title="Mover vista (H)"></button>
       <span class="sep"></span>
       <button class="act zo" data-act="zoomOut" title="Alejar">−</button>
       <span id="zoomLabel" title="Zoom">100%</span>
       <button class="act zo" data-act="zoomIn" title="Acercar">+</button>
-      <button class="act zo" data-act="zoomFit" title="Ajustar a contenido">⛶</button>
+      <button class="act zo" data-act="zoomFit" data-ico="ajustar" title="Ajustar a contenido"></button>
     </div>
     <span class="sbDer"><span id="coords"></span><span id="verTag"></span></span>
   </footer>
@@ -327,8 +327,8 @@
     <div class="modalHead">
       <b>PANEL SCHEDULE &amp; LOAD CALCULATION</b>
       <div class="mbtns">
-        <button id="psPrint">🖨 Print Sheet (E-2)</button>
-        <button id="psClose">✕ Cerrar</button>
+        <button id="psPrint" data-ico="pdf">Print Sheet (E-2)</button>
+        <button id="psClose" data-ico="close">Cerrar</button>
       </div>
     </div>
     <div class="psHeader">
@@ -337,7 +337,7 @@
       <label>Main <input id="psMain" style="width:90px"></label>
       <label>Montaje <input id="psMount" style="width:140px"></label>
       <label>Espacios <input id="psSpaces" type="number" min="2" max="84" step="2" style="width:56px"></label>
-      <button id="psFromPlan" class="small" title="Lee el atributo Circuito de cada símbolo del plano (A-12, 14…) y escribe en cada circuito cuántos receptáculos y luminarias cuelgan de él, con su VA (180 VA por receptáculo, 100 VA por luminaria)">🔌 Traer del plano</button>
+      <button id="psFromPlan" class="small" title="Lee el atributo Circuito de cada símbolo del plano (A-12, 14…) y escribe en cada circuito cuántos receptáculos y luminarias cuelgan de él, con su VA (180 VA por receptáculo, 100 VA por luminaria)" data-ico="download">Traer del plano</button>
       <label>AIC <input id="psAic" style="width:110px"></label>
     </div>
     <div class="psGrid"><table id="psTable"></table></div>
@@ -383,7 +383,7 @@
   <div class="modalBox" style="width:min(760px,96vw)">
     <div class="modalHead">
       <b>💬 PREGÚNTALE A CLAUDE — sobre este plano</b>
-      <div class="mbtns"><button id="aiClose">✕ Cerrar</button></div>
+      <div class="mbtns"><button id="aiClose" data-ico="close">Cerrar</button></div>
     </div>
     <div id="aiBody" class="pbody"></div>
   </div>
@@ -393,31 +393,31 @@
   <div class="modalBox" style="width:min(580px,94vw)">
     <div class="modalHead">
       <b>🔎 PROPERTY / LOT SEARCH</b>
-      <div class="mbtns"><button id="lotClose">✕ Cerrar</button></div>
+      <div class="mbtns"><button id="lotClose" data-ico="close">Cerrar</button></div>
     </div>
     <div class="pbody">
       <input id="lotAddr" placeholder="Dirección o folio — ej: 410 S Sterling Ave, Tampa, FL 33609" style="font-size:14px;padding:8px">
       <div class="row"><label>Condado</label><select id="lotCounty" style="flex:1"></select></div>
       <div class="row">
         <button id="lotAddCounty" style="flex:1">+ Agregar condado</button>
-        <button id="lotEditCounty" style="flex:1">✎ Editar</button>
-        <button id="lotDelCounty" style="flex:1">🗑 Borrar</button>
+        <button id="lotEditCounty" style="flex:1" data-ico="editar">Editar</button>
+        <button id="lotDelCounty" style="flex:1" data-ico="papelera">Borrar</button>
       </div>
-      <button id="lotDirect" style="padding:9px;font-weight:700">🎯 Ir directo al lote</button>
+      <button id="lotDirect" style="padding:9px;font-weight:700" data-ico="diana">Ir directo al lote</button>
       <div class="muted small">Busca la dirección exacta dentro del sitio del condado — el primer resultado es la página del lote. Si pones el número de folio (Hillsborough), abre el lote directo.</div>
-      <button id="lotOpenPA" style="padding:7px">🏛 Abrir el buscador del Property Appraiser</button>
+      <button id="lotOpenPA" style="padding:7px" data-ico="buscar">Abrir el buscador del Property Appraiser</button>
       <div class="muted small">Al abrir, la dirección queda copiada — pégala (Ctrl+V) en el buscador de la página.</div>
       <div class="row">
-        <button id="lotGoogle" style="flex:1">🔍 Google</button>
-        <button id="lotMaps" style="flex:1">🗺 Maps</button>
-        <button id="lotFema" style="flex:1">🌊 FEMA Flood</button>
+        <button id="lotGoogle" style="flex:1" data-ico="buscar">Google</button>
+        <button id="lotMaps" style="flex:1" data-ico="mapa">Maps</button>
+        <button id="lotFema" style="flex:1" data-ico="agua">FEMA Flood</button>
       </div>
       <div id="lotFallback" hidden>
         <a id="lotUrlA" href="#" target="_blank" rel="noopener" style="display:block;text-align:center;padding:9px;background:#1e2530;color:#f5b82e;font-weight:700;border-radius:6px;text-decoration:none;margin-top:4px">↗ ABRIR EN PESTAÑA NUEVA</a>
         <div class="muted small" style="margin-top:4px">Si el botón de arriba no abre (visor bloqueado): copia el link y pégalo en la <b>barra de direcciones</b> del navegador (no en el buscador de Google):</div>
         <div class="row">
           <input id="lotUrl" readonly style="flex:1;font-size:11px">
-          <button id="lotCopy" style="flex:none">📋 Copiar</button>
+          <button id="lotCopy" style="flex:none" data-ico="copiar">Copiar</button>
         </div>
       </div>
     </div>
@@ -427,6 +427,7 @@
 <!-- ======= HOJA DE IMPRESIÓN ======= -->
 <div id="printSheet" hidden></div>
 
+<script src="js/icons.js"></script>
 <script src="js/vendor/pdf.min.js"></script>
 <script src="js/logo.js"></script>
 <script src="js/config.js"></script>

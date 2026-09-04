@@ -305,19 +305,31 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 #symSearch { margin: 8px; padding: 7px 10px; border: 1.5px solid var(--mp-line); border-radius: 10px; font-size: 12px; background: #fff; transition: border-color .15s, box-shadow .15s; }
 #symSearch:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
 #catTabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 8px; }
+/* pestañas de la paleta: pastilla en relieve; la elegida se enciende con el
+   gradiente azul del botón primario (guía §5 "chip de elegir") */
 #catTabs .cat {
-  border: 1.5px solid var(--mp-line); background: #fff; border-radius: 999px;
-  font-size: 11px; padding: 4px 10px; cursor: pointer;
-  transition: background .15s, border-color .15s, transform .12s;
+  border: 1px solid rgba(27,60,140,.18); background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%);
+  color: var(--mp-navy); border-radius: 999px;
+  font-size: 11px; font-weight: 600; padding: 5px 11px; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 5px rgba(7,26,46,.08);
+  transition: background .15s var(--mp-ease, ease), border-color .15s, transform .12s, box-shadow .15s;
 }
-#catTabs .cat:hover { border-color: var(--mp-blue); transform: translateY(-1px); }
-#catTabs .cat.active { background: var(--mp-navy); color: #fff; border-color: var(--mp-navy); }
-#symList { flex: 1; overflow-y: auto; padding: 4px 8px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
+#catTabs .cat:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 4px 10px rgba(7,26,46,.12), 0 0 10px rgba(34,232,224,.18); }
+#catTabs .cat:active { transform: translateY(1px); box-shadow: inset 0 2px 4px rgba(7,26,46,.18); }
+#catTabs .cat.active {
+  background: linear-gradient(180deg, #2E62E0 0%, var(--mp-navy) 100%); color: #F4FBFF; border-color: rgba(27,60,140,.55);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), inset 0 -1px 0 rgba(7,26,46,.25), 0 3px 8px rgba(27,60,140,.28);
+}
+/* grid-auto-rows explicito: sin el, en el iPad la fila se quedaba en la altura
+   minima tactil (36 px) y el boton recortaba el dibujo y el nombre del simbolo. */
+#symList { flex: 1; overflow-y: auto; padding: 4px 8px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; grid-auto-rows: minmax(min-content, max-content); }
 .symBtn {
-  border: 1.5px solid var(--mp-line); background: #fff; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(27,60,140,.16); background: linear-gradient(180deg, #FFFFFF 0%, #F7FBFE 100%); border-radius: 12px; cursor: pointer;
   padding: 6px 4px 4px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 5px rgba(7,26,46,.06);
   transition: transform .12s ease, box-shadow .15s ease, border-color .15s ease;
 }
+.symBtn:active { transform: translateY(1px); box-shadow: inset 0 2px 4px rgba(7,26,46,.14); }
 .symBtn:hover { border-color: var(--mp-blue); transform: translateY(-2px); box-shadow: 0 6px 14px rgba(11,32,54,.14); }
 .symBtn.active { border-color: var(--mp-blue); background: var(--mp-sky-2); box-shadow: 0 0 0 3px rgba(42,91,215,.15); }
 .symBtn { position: relative; }
@@ -327,7 +339,10 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 }
 .symBtn .favstar.on { color: #F2C230; }
 .symBtn .favstar:hover { color: #F2C230; }
-.symBtn svg { width: 56px; height: 42px; }
+/* flex: none es obligatorio: sin el, en el iPad el dibujo se encogia a 0 px de
+   alto (el boton es un item de rejilla con min-height tactil) y la paleta salia
+   con los nombres pero SIN simbolos. Medido 04/09 en Chromium tactil. */
+.symBtn svg { width: 56px; height: 42px; flex: none; }
 .symBtn .nm { font-size: 9.5px; text-align: center; color: var(--mp-ink-2); line-height: 1.15; }
 
 /* ===== Canvas ===== */
@@ -352,27 +367,35 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 .panel { border-bottom: 1px solid var(--mp-line); }
 /* (auditoría takeoff 03/09) con float:right el 3er botón caía sobre la tabla y no se podía pulsar */
 .panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; padding: 8px 10px 4px; color: var(--mp-teal-text); font-weight: 650; border-left: 3px solid var(--mp-blue); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.panel h3 button {
-  margin-left: auto; font-size: 10px; padding: 2px 7px; border: 1px solid var(--mp-line);
-  background: var(--mp-card); border-radius: 5px; cursor: pointer; text-transform: none; letter-spacing: 0;
-}
-.panel h3 button:hover { background: var(--mp-sky-2); }
+.panel h3 button { margin-left: auto; font-size: 10px; padding: 3px 8px; text-transform: none; letter-spacing: 0; }
 .pbody { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .pbody input[type="text"], .pbody input:not([type]), .pbody input[type="number"], .pbody select {
   width: 100%; padding: 6px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 12px;
   background: #fff; transition: border-color .15s, box-shadow .15s;
 }
 .pbody input:focus, .pbody select:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
+/* "aquí te toca escribir": el campo se señala sin robar el teclado */
+.pbody input.pideDato { border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.18); animation: pideDato 1.1s ease-in-out 2; }
+@keyframes pideDato { 0%, 100% { box-shadow: 0 0 0 3px rgba(42,91,215,.18); } 50% { box-shadow: 0 0 0 5px rgba(34,232,224,.32); } }
+@media (prefers-reduced-motion: reduce) { .pbody input.pideDato { animation: none; } }
 #layersBody button, .pbody button { border-radius: 9px !important; transition: background .15s, border-color .15s, transform .12s, box-shadow .15s; }
 #layersBody button:hover, .pbody button:hover { border-color: var(--mp-blue) !important; transform: translateY(-1px); box-shadow: 0 3px 8px rgba(11,32,54,.12); }
 .pbody .row { display: flex; gap: 6px; align-items: center; }
 .pbody .row label { flex: none; width: 74px; font-size: 11px; color: var(--mp-ink-2); }
-.pbody button {
-  padding: 5px 8px; border: 1px solid var(--mp-line); background: var(--mp-card); border-radius: 6px;
-  cursor: pointer; font-size: 12px; color: var(--mp-ink);
+/* botones del panel: tecla blanca levantada (guía §3 "secundario") */
+.pbody button, #layersBody button, .mbtns button, .panel h3 button {
+  padding: 5px 9px; border: 1px solid rgba(27,60,140,.18);
+  background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); border-radius: 9px;
+  cursor: pointer; font-size: 12px; color: var(--mp-navy); font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 5px rgba(7,26,46,.08);
 }
-.pbody button:hover { background: var(--mp-sky-2); }
-.pbody button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.42); }
+.pbody button:hover, #layersBody button:hover, .mbtns button:hover, .panel h3 button:hover {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 4px 10px rgba(7,26,46,.12), 0 0 10px rgba(34,232,224,.18);
+}
+.pbody button:active, #layersBody button:active, .mbtns button:active, .panel h3 button:active {
+  transform: translateY(1px); box-shadow: inset 0 2px 4px rgba(7,26,46,.18);
+}
+.pbody button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.4); background: linear-gradient(180deg, #FFFFFF 0%, #FDF4F4 100%); }
 .muted { color: var(--mp-ink-2); font-size: 12px; }
 .small { font-size: 10px; text-transform: none; letter-spacing: 0; }
 /* Entrar a la nube: tecla primaria pequeña, al lado del badge */
@@ -393,6 +416,25 @@ body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 #countsBody td.n { text-align: right; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 #countsBody tr.cat td { background: var(--mp-sky-3); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .11em; color: var(--mp-teal-text); }
 
+/* ===== iconos de línea (js/icons.js) ===== */
+svg.ico { width: 18px; height: 18px; flex: none; display: block; pointer-events: none; }
+#toolbar svg.ico, .dock svg.ico { width: 19px; height: 19px; }
+.barra button.tool svg.ico { width: 21px; height: 21px; }
+.barra .gIco svg.ico { width: 19px; height: 19px; }
+#navFijo svg.ico { width: 17px; height: 17px; }
+#catTabs .cat svg.ico { width: 15px; height: 15px; }
+#toolMenu .tIco svg.ico { width: 19px; height: 19px; margin: 0 auto; }
+.pbody button svg.ico, #layersBody button svg.ico, .mbtns button svg.ico, .panel h3 button svg.ico { width: 15px; height: 15px; }
+/* los botones con icono + texto los ponen en fila, con aire entre medias */
+#catTabs .cat, .pbody button, #layersBody button, .mbtns button, .panel h3 button, #grpArchivo button, #grpAjustes button, #grpHist button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+#grpArchivo button, #grpAjustes button, #grpHist button { flex-direction: column !important; gap: 1px !important; }
+body.touch svg.ico { width: 20px; height: 20px; }
+body.touch .barra button.tool svg.ico { width: 24px; height: 24px; }
+body.touch #catTabs .cat svg.ico { width: 17px; height: 17px; }
+body.touch #navFijo svg.ico { width: 21px; height: 21px; }
+
 /* ===== Status bar ===== */
 #statusbar {
   height: 36px; flex: none; background: var(--mp-deep); color: #9FC2D8;
@@ -400,7 +442,18 @@ body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
   padding: 0 12px; font-size: 11.5px;
   border-top: 1px solid rgba(255,255,255,.09);
 }
-#statusbar #hint { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+#statusbar #hint { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; display: flex; align-items: center; gap: 7px; }
+/* punto de color en vez de emoji (guía §4): verde bien · ámbar ojo · azul esperando */
+#statusbar #hint.ok::before, #statusbar #hint.aviso::before, #statusbar #hint.espera::before {
+  content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%;
+}
+#statusbar #hint.ok::before { background: #3FBF4E; box-shadow: 0 0 7px rgba(63,191,78,.85); }
+#statusbar #hint.aviso::before { background: #F2C230; box-shadow: 0 0 7px rgba(242,194,48,.85); }
+#statusbar #hint.espera::before { background: var(--mp-cyan); box-shadow: 0 0 7px rgba(34,232,224,.8); animation: latePunto 1.4s ease-in-out infinite; }
+@keyframes latePunto { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { #statusbar #hint.espera::before { animation: none; } }
+#statusbar #hint.ok { color: #A8E6A0; }
+#statusbar #hint.aviso { color: #F6E9A8; }
 #statusbar .sbDer { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #statusbar #verTag { opacity: .55; margin-left: 10px; font-size: 10px; }
 /* Select / Pan / zoom: fijos, en el centro, chiquitos como en Revu */
@@ -423,8 +476,7 @@ body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 .modalBox { background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 16px; width: min(1020px, 96vw); max-height: 92vh; overflow-y: auto; padding: 14px 18px 18px; box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 24px 60px -18px rgba(7,26,46,.45); }
 .modalHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 .modalHead b { font-size: 14px; letter-spacing: -0.01em; font-weight: 650; color: var(--mp-ink); }
-.mbtns button { margin-left: 6px; padding: 5px 10px; border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 8px; cursor: pointer; font-size: 12px; }
-.mbtns button:hover { background: var(--mp-sky-2); border-color: var(--mp-blue); }
+.mbtns button { margin-left: 6px; padding: 5px 11px; }
 .psHeader { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; font-size: 11.5px; align-items: center; }
 .psHeader label { display: flex; align-items: center; gap: 4px; color: var(--mp-ink-2); }
 .psHeader input { border: 1px solid var(--mp-line); border-radius: 6px; padding: 3px 5px; font-size: 11.5px; }
@@ -604,12 +656,26 @@ body.touch .symBtn { padding: 10px 6px 8px; }
 body.touch .symBtn svg { width: 68px; height: 52px; }
 body.touch .symBtn .nm { font-size: 11px; }
 body.touch .symBtn .favstar { font-size: 17px; top: 4px; right: 7px; }
-body.touch #catTabs .cat { font-size: 13px; padding: 7px 13px; }
+body.touch #catTabs .cat { font-size: 13.5px; padding: 11px 14px; min-height: 44px; }
+/* dedo con guantes: 44 px de alto en todo lo que se toca (guía §6) */
+body.touch #symSearch { min-height: 44px; font-size: 16px; }
+/* la estrella es un blanco de 44 px que NO ocupa sitio: va absoluta sobre la
+   esquina del boton (el simbolo esta centrado, no lo tapa) */
+body.touch .symBtn .favstar { font-size: 19px; top: 0; right: 0; padding: 0; margin: 0; width: 44px; height: 44px; display: flex; align-items: flex-start; justify-content: flex-end; }
+body.touch .symBtn .favstar::before { content: ''; position: absolute; inset: 0; }
+body.touch #btnPal, body.touch #btnProps { min-height: 44px; }
+body.touch .pbody button, body.touch #layersBody button, body.touch .mbtns button, body.touch .panel h3 button { min-height: 44px !important; padding: 8px 12px !important; }
+body.touch .pbody input, body.touch .pbody select { min-height: 44px; }
+body.touch .pbody .row label { font-size: 12.5px; }
+body.touch #grpHist button { min-width: 44px; }
+body.touch #grpAjustes select { min-height: 44px; }
+body.touch .panel h3 { font-size: 12px; padding: 10px 10px 5px; }
+body.touch input[type=checkbox], body.touch input[type=radio] { width: 24px; height: 24px; }
 body.touch #sheetTabs .stab { font-size: 14px; padding: 9px 16px; }
 body.touch #toolMenu .tmItem { padding: 11px 12px; font-size: 15px; }
 body.touch .pbody button, body.touch #layersBody button { padding: 9px 10px !important; font-size: 13px !important; }
-body.touch #statusbar { height: 50px; font-size: 13px; }
-body.touch #navFijo button { min-width: 44px; height: 42px; font-size: 18px; }
+body.touch #statusbar { height: 52px; font-size: 13px; }
+body.touch #navFijo button { min-width: 44px; height: 44px; font-size: 18px; }
 body.touch #navFijo .sep { height: 26px; }
 body.touch .sw { width: 28px; height: 28px; }
 body.touch #main { position: relative; }
@@ -629,8 +695,12 @@ body.touch #btnEst, body.touch #btnCsv { padding: 8px 12px !important; font-size
 body.touch #btnPal, body.touch #stAdd { min-width: 40px; }
 /* blancos de dedo: casillas de capas, estrellas de favoritos, × de hojas */
 body.touch #layersBody label.lay { min-height: 40px; display: flex; align-items: center; gap: 10px; }
-body.touch #layersBody input[type=checkbox] { width: 22px; height: 22px; }
-body.touch .symBtn .favstar { padding: 6px 8px; margin: -6px -8px; }
+body.touch #layersBody input[type=checkbox] { width: 24px; height: 24px; }
+/* blancos sueltos que quedaban por debajo de 44: el + de hoja, el 🆕 de
+   proyecto, el borrar-guia y la casilla de nombres del equipo */
+body.touch #stAdd, body.touch #pjNuevo, body.touch #btnGuiaDel { min-height: 44px; min-width: 44px; }
+body.touch #cbEqName { width: 24px; height: 24px; }
+body.touch #rightPanel input[type=text], body.touch #rightPanel input:not([type]), body.touch #rightPanel input[type=number], body.touch #rightPanel input[type=search] { min-height: 44px; }
 body.touch #sheetTabs .stab .sx { padding: 6px 8px; font-size: 16px; }
 
 /* ══════════ 💬 CHAT FLOTANTE ══════════

@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.Q';
+  var APP_VERSION = 'v30.S';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -560,7 +560,7 @@
     if (!sucio || restaurando) { cb(); return; }
     guardaEnBiblioteca(true, function (ok) {
       if (ok) { sucio = false; cb(); }
-      else { uiAlert('No se pudo guardar lo pendiente en este aparato.\n\nUsa 💾 Guardar para bajar el archivo antes de cambiar de proyecto.'); setHint(''); pintaLista(); }
+      else { uiAlert('No se pudo guardar lo pendiente en este aparato.\n\nUsa Guardar para bajar el archivo antes de cambiar de proyecto.'); setHint(''); pintaLista(); }
     });
   }
   function nuevoProyecto() {
@@ -940,7 +940,7 @@
         if (!okR) {
           // la copia NO se pudo escribir: la de la nube NO se trae. Nada se pierde.
           nube.conflictoAbierto = false; nubeSet('error', 'No se pudo guardar tu versión aparte en este aparato.');
-          uiAlert('No se pudo guardar tu versión aparte en este aparato, así que la de la nube NO se trajo. Lo de aquí sigue intacto.\n\nUsa 💾 Guardar para bajar tu archivo y vuelve a intentar.');
+          uiAlert('No se pudo guardar tu versión aparte en este aparato, así que la de la nube NO se trajo. Lo de aquí sigue intacto.\n\nUsa Guardar para bajar tu archivo y vuelve a intentar.');
           return;
         }
         encolaSubida(mia.state.project.id);
@@ -1043,8 +1043,8 @@
           // (Safari privado, almacenamiento restringido) el usuario creía que
           // todo se guardaba solo y perdía el plano al recargar
           if (!ok && !lsOk && !autosaveAvisado) { autosaveAvisado = true; uiAlert(soloLectura
-            ? '⚠️ En esta sesión NO se está guardando automáticamente (el almacenamiento del aparato no respondió al arrancar).\n\nUsa 💾 Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.'
-            : '⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa 💾 Guardar para bajar el archivo antes de cerrar.'); }
+            ? '⚠️ En esta sesión NO se está guardando automáticamente (el almacenamiento del aparato no respondió al arrancar).\n\nUsa Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.'
+            : '⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa Guardar para bajar el archivo antes de cerrar.'); }
           if (ok || lsOk) autosaveAvisado = false;
         }, 0);
       });
@@ -4785,7 +4785,21 @@
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
     place: 'Clic para colocar · R para rotar 45° · Esc para terminar'
   };
-  function setHint(t) { $('#hint').textContent = t; }
+  /* La barra de abajo dice cómo va la cosa. La guía de la casa pide punto de
+     color, no emoji: aquí se le quita el ✔/⚠/⏳ del principio al mensaje y se
+     pinta el punto con su color (verde bien, ámbar ojo, azul esperando). */
+  function setHint(t) {
+    var h = $('#hint'); if (!h) return;
+    var s = String(t == null ? '' : t), cls = '';
+    var m = /^\s*([\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE0F\u{1F300}-\u{1FAFF}]+)\s*/u.exec(s);
+    if (m) {
+      s = s.slice(m[0].length);
+      var g = m[1];
+      cls = /✔|✅/.test(g) ? 'ok' : /⏳|🔄/.test(g) ? 'espera' : /⚠|❌|✖|🐢/.test(g) ? 'aviso' : '';
+    }
+    h.className = cls;
+    h.textContent = s;
+  }
 
   function ponEqName(off) {
     eqNameOff = !!off;
@@ -5902,7 +5916,14 @@
     sel = { kind: 'area', id: e.id };
     refresh();
     if (esHomerun) {
-      var fd = $('#prCircDesc'); if (fd) { fd.focus(); }
+      /* NO se le roba el foco al campo (regresión 04/09): al terminar el
+         homerun el cursor saltaba a "Cuarto / carga", así que la siguiente
+         tecla de herramienta (A, W, T…) se escribía DENTRO del campo y
+         quedaba guardada como descripción del circuito en el Panel Schedule.
+         Ahora el campo solo se señala un momento: quien quiera escribir,
+         hace clic; quien quiera seguir dibujando, sigue con sus atajos. */
+      var fd = $('#prCircDesc');
+      if (fd) { fd.classList.add('pideDato'); setTimeout(function () { fd.classList.remove('pideDato'); }, 2600); }
       setHint('⚡ Circuito #' + e.circ.num + ' trazado: ' + fmtFtIn(perimDe(e)) + ' + ' + e.circ.drop + '\' de drop = ' + fmtFtIn(largoHomerun(e)) +
         ' de ' + e.circ.cable + ' · escribe el cuarto y ajusta cable/breaker/drop en Propiedades');
       return;
@@ -6896,7 +6917,7 @@
     limpiaHuerfanas();
     selGroup = null; sel = null;
     refresh(); renderSel(); showProps();
-    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: botón 🧭 en el panel derecho');
+    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: botón de la brújula en el panel derecho');
   }
   function borrarGuia() {
     if (!state.guia.length) { setHint('🧭 No hay guía en la hoja'); return; }
@@ -7058,13 +7079,13 @@
         '<button id="prRotL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
         '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
-        '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>' +
-        '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">🧩 Calzar con lo puesto</button>' +
-        '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">🎯 Encajar en el plano (guía)</button>' +
-        '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">🧭 Convertir en guía (survey)</button>' +
+        '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>' +
+        '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">' + ICO.svg('encaja') + ' Calzar con lo puesto</button>' +
+        '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">' + ICO.svg('diana') + ' Encajar en el plano (guía)</button>' +
+        '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">' + ICO.svg('brujula') + ' Convertir en guía (survey)</button>' +
         '<button id="prFlipDryG" style="width:100%;margin-bottom:6px" title="Cambia de lado la línea fina del drywall en TODAS las paredes de bloque seleccionadas — un clic en vez de una por una">↕ Lado del drywall (grupo)</button>' +
         botonesCad(false) +
-        '<button class="danger" id="prDelGroup" style="margin-top:6px">🗑 Borrar todo el grupo</button>';
+        '<button class="danger" id="prDelGroup" style="margin-top:6px">' + ICO.svg('papelera') + ' Borrar todo el grupo</button>';
       engancharCad();
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
@@ -7156,7 +7177,7 @@
         var dice = intr == null ? '' : ((e.drySide || 1) === intr ? ': adentro' : ': AFUERA ⚠');
         html += '<button id="prFlipDry">↕ Drywall' + dice + '</button>';
       }
-      html += '<button class="danger" id="prDelete">🗑 Borrar pared</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar pared</button>';
     } else if (sel.kind === 'opening') {
       html += '<div class="row"><label>Tipo</label><select id="prOpenType">';
       Object.keys(OPEN_NAMES).forEach(function (k) {
@@ -7170,7 +7191,7 @@
       } else if (e.type === 'pocket') {
         html += '<div class="row"><button id="prFlipHinge" title="A qué lado corre la hoja y dónde queda el bolsillo dentro de la pared">↔ Lado del bolsillo</button></div>';
       }
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'symbol') {
       var def = SYMBOLS[e.key];
       html += '<div><b>' + esc(def.name) + '</b></div>';
@@ -7204,7 +7225,7 @@
       html += '<div class="row"><label>Nota</label><input id="prAttrNote" placeholder="ej: GFCI · WP · DEDICATED" value="' + esc(at.note || '') + '"></div>';
       html += '<div class="row"><label>Descripción</label><input id="prAttrDesc" placeholder="ej: BOMBA DE POZO — SERVICE SIZE 1¼&quot;C" value="' + esc(at.desc || '') + '"></div>';
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'text') {
       // AREA de texto, no caja de una linea: aqui el Enter hace renglon nuevo.
       // Y la barra de formato va PEGADA debajo y compacta (Edgar, 08/30: "es
@@ -7225,9 +7246,9 @@
         '<button id="prTxtBold" class="' + (e.bold ? 'on' : '') + '" style="font-weight:800" title="Negrita">B</button>' +
         '<button id="prTxtItal" class="' + (e.italic ? 'on' : '') + '" style="font-style:italic" title="Cursiva">I</button>' +
         '<span class="sep"></span>' +
-        '<button class="alBtn ' + (alAct === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">⯇</button>' +
-        '<button class="alBtn ' + (alAct === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
-        '<button class="alBtn ' + (alAct === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
+        '<button class="alBtn ' + (alAct === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">' + ICO.svg('flechaIzq') + '</button>' +
+        '<button class="alBtn ' + (alAct === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">' + ICO.svg('menu') + '</button>' +
+        '<button class="alBtn ' + (alAct === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">' + ICO.svg('flechaDer') + '</button>' +
         '<span class="sep"></span>' +
         '<button id="prTxtGirL" title="Girar 90° a la izquierda">↺</button>' +
         '<input id="prTxtAng" class="n" type="number" step="5" value="' + (+(e.rot || 0)).toFixed(0) + '" title="Ángulo exacto en grados — o arrastra el círculo azul de arriba">' +
@@ -7241,12 +7262,12 @@
         '<option value="plain"' + (!e.style || e.style === 'plain' ? ' selected' : '') + '>Plain text</option>' +
         '<option value="circle"' + (e.style === 'circle' ? ' selected' : '') + '>Bubble ① (conductor #)</option>' +
         '<option value="hex"' + (e.style === 'hex' ? ' selected' : '') + '>Hexagon ⬡ (key note)</option></select></div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'dim') {
       html += '<div class="row"><label>Length</label><input id="prDimLen" value="' + fmtFtIn(Math.hypot(e.x2 - e.x1, e.y2 - e.y1)) + '"></div>';
       html += '<div class="muted small">Doble clic en la cota también edita la medida · arrástrala para separarla</div>';
       html += '<button id="prFlipDim">↕ Cambiar lado</button>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'wire') {
       html += '<div><b>Longitud: ' + fmtFtIn(wireLen(e)) + '</b></div>';
       html += '<div class="row"><label>Etiqueta</label><input id="prWireLabel" placeholder="ej: Feeder (1) FPL→MSB" value="' + esc(e.label || '') + '"></div>';
@@ -7263,8 +7284,8 @@
         }).join('') + '</select></div>';
       html += filasPuntas(e, 'prWireCap');
       if (esCurvo) html += '<button id="prWireFlip">↕ Cambiar lado del arco</button>';
-      html += '<button id="prWireToWall">▬ Convertir en pared</button>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button id="prWireToWall">' + ICO.svg('wall') + ' Convertir en pared</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'ink') {
       html += '<div><b>' + (e.modo === 'hi' ? '🖍 Resaltado' : '✒️ Trazo a mano') + '</b> · ' + fmtFtIn(polyPerim(e.pts, true)) + ' · ' + e.pts.length + ' puntos</div>';
       html += '<div class="row"><label>Color</label><div id="prInkColores" style="display:flex;gap:4px;flex-wrap:wrap">' +
@@ -7274,7 +7295,7 @@
       html += '<div class="row"><label>Grosor</label><input id="prInkLw" type="number" step="0.2" min="0.3" max="30" value="' + (e.lw || (e.modo === 'hi' ? 9 : 1.4)) + '"></div>';
       html += '<div class="row"><label>Opacidad %</label><input id="prInkOp" type="number" min="5" max="100" value="' + (e.op != null ? e.op : (e.modo === 'hi' ? 45 : 100)) + '"></div>';
       html += '<div class="row"><button id="prInkModo">' + (e.modo === 'hi' ? '✒️ Pasar a lápiz' : '🖍 Pasar a resaltador') + '</button></div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'leader') {
       // el callout usa la misma área de texto y la misma barra que el texto
       // (los manejadores de #prText, fuente, tamaño, B/I, alineado y color son
@@ -7296,16 +7317,16 @@
         '<button id="prTxtItal" class="' + (e.italic ? 'on' : '') + '" style="font-style:italic" title="Cursiva">I</button>' +
         '<span class="sep"></span>' +
         '<button class="alBtn ' + (alL === '' ? 'on' : '') + '" data-al="" title="Automático: según el lado de la flecha">↔</button>' +
-        '<button class="alBtn ' + (alL === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">⯇</button>' +
-        '<button class="alBtn ' + (alL === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
-        '<button class="alBtn ' + (alL === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
+        '<button class="alBtn ' + (alL === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">' + ICO.svg('flechaIzq') + '</button>' +
+        '<button class="alBtn ' + (alL === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">' + ICO.svg('menu') + '</button>' +
+        '<button class="alBtn ' + (alL === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">' + ICO.svg('flechaDer') + '</button>' +
         '<span class="sep"></span>' +
         COLOR_PRESETS.map(function (c8) {
           return '<span class="sw' + ((e.color || '#14161a') === c8[0] ? ' cur' : '') + '" data-c="' + c8[0] + '" title="' + c8[1] + '" style="background:' + c8[0] + '"></span>';
         }).join('') +
         '</div>';
       html += '<div class="muted small">Doble clic sobre la nota también la edita. Arrastra la nota para moverla; la flecha se queda en su punto.</div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'area') {
       if (e.open && e.circ) {
         var c = e.circ;
@@ -7331,7 +7352,7 @@
         html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo. Cambia el color o el grosor abajo para distinguir circuitos.</div>';
       } else if (e.open) {
         html += '<div><b>Length: ' + fmtFtIn(perimDe(e)) + '</b></div>';
-        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">⚡ Convertir en circuito (homerun)</button>';
+        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">' + ICO.svg('homerun') + ' Convertir en circuito (homerun)</button>';
       } else {
         html += '<div><b>Area: ' + (areaDe(e) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(perimDe(e)) + '</div>';
       }
@@ -7344,7 +7365,7 @@
         html += '<div class="row"><label>Rotación</label><input id="prAreaRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
         // relleno de color: resalta el área sin tapar lo de abajo (o sólido al 100 %)
         html += '<div class="row" title="Color del interior. Con opacidad menor a 100 % resalta como marcador: lo de abajo se sigue viendo."><label>Relleno</label><div class="swRow" id="prFillRow">' +
-          '<span class="sw' + (!e.relleno ? ' cur' : '') + '" data-c="" title="Sin relleno" style="background:#fff;color:#a33;font-size:10px;line-height:14px;text-align:center">✕</span>' +
+          '<span class="sw' + (!e.relleno ? ' cur' : '') + '" data-c="" title="Sin relleno" style="background:#fff;color:#a33;font-size:10px;line-height:14px;text-align:center">' + ICO.svg('close') + '</span>' +
           COLOR_PRESETS.map(function (c) {
             return '<span class="sw' + (e.relleno === c[0] ? ' cur' : '') + '" data-c="' + c[0] + '" title="' + c[1] + '" style="background:' + c[0] + '"></span>';
           }).join('') + '</div></div>';
@@ -7415,18 +7436,18 @@
           return '<option value="' + rr9[0] + '"' + ((+(e.rc || 0)) === parseFloat(rr9[0]) ? ' selected' : '') + '>' + rr9[1] + '</option>';
         }).join('') + '</select></div>';
       if (e.bul && e.bul.some(function (v9) { return Math.abs(v9 || 0) > 0.01; })) {
-        html += '<button id="prSinCurva" title="Todos los lados vuelven a ser rectos">⌐ Enderezar los lados curvos</button>';
+        html += '<button id="prSinCurva" title="Todos los lados vuelven a ser rectos">' + ICO.svg('line') + ' Enderezar los lados curvos</button>';
       }
       html += '<div class="row"><label style="flex:1">Mostrar medida</label><input id="prAreaLbl" type="checkbox"' + (e.showLabel ? ' checked' : '') + ' title="Escribe el sq ft (o la longitud) en el plano"></div>';
       if (e.open) {
         // Edgar, 08/30: "hice un dibujo de un counter, que permita convertir
         // en poligono, para poner una isla o peninsula como un counter"
-        html += '<button id="prToPoly">▦ Convertir en polígono (isla / counter)</button>';
-        html += '<button id="prToWall">▬ Convertir en paredes</button>';
+        html += '<button id="prToPoly">' + ICO.svg('area') + ' Convertir en polígono (isla / counter)</button>';
+        html += '<button id="prToWall">' + ICO.svg('wall') + ' Convertir en paredes</button>';
       } else {
-        html += '<button id="prToLine">⌐ Convertir en línea (abrir el contorno)</button>';
+        html += '<button id="prToLine">' + ICO.svg('line') + ' Convertir en línea (abrir el contorno)</button>';
       }
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     }
     if (sel && e) {
       // OPACIDAD: vale para todo lo que se puede seleccionar
@@ -7441,7 +7462,7 @@
         '<button id="prRotSelL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotSelR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
         '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>' +
-        '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>';
+        '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>';
     }
     if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area');
     body.innerHTML = html;
@@ -7913,7 +7934,7 @@
       brk[kb] = (brk[kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // × unidades también en el breaker
     });
     if (nCirc) {
-      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">📋 → Panel Schedule</button></td></tr>';
+      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">' + ICO.svg('panelsch') + ' → Panel Schedule</button></td></tr>';
       Object.keys(cabPorTipo).forEach(function (k) {
         rows += '<tr><td>' + esc(k) + ' <span class="muted small">(trazo + drop)</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
       });
@@ -8604,7 +8625,7 @@
     }
     tintTo(url, 198, 40, 30, function (u) { if (state.bg2) { state.bg2.url = u; renderBg(); } });
     renderBg(); updateOvUI(); scheduleAutosave();
-    setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca 🎯 Alinear para cuadrarlo por 2 puntos de control.');
+    setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca Alinear para cuadrarlo por 2 puntos de control.');
   }
   // 🧲 SOLDAR ARMADO: tras arrastrar cada cuarto (pieza) a su sitio, este
   // botón une todo: fusiona las paredes dobladas donde dos piezas empatan,
@@ -9083,8 +9104,8 @@
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<div style="font-weight:700;font-size:12.5px">💬 Pregúntale a Claude sobre este plano</div>' +
       '<div style="display:flex;gap:5px">' +
-      (cfg.url ? '<button id="aiPingBtn" title="Comprueba dirección, token y qué instrucciones corren. No cuesta nada." style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">🔌 Probar</button>' : '') +
-      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">⚙ Ajustes</button></div></div>' +
+      (cfg.url ? '<button id="aiPingBtn" title="Comprueba dirección, token y qué instrucciones corren. No cuesta nada." style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">' + ICO.svg('probar') + ' Probar</button>' : '') +
+      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">' + ICO.svg('props') + ' Ajustes</button></div></div>' +
       (cfg.url
         ? '<div class="muted small" style="margin:4px 0 6px">Va con el plano entero: cada pared con sus medidas, las aberturas y los cuartos. Cuesta unos 9 centavos por pregunta.</div>' +
           '<textarea id="aiPreg" rows="2" placeholder="ej: ¿cómo armo estas 13 piezas? · ¿este cuarto puede ser dormitorio? · ¿qué circuitos necesita esta cocina?" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-family:inherit;font-size:12.5px"></textarea>' +
@@ -9130,7 +9151,7 @@
      ping de siempre — gratis, no llama a Claude. */
   function pingCerebro() {
     var c2 = cerebroCfg();
-    if (!c2.url) { setHint('🔌 Falta la dirección del cerebro — ponla en ⚙ Ajustes'); return; }
+    if (!c2.url) { setHint('🔌 Falta la dirección del cerebro — ponla en Ajustes'); return; }
     setHint('🔌 Probando el cerebro…');
     fetch(c2.url, {
       method: 'POST',
@@ -9322,13 +9343,13 @@
       '<div id="chatCab">' +
         '<span id="chatTit">💬 Claude</span>' +
         '<span id="chatCoste"></span>' +
-        '<button id="chatLimpiar" title="Empezar una conversación nueva">🗑</button>' +
+        '<button id="chatLimpiar" title="Empezar una conversación nueva">' + ICO.svg('papelera') + '</button>' +
         '<button id="chatMin" title="Encoger">–</button>' +
       '</div>' +
       '<div id="chatCuerpo"></div>' +
       '<div id="chatPie">' +
         '<textarea id="chatTxt" rows="2" placeholder="Pregúntale sobre este plano…"></textarea>' +
-        '<button id="chatEnv" title="Enviar (Enter)">➤</button>' +
+        '<button id="chatEnv" title="Enviar (Enter)">' + ICO.svg('send') + '</button>' +
       '</div>';
     document.body.appendChild(d);
 
@@ -9638,7 +9659,7 @@
         (d.uso ? '<div style="margin-top:8px;color:#777;font-size:11px">— ' + mdEsc(d.uso.centavos) + ' centavos</div>' : '');
     }).catch(function (e) {
       if (btn) btn.disabled = false;
-      out.textContent = '⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en ⚙ Ajustes?';
+      out.textContent = '⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en Ajustes?';
     });
   }
 
@@ -9998,7 +10019,7 @@
         sigue();
       }).catch(function (e) {
         termina(); setHint('');
-        uiAlert('⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en ⚙ Ajustes?');
+        uiAlert('⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en Ajustes?');
       });
     };
     img.onerror = function () { termina(); uiAlert('⚠️ No se pudo leer esa imagen.'); };
@@ -10123,7 +10144,7 @@
       var elegidas = state.walls.filter(function (w) { return idsSel[w.id]; });
       if (elegidas.length >= 2) {
         /* LA COSTURA. Soldar SOLO lo seleccionado dejaba la unión sin tocar:
-           al calzar una pieza queda seleccionada, se pulsa 🧲 y no pasa nada
+           al calzar una pieza queda seleccionada, se pulsas Imanes y no pasa nada
            — la pared repetida sigue ahí doble. Medido 28/08: 8 paredes → 8.
            Por eso al universo se le suman las paredes de al lado (a menos de
            30"): son justo las de la costura. Lo lejano sigue sin tocarse. */
@@ -10732,7 +10753,7 @@
               syncProjectInputs();
               renderSheetTabs();
               scheduleAutosave();
-              setHint('Hoja en blanco — dibuja, o abre un plano con 📂 Abrir');
+              setHint('Hoja en blanco — dibuja, o abre un plano con el botón Abrir');
             });
             return;
           }
@@ -11933,7 +11954,7 @@
   // exporta" — aquí es donde se pierde información entre las dos apps, así
   // que en vez de confiar, se cuenta y se compara.
   var reciboDib = [];      // [{name, sqft}] de cada cuarto que se dibujó
-  var ultimoRecibo = null; // texto del último recibo (botón 📋 Recibo)
+  var ultimoRecibo = null; // texto del último recibo (botón "Recibo del último escaneo")
   var reciboNota = '';     // aviso extra del importador para el recibo
   var reciboLimpio = null; // qué hizo la limpieza automática al importar
   // lo que el ARCHIVO trae, contado sin tocar el dibujo
@@ -13003,7 +13024,7 @@
             setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' aberturas, ' +
               n.windows + ' ventanas' + (n.floors > 1 ? ' en ' + n.floors + ' pisos' : '') +
               (withFurn && n.furn ? ' + ' + n.furn + ' muebles de referencia' : ' — plano limpio, sin muebles') +
-              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — botón 📋 Recibo en Capas'
+              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — botón "Recibo del último escaneo" en Capas'
                           : ' · 📋 recibo: todo llegó completo') +
               ' · a escala real, en drywall (el block lo pone 🧲 Soldar)');
             // si algo se perdió, se enseña en la cara: es el punto débil
@@ -13174,7 +13195,7 @@
         saveFile((state.project.name || 'plano') + '.png', blob);
       }, 'image/png');
     };
-    img.onerror = function () { setHint('❌ No se pudo rasterizar el PNG (el SVG no cargó). Prueba 🖨 PDF, que no pasa por imagen.'); };
+    img.onerror = function () { setHint('❌ No se pudo rasterizar el PNG (el SVG no cargó). Prueba el botón PDF, que no pasa por imagen.'); };
     var pngT = setTimeout(function () { if (/Exportando PNG/.test($('#hint').textContent)) setHint('⏳ El PNG está tardando — con un plano de fondo grande puede llevar varios segundos'); }, 6000);
     img.addEventListener('load', function () { clearTimeout(pngT); });
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data);
@@ -13417,7 +13438,7 @@
         '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
         '<td style="width:96px"><input class="num" data-i="' + i + '" data-f="va" value="' + (l.va || '') + '"></td>' +
         '<td class="cb"><label><input type="checkbox" data-i="' + i + '" data-f="hvac"' + (l.hvac ? ' checked' : '') + '> HVAC 100%</label></td>' +
-        '<td style="width:26px;text-align:center"><button class="del" data-i="' + i + '">✕</button></td>' +
+        '<td style="width:26px;text-align:center"><button class="del" data-i="' + i + '">' + ICO.svg('close') + '</button></td>' +
         '</tr>';
     });
     $('#psLoads').innerHTML = lr;
@@ -13841,8 +13862,8 @@
       document.body.appendChild(errBar);
     }
     errBar.innerHTML = '<span style="flex:1">⚠️ Algo falló: <b>' + esc(String(msg).slice(0, 160)) + '</b>. Tu trabajo sigue guardado; si la app no responde, recarga la página.</span>' +
-      '<button id="errBajar" style="padding:5px 10px;border:0;border-radius:6px;background:#fff;color:#b71c1c;font-weight:700;cursor:pointer">💾 Bajar copia del plano</button>' +
-      '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">✕</button>';
+      '<button id="errBajar" style="padding:5px 10px;border:0;border-radius:6px;background:#fff;color:#b71c1c;font-weight:700;cursor:pointer">' + ICO.svg('save') + ' Bajar copia del plano</button>' +
+      '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">' + ICO.svg('close') + '</button>';
     errBar.querySelector('#errCerrar').addEventListener('click', function () { errBar.remove(); errBar = null; });
     errBar.querySelector('#errBajar').addEventListener('click', function () {
       try { saveFile('rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json', payloadProyecto()); } catch (e) {}
@@ -13979,27 +14000,27 @@
      proyecto: cada PC / iPad puede tener su propia disposición).
      ================================================================== */
   var TOOL_DEFS = [
-    { id: 'select', grp: 'nav', ico: '⬚', nom: 'Select', key: 'V', tip: 'Seleccionar (V)' },
-    { id: 'pan', grp: 'nav', ico: '✋', nom: 'Pan', key: 'H', tip: 'Mover vista (H)' },
-    { id: 'wall', grp: 'build', ico: '▬', nom: 'Wall', key: 'W', tip: 'Dibujar pared (W)', menu: 'wall', menuTip: 'Elegir tipo de pared' },
-    { id: 'door', grp: 'build', ico: '◟', nom: 'Door', key: 'D', tip: 'Colocar puerta (D)', menu: 'door', menuTip: 'Elegir tipo de puerta' },
-    { id: 'window', grp: 'build', ico: '≡', nom: 'Window', key: 'N', tip: 'Colocar ventana (N)', menu: 'window', menuTip: 'Elegir tipo de ventana' },
-    { id: 'area', grp: 'shape', ico: '▦', nom: 'Area', key: 'A', tip: 'Superficie / techo: polígono con patrón (A)', menu: 'area', menuTip: 'Elegir superficie' },
-    { id: 'rect', grp: 'shape', ico: '▭', nom: 'Rect', tip: 'Rectángulo / polígono (2 clics, SHIFT = regular)', menu: 'rect', menuTip: 'Elegir forma: rectángulo, triángulo, pentágono, hexágono...' },
-    { id: 'ellipse', grp: 'shape', ico: '◯', nom: 'Ellipse', tip: 'Elipse / círculo (2 clics, SHIFT = círculo)' },
-    { id: 'line', grp: 'shape', ico: '╱', nom: 'Line', tip: 'Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)', menu: 'line', menuTip: 'Elegir tipo de línea y punta' },
-    { id: 'pline', grp: 'shape', ico: '⌐', nom: 'Polyline', tip: 'Polilínea: línea de varios tramos (doble clic o Enter termina)', menu: 'pline', menuTip: 'Elegir tipo de línea' },
-    { id: 'cloud', grp: 'shape', ico: '☁', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
-    { id: 'homerun', grp: 'elec', ico: '⚡', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
-    { id: 'wire', grp: 'elec', ico: '⌇', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
-    { id: 'dim', grp: 'note', ico: '⇤⇥', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
-    { id: 'measure', grp: 'note', ico: '📏', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
-    { id: 'text', grp: 'note', ico: 'A', nom: 'Text', key: 'T', tip: 'Texto (T)' },
-    { id: 'leader', grp: 'note', ico: '↖A', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
-    { id: 'calibrate', grp: 'note', ico: '⌖', nom: 'Calibrate', key: 'K', tip: 'Calibrar plano de fondo (K)', menuTip: 'Medir una distancia conocida o aplicar la escala escrita en el plano' },
-    { id: 'pen', grp: 'ink', ico: '✒️', nom: 'Pen', key: 'P', tip: 'Lápiz a mano alzada (P) — Apple Pencil o dedo' },
-    { id: 'hi', grp: 'ink', ico: '🖍', nom: 'Highlight', tip: 'Resaltador — resalta sin tapar' },
-    { id: 'erase', grp: 'ink', ico: '🧽', nom: 'Eraser', tip: 'Borrador de tinta: pasa por encima de un trazo' }
+    { id: 'select', grp: 'nav', ico: 'select', nom: 'Select', key: 'V', tip: 'Seleccionar (V)' },
+    { id: 'pan', grp: 'nav', ico: 'pan', nom: 'Pan', key: 'H', tip: 'Mover vista (H)' },
+    { id: 'wall', grp: 'build', ico: 'wall', nom: 'Wall', key: 'W', tip: 'Dibujar pared (W)', menu: 'wall', menuTip: 'Elegir tipo de pared' },
+    { id: 'door', grp: 'build', ico: 'door', nom: 'Door', key: 'D', tip: 'Colocar puerta (D)', menu: 'door', menuTip: 'Elegir tipo de puerta' },
+    { id: 'window', grp: 'build', ico: 'window', nom: 'Window', key: 'N', tip: 'Colocar ventana (N)', menu: 'window', menuTip: 'Elegir tipo de ventana' },
+    { id: 'area', grp: 'shape', ico: 'area', nom: 'Area', key: 'A', tip: 'Superficie / techo: polígono con patrón (A)', menu: 'area', menuTip: 'Elegir superficie' },
+    { id: 'rect', grp: 'shape', ico: 'rect', nom: 'Rect', tip: 'Rectángulo / polígono (2 clics, SHIFT = regular)', menu: 'rect', menuTip: 'Elegir forma: rectángulo, triángulo, pentágono, hexágono...' },
+    { id: 'ellipse', grp: 'shape', ico: 'ellipse', nom: 'Ellipse', tip: 'Elipse / círculo (2 clics, SHIFT = círculo)' },
+    { id: 'line', grp: 'shape', ico: 'line', nom: 'Line', tip: 'Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)', menu: 'line', menuTip: 'Elegir tipo de línea y punta' },
+    { id: 'pline', grp: 'shape', ico: 'pline', nom: 'Polyline', tip: 'Polilínea: línea de varios tramos (doble clic o Enter termina)', menu: 'pline', menuTip: 'Elegir tipo de línea' },
+    { id: 'cloud', grp: 'shape', ico: 'cloud', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
+    { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
+    { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
+    { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
+    { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
+    { id: 'text', grp: 'note', ico: 'text', nom: 'Text', key: 'T', tip: 'Texto (T)' },
+    { id: 'leader', grp: 'note', ico: 'callout', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
+    { id: 'calibrate', grp: 'note', ico: 'calibrate', nom: 'Calibrate', key: 'K', tip: 'Calibrar plano de fondo (K)', menuTip: 'Medir una distancia conocida o aplicar la escala escrita en el plano' },
+    { id: 'pen', grp: 'ink', ico: 'pen', nom: 'Pen', key: 'P', tip: 'Lápiz a mano alzada (P) — Apple Pencil o dedo' },
+    { id: 'hi', grp: 'ink', ico: 'highlight', nom: 'Highlight', tip: 'Resaltador — resalta sin tapar' },
+    { id: 'erase', grp: 'ink', ico: 'eraser', nom: 'Eraser', tip: 'Borrador de tinta: pasa por encima de un trazo' }
   ];
   var GRUPOS = [
     { id: 'nav', nom: 'Navegar', largo: 'Navegar' },
@@ -14074,7 +14095,7 @@
   function btnTool(id) {
     var d = defDe(id); if (!d) return '';
     var tieneDd = !!d.menu;
-    return '<button class="tool' + (tool === id ? ' active' : '') + '" data-tool="' + id + '" title="' + esc(d.tip) + '">' + d.ico + '<label>' + esc(d.nom) + '</label>' +
+    return '<button class="tool' + (tool === id ? ' active' : '') + '" data-tool="' + id + '" title="' + esc(d.tip) + '">' + ICO.svg(d.ico) + '<label>' + esc(d.nom) + '</label>' +
       (tieneDd ? '<span class="dd" data-menu="' + d.menu + '" title="' + esc(d.menuTip) + '">▾</span>' : '') + '</button>';
   }
   function btnGrupo(g, vert) {
@@ -14082,7 +14103,7 @@
     var abierto = false;
     try { abierto = !$('#toolMenu').hidden && $('#toolMenu').dataset.grp === g.id; } catch (e) {}
     return '<button class="grpBtn' + (grpDe(tool) === g.id ? ' active' : '') + (abierto ? ' abierto' : '') + '" data-grp="' + g.id + '" title="' + esc(g.largo) + ' — toca para ver todas sus herramientas">' +
-      '<span class="gIco">' + (ult ? ult.ico : '') + '</span><label>' + esc(vert && g.corto ? g.corto : g.nom) + '</label></button>';
+      '<span class="gIco">' + (ult ? ICO.svg(ult.ico) : '') + '</span><label>' + esc(vert && g.corto ? g.corto : g.nom) + '</label></button>';
   }
   function elBarra(id, dock) {
     var div = document.createElement('div');
@@ -14141,7 +14162,7 @@
     if (g && layout.ultima[g] !== t) { layout.ultima[g] = t; guardaLayoutLuego(); }
     $$('.dock .grpBtn').forEach(function (b) {
       var d = defDe(layout.ultima[b.dataset.grp]) || toolsDe(b.dataset.grp)[0];
-      var ic = b.querySelector('.gIco'); if (ic && d) ic.textContent = d.ico;
+      var ic = b.querySelector('.gIco'); if (ic && d) ic.innerHTML = ICO.svg(d.ico);
       b.classList.toggle('active', b.dataset.grp === g);
     });
     $$('#toolMenu .tmTool').forEach(function (it) { it.classList.toggle('cur', it.dataset.tool === t); });
@@ -14189,7 +14210,7 @@
     var esFav = layout.favs.indexOf(d.id) >= 0;
     var conSub = !!d.menu || (d.id === 'calibrate' && !!state.bg);
     return '<div class="tmItem tmTool' + (tool === d.id ? ' cur' : '') + '" data-tool="' + d.id + '" title="' + esc(d.tip) + '">' +
-      '<span class="tIco">' + d.ico + '</span><span class="tNom">' + esc(d.nom) + '</span>' +
+      '<span class="tIco">' + ICO.svg(d.ico) + '</span><span class="tNom">' + esc(d.nom) + '</span>' +
       (d.key ? '<span class="tKey">' + d.key + '</span>' : '') +
       (conSub ? '<span class="tSub" title="' + esc(d.menuTip || '') + '">▸</span>' : '') +
       '<span class="tPin' + (esFav ? ' on' : '') + '" title="' + (esFav ? 'Quitar de Mis herramientas' : 'Poner en Mis herramientas') + '">' + (esFav ? '★' : '☆') + '</span></div>';
@@ -14378,14 +14399,14 @@
   }
   function pintaPanelBarras() {
     var p = $('#barrasPanel'), st = p.scrollTop;
-    var html = '<h4>Organizar barras <button class="x" data-bp="cerrar" title="Cerrar">✕</button></h4>';
+    var html = '<h4>Organizar barras <button class="x" data-bp="cerrar" title="Cerrar">' + ICO.svg('close') + '</button></h4>';
     html += '<div class="bpSec">Barras — cuáles ves y dónde van</div>';
     ordenBarras().forEach(function (o) {
       var arr = layout.docks[o.dock], i = arr.indexOf(o.id), vis = barraVisible(o.id);
       html += '<div class="bpRow" data-barra="' + o.id + '">' +
         '<label class="nm" title="' + esc(BARRAS[o.id].tip) + '"><input type="checkbox" data-bp="ver"' + (vis ? ' checked' : '') + ' title="Ver u ocultar esta barra">' + esc(BARRAS[o.id].nom) + '</label>' +
         '<select data-bp="dock" title="Dónde va la barra">' + DOCKS.map(function (d) { return '<option value="' + d + '"' + (d === o.dock ? ' selected' : '') + '>' + DOCK_NOM[d] + '</option>'; }).join('') + '</select>' +
-        '<button data-bp="mv" data-n="-1" title="Antes"' + (i <= 0 ? ' disabled' : '') + '>◀</button>' +
+        '<button data-bp="mv" data-n="-1" title="Antes"' + (i <= 0 ? ' disabled' : '') + '>' + ICO.svg('flechaIzq') + '</button>' +
         '<button data-bp="mv" data-n="1" title="Después"' + (i >= arr.length - 1 ? ' disabled' : '') + '>▶</button></div>';
     });
     html += '<p class="bpNota">También puedes agarrar la ⋮⋮ de cualquier barra y soltarla arriba, abajo o a un lado del plano.</p>';
@@ -14394,9 +14415,9 @@
     layout.favs.forEach(function (id, i) {
       var d = defDe(id);
       html += '<div class="bpRow" data-fav="' + id + '"><span class="ico">' + d.ico + '</span><span class="nm">' + esc(d.nom) + '</span>' +
-        '<button data-bp="fmv" data-n="-1" title="Subir"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
-        '<button data-bp="fmv" data-n="1" title="Bajar"' + (i === layout.favs.length - 1 ? ' disabled' : '') + '>▼</button>' +
-        '<button class="quitar" data-bp="fdel" title="Quitar de Mis herramientas">✕</button></div>';
+        '<button data-bp="fmv" data-n="-1" title="Subir"' + (i === 0 ? ' disabled' : '') + '>' + ICO.svg('flechaArriba') + '</button>' +
+        '<button data-bp="fmv" data-n="1" title="Bajar"' + (i === layout.favs.length - 1 ? ' disabled' : '') + '>' + ICO.svg('flechaAbajo') + '</button>' +
+        '<button class="quitar" data-bp="fdel" title="Quitar de Mis herramientas">' + ICO.svg('close') + '</button></div>';
     });
     var libres = TOOL_DEFS.filter(function (d) { return layout.favs.indexOf(d.id) < 0; });
     if (libres.length) {
@@ -14789,7 +14810,7 @@
       return true;
     };
     setTimeout(function () {
-      setHint('📱 Modo iPad: 🧰 abre los símbolos · ⚙ abre propiedades · pellizca para zoom · un dedo dibuja');
+      setHint('Modo iPad: el botón de la caja de herramientas abre los símbolos · el engranaje abre propiedades · pellizca para zoom · un dedo dibuja');
     }, 400);
   }
 
@@ -14813,6 +14834,7 @@
       if (bl) { bl.src = window.MAXPOWER_LOGO; bl.hidden = false; }
     }
   } catch (e) {}
+  try { ICO.pinta(); } catch (e) {}
   renderGrid();
   buildPalette();
   applyView();
@@ -14908,8 +14930,8 @@
     renderSheetTabs();
     updateOvUI();
     if (sinLectura) {
-      uiAlert('No se pudo leer lo guardado en este aparato: el almacenamiento no respondió.\n\nPara no pisar nada, en esta sesión NO se guarda automáticamente. Usa 💾 Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.');
-      setHint('⚠️ Sin guardado automático en esta sesión (el almacenamiento no respondió) — usa 💾 Guardar');
+      uiAlert('No se pudo leer lo guardado en este aparato: el almacenamiento no respondió.\n\nPara no pisar nada, en esta sesión NO se guarda automáticamente. Usa Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.');
+      setHint('⚠️ Sin guardado automático en esta sesión (el almacenamiento no respondió) — usa Guardar');
     } else setHint(restored
       ? '🔄 Tu trabajo se restauró automáticamente — todo se guarda solo mientras dibujas (💾 Guardar para tener el archivo)'
       : 'Bienvenido a MXP Planos — dibuja paredes (W), coloca símbolos desde la paleta, o importa un plano con "Fondo" y calíbralo (K)');
