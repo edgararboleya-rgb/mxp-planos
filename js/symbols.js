@@ -1240,12 +1240,6 @@
 
   /* --- lado de servicio (el poste, el service drop, el meter y el LB viven en
      la pestaña 🔌 Riser, a medida real: aquí solo lo que NO está allá) --- */
-  ol('ol_weatherhead', 'Weatherhead (one-line)', 'Weatherhead', 32, 54,
-    PA('M-11,26 L-11,-8 A11,11 0 0 1 11,-8 L11,0') +          // pared de afuera del cuello
-    PA('M-1,26 L-1,-8 A1,1 0 0 1 1,-8 L1,0') +                // pared de adentro
-    L(2, 0, 2, 10) + L(6, 1, 6, 11) + L(10, 0, 10, 10));      // los conductores que salen
-  ol('ol_xfmr_util', 'Utility Transformer — dos círculos (one-line)', 'XFMR utility', 42, 28,
-    C(-6, 0, 11) + C(6, 0, 11));
   ol('ol_xfmr_dy', 'Utility Transformer Δ–Y (delta / wye)', 'XFMR Δ-Y', 46, 32,
     C(-8, 0, 12) + C(8, 0, 12) + delta(-8, 1, 6) + wye(8, 0, 6));
 
