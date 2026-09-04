@@ -493,6 +493,54 @@
     cat: 'riser', layer: 'electrical', w: 18, h: 38, bx: 0, by: 4,
     svg: C(0, -6, 8) + C(0, 6, 8) + T(0, 21, 5, 'XFMR', { bold: true }) };
 
+  /* ===================== 480 V (Edgar, 04/09) =====================
+     "Crea un transformador y panelboards de 480, pero créalos en la parte de
+      riser, porque lo que quería es que todo fuera como riser… y también el
+      VFD, manteniendo ese estilo."
+     O sea: CAJONES A MEDIDA REAL como el resto de la pestaña 🔌 Riser, no la
+     simbología de wiring diagram. Las medidas son las típicas del oficio
+     (marcadas 'oficio'): confírmalas contra la hoja del fabricante antes de
+     dimensionar un cuarto eléctrico. */
+  function xfmrBox(alto, ancho, kva) {
+    var r = Math.min(ancho * 0.19, 7), tam = Math.min(ancho * 0.21, 4.4);
+    return R(-ancho / 2, -alto / 2, ancho, alto) +
+      C(0, -alto * 0.26, r) + C(0, -alto * 0.26 + r * 1.3, r) +
+      T(0, alto / 2 - alto * 0.17, tam, 'XFMR', { bold: true }) +
+      T(0, alto / 2 - alto * 0.06, tam * 0.78, kva);
+  }
+  function vfdBox(alto, ancho, hp) {
+    var tam = Math.min(ancho * 0.24, 4.2);
+    return R(-ancho / 2, -alto / 2, ancho, alto) +
+      L(-ancho / 2 + 1.5, -alto * 0.08, ancho / 2 - 1.5, -alto / 2 + 1.5) +   // la diagonal del variador
+      T(0, alto / 2 - alto * 0.20, tam, 'VFD', { bold: true }) +
+      T(0, alto / 2 - alto * 0.06, tam * 0.78, hp);
+  }
+  // transformadores secos 480 → 208Y/120 (medidas típicas de uso general)
+  S.riser_xfmr_30_480 = { name: 'Transformer 30kVA 480→208Y/120 (30"×22", oficio)', short: 'XFMR 30kVA',
+    cat: 'riser', layer: 'electrical', w: 28, h: 41, svg: xfmrBox(30, 22, '30kVA 480V') };
+  S.riser_xfmr_45_480 = { name: 'Transformer 45kVA 480→208Y/120 (34"×24", oficio)', short: 'XFMR 45kVA',
+    cat: 'riser', layer: 'electrical', w: 30, h: 45, svg: xfmrBox(34, 24, '45kVA 480V') };
+  S.riser_xfmr_75_480 = { name: 'Transformer 75kVA 480→208Y/120 (40"×28", oficio)', short: 'XFMR 75kVA',
+    cat: 'riser', layer: 'electrical', w: 34, h: 51, svg: xfmrBox(40, 28, '75kVA 480V') };
+  S.riser_xfmr_112_480 = { name: 'Transformer 112.5kVA 480→208Y/120 (46"×32", oficio)', short: 'XFMR 112kVA',
+    cat: 'riser', layer: 'electrical', w: 38, h: 57, svg: xfmrBox(46, 32, '112kVA 480V') };
+  // panelboards de 277/480 V, 3 fases 4 hilos (cajón de 20" salvo el de 600A)
+  S.riser_panel_480_100 = { name: 'Panelboard 100A 277/480V 18ckt (50"×20", oficio)', short: 'Panel 100A 480V',
+    cat: 'riser', layer: 'electrical', w: 26, h: 61, svg: loadCenter(50, 20, 'PANEL', '100A 480V') };
+  S.riser_panel_480_225 = { name: 'Panelboard 225A 277/480V 30ckt (62"×20", oficio)', short: 'Panel 225A 480V',
+    cat: 'riser', layer: 'electrical', w: 26, h: 73, svg: loadCenter(62, 20, 'PANEL', '225A 480V') };
+  S.riser_panel_480_400 = { name: 'Panelboard 400A 277/480V 42ckt (74"×20", oficio)', short: 'Panel 400A 480V',
+    cat: 'riser', layer: 'electrical', w: 26, h: 85, svg: loadCenter(74, 20, 'PANEL', '400A 480V') };
+  S.riser_panel_480_600 = { name: 'Panelboard 600A 277/480V 42ckt MCB (86"×24", oficio)', short: 'Panel 600A 480V',
+    cat: 'riser', layer: 'electrical', w: 30, h: 97, svg: loadCenter(86, 24, 'PANEL', '600A 480V') };
+  // variadores de frecuencia, NEMA 1 de pared (por caballaje a 480 V)
+  S.riser_vfd_10 = { name: 'VFD hasta 10HP 480V (18"×10", oficio)', short: 'VFD 10HP',
+    cat: 'riser', layer: 'electrical', w: 16, h: 29, svg: vfdBox(18, 10, '≤10 HP') };
+  S.riser_vfd_25 = { name: 'VFD hasta 25HP 480V (24"×12", oficio)', short: 'VFD 25HP',
+    cat: 'riser', layer: 'electrical', w: 18, h: 35, svg: vfdBox(24, 12, '≤25 HP') };
+  S.riser_vfd_50 = { name: 'VFD hasta 50HP 480V (34"×16", oficio)', short: 'VFD 50HP',
+    cat: 'riser', layer: 'electrical', w: 22, h: 45, svg: vfdBox(34, 16, '≤50 HP') };
+
   S.riser_padmount = { name: 'Pad-mount Transformer (planta 60"×48", utility)', short: 'Pad-mount',
     cat: 'riser', layer: 'electrical', w: 62, h: 59, bx: 0, by: 4.5,
     svg: R(-30, -24, 60, 48, 2) + C(-9, 0, 8) + C(9, 0, 8) +
@@ -1190,20 +1238,12 @@
     return out;
   }
 
-  /* --- lado de servicio --- */
-  ol('ol_pole', 'Service Pole / Poste de servicio', 'Poste', 34, 124,
-    L(0, -60, 0, 60) + L(-15, -46, 15, -46) + C(-10, -49.5, 2.4) + C(0, -49.5, 2.4) + C(10, -49.5, 2.4));
-  ol('ol_drop', 'Service Drop / bajante de acometida', 'Service drop', 62, 42,
-    PA('M-29,-15 Q0,5 29,-17') + PA('M-29,-9 Q0,11 29,-11') + PA('M-29,-3 Q0,17 29,-5') +
-    T(0, 19, 6, 'SERVICE DROP', { bold: true }));
+  /* --- lado de servicio (el poste, el service drop, el meter y el LB viven en
+     la pestaña 🔌 Riser, a medida real: aquí solo lo que NO está allá) --- */
   ol('ol_weatherhead', 'Weatherhead (one-line)', 'Weatherhead', 32, 54,
     PA('M-11,26 L-11,-8 A11,11 0 0 1 11,-8 L11,0') +          // pared de afuera del cuello
     PA('M-1,26 L-1,-8 A1,1 0 0 1 1,-8 L1,0') +                // pared de adentro
     L(2, 0, 2, 10) + L(6, 1, 6, 11) + L(10, 0, 10, 10));      // los conductores que salen
-  ol('ol_meter', 'Meter — círculo con M (one-line)', 'Meter M', 28, 28,
-    C(0, 0, 12) + T(0, 5, 13, 'M', { bold: true }));
-  ol('ol_meter_kwh', 'Meter — círculo con kWh (one-line)', 'Meter kWh', 28, 28,
-    C(0, 0, 12) + T(0, 3.5, 8, 'kWh', { bold: true }));
   ol('ol_xfmr_util', 'Utility Transformer — dos círculos (one-line)', 'XFMR utility', 42, 28,
     C(-6, 0, 11) + C(6, 0, 11));
   ol('ol_xfmr_dy', 'Utility Transformer Δ–Y (delta / wye)', 'XFMR Δ-Y', 46, 32,
@@ -1268,9 +1308,6 @@
     L(0, -20, 0, 8) + C(0, -20, 2.4, DOT) + gnd(0, 8) + T(6, -8, 8, 'GEC', { bold: true, anchor: 'start' }));
 
   /* --- canalización --- */
-  ol('ol_lb', 'Conduit Body LB', 'LB', 40, 40,
-    PA('M-16,16 L-16,-4 A12,12 0 0 1 -4,-16 L16,-16') + PA('M-6,16 L-6,-4 A2,2 0 0 1 -4,-6 L16,-6') +
-    R(-15, -15, 10, 10, 1.5) + T(2, 10, 8, 'LB', { bold: true }));
 
   /* --- control y arranque --- */
   ol('ol_hoa', 'Selector Hand-Off-Auto', 'HOA', 46, 44,
@@ -1291,16 +1328,8 @@
   ol('ol_float_sw', 'Switch de flotador', 'Float switch', 42, 44,
     L(-16, -6, -5, -6) + L(5, -6, 16, -6) + L(-5, -6, 6, -13) + L(0, -6, 0, 8) +
     PA('M-9,8 q9,-9 18,0 q-9,9 -18,0') + T(0, 22, 6, 'FS', { bold: true }));
-  ol('ol_timeclock', 'Time Clock', 'Time clock', 38, 38,
-    C(0, 0, 14) + L(0, 0, 0, -8) + L(0, 0, 6, 3) + T(0, 24, 7, 'TC', { bold: true }));
   ol('ol_vfd', 'Variable Frequency Drive (VFD)', 'VFD', 48, 42,
     R(-18, -14, 36, 28, 1) + L(-18, 14, 18, -14) + T(-9, 8, 9, 'VFD', { bold: true }));
-  ol('ol_gen', 'Generador (one-line)', 'Gen G', 34, 34,
-    C(0, 0, 15) + T(0, 5.5, 15, 'G', { bold: true }));
-  ol('ol_ats', 'Transfer Switch ATS (one-line)', 'ATS', 52, 56,
-    L(-14, -24, -14, -8) + L(14, -24, 14, -8) + L(-14, -8, 0, 2) + L(14, -8, 8, -3) +
-    C(-14, -8, 2.2, DOT) + C(14, -8, 2.2, DOT) + L(0, 2, 0, 18) + C(0, 2, 2.2, DOT) +
-    T(0, 26, 8, 'ATS', { bold: true }));
 
   /* ================== ETIQUETAS Y BLOQUES DE ANOTACIÓN ==================
      Sin estos el plano no pasa revisión. El texto que cambia por obra (el

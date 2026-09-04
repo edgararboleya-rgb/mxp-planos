@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.J';
+  var APP_VERSION = 'v30.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -8314,10 +8314,14 @@
     /* One-line: el símbolo esquemático es el MISMO equipo que su cajón real,
        así que va al estimador con el nombre que los alias ya conocen. OJO: si
        en la misma hoja se dibuja el cajón Y el símbolo, cuentan dos. */
-    ol_meter: 'Meter Can', ol_meter_kwh: 'Meter Can',
     ol_panelboard: 'Panel / Load Center', ol_loadcenter: 'Panel / Load Center',
     ol_disc_nf: 'Disconnect / Safety Switch', ol_disc_f: 'Disconnect / Safety Switch',
-    ol_ats: 'ATS (Transfer Switch)', ol_spd_ol: 'Surge Protector (SPD)'
+    ol_spd_ol: 'Surge Protector (SPD)',
+    // 480 V del riser: mismo material que sus hermanos de 120/240
+    riser_xfmr_30_480: 'Transformer', riser_xfmr_45_480: 'Transformer',
+    riser_xfmr_75_480: 'Transformer', riser_xfmr_112_480: 'Transformer',
+    riser_panel_480_100: 'Panel / Load Center', riser_panel_480_225: 'Panel / Load Center',
+    riser_panel_480_400: 'Panel / Load Center', riser_panel_480_600: 'Panel / Load Center'
   };
   function nombreEst(k) { return EST_NOMBRE[k] || (SYMBOLS[k] ? SYMBOLS[k].name : k); }
   // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,
