@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.I';
+  var APP_VERSION = 'v30.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -636,7 +636,8 @@
      planos_proyectos. Nada bloquea el dibujo: se encola, se sube en segundo
      plano y el badge ☁ dice en qué anda. Sin sesión del estimador no hace
      nada; sin red, espera a que vuelva. */
-  var nube = { estado: 'off', msg: '', intentos: 0, timer: null, subiendo: false, pendientes: {}, ultimoOk: '', conflictoAbierto: false, pospuestos: {} };
+  var nube = { estado: 'off', msg: '', intentos: 0, timer: null, subiendo: false, desde: 0, pendientes: {}, ultimoOk: '', conflictoAbierto: false, pospuestos: {} };
+  var NUBE_COLGADA = 90000;   // una subida que pasa de esto se da por colgada y se reintenta
   var NUBE_ESPERA = 6000, NUBE_REINTENTO = [8000, 25000, 60000];
   function nubeUid() { var s = sbAuth(); return s && s.uid ? s.uid : null; }
   function nubeActiva() { return !!(SB && SB.url && nubeUid()); }
@@ -652,9 +653,26 @@
   function pintaNube() {
     var n = $('#pjNube'); if (!n) return;
     var txt = { off: '☁ sin conexión al panel', espera: '☁ pendiente de subir', subiendo: '☁ subiendo…', ok: '☁ al día', error: '⚠ no subió', sinred: '☁ sin internet', conflicto: '⚠ conflicto con otro aparato', nuevo: '☁ hay una versión más nueva' }[nube.estado] || '';
-    n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '');
-    n.title = nube.msg || (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón 💲 Estimador) para que los planos suban solos.' : '');
-    n.className = 'nubeBadge ' + nube.estado;
+    var nPend = Object.keys(nube.pendientes).length;
+    n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '') + (nPend > 1 ? ' (' + nPend + ')' : '');
+    n.title = (nube.msg ? nube.msg + '\n\n' : '') +
+      (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón 📤 Estimador, abajo en MATERIALES) para que los planos suban solos.'
+        : 'Toca aquí para subir ahora mismo.' + (nPend ? '\nEn cola: ' + nPend + '.' : ''));
+    n.className = 'nubeBadge ' + nube.estado + (nube.estado === 'off' ? '' : ' clic');
+  }
+  /* Tocar el badge = subir AHORA. Sirve para no esperar, y para ver el error de
+     verdad si algo no sube (Edgar, 04/09: se le quedó en "pendiente de subir"). */
+  function nubeAhora() {
+    if (!nubeActiva()) { uiAlert('Todavía no has entrado con tu usuario del panel.\n\nUsa el botón 📤 Estimador (abajo, en MATERIALES) y entra; a partir de ahí los planos suben solos.'); return; }
+    if (navigator.onLine === false) { nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); return; }
+    nube.pospuestos = {};
+    if (nube.subiendo && Date.now() - nube.desde > NUBE_COLGADA) nube.subiendo = false;
+    if (nube.subiendo) { setHint('☁ Ya se está subiendo…'); return; }
+    nube.intentos = 0;
+    if (!Object.keys(nube.pendientes).length) nube.pendientes[state.project.id] = 1;
+    clearTimeout(nube.timer);
+    setHint('☁ Subiendo ahora…');
+    subeCola();
   }
   function nubeSet(estado, msg) { nube.estado = estado; nube.msg = msg || ''; pintaNube(); }
   function gzipTexto(txt, cb) {
@@ -683,6 +701,7 @@
     nube.timer = setTimeout(subeCola, NUBE_ESPERA);
   }
   function subeCola() {
+    if (nube.subiendo && Date.now() - nube.desde > NUBE_COLGADA) nube.subiendo = false;   // se colgó: se reintenta
     if (nube.subiendo || nube.conflictoAbierto) return;
     var ids = Object.keys(nube.pendientes);
     if (!ids.length) { nubeSet(nubeActiva() ? 'ok' : 'off'); return; }
@@ -691,7 +710,7 @@
     var libres = ids.filter(function (x) { return !pospuesto(x); });
     if (!libres.length) { nubeSet('conflicto', 'Hay un conflicto sin decidir; lo demás está al día.'); return; }
     var id = libres[0];
-    nube.subiendo = true; nubeSet('subiendo');
+    nube.subiendo = true; nube.desde = Date.now(); nubeSet('subiendo');
     subeProyecto(id, function (ok, msg) {
       nube.subiendo = false;
       if (ok) {
@@ -865,7 +884,7 @@
       state.project.rev = Math.max(state.project.rev || 0, fila.rev || 0) + 1;
       state.project.updatedAt = new Date().toISOString();
       try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e) {}
-      nube.subiendo = true; nubeSet('subiendo');
+      nube.subiendo = true; nube.desde = Date.now(); nubeSet('subiendo');
       subeProyecto(id, function (ok, msg) {
         nube.subiendo = false; nube.conflictoAbierto = false;
         if (ok) { delete nube.pendientes[id]; delete nube.pospuestos[id]; nubeSet('ok'); setHint('☁ Subida la versión de este aparato; la anterior quedó como revisión en la nube'); }
@@ -960,7 +979,11 @@
   }
   try {
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') setTimeout(function () { revisaNube('visible'); }, 600); });
-    setInterval(function () { if (document.visibilityState === 'visible') revisaNube('reloj'); }, 5 * 60 * 1000);
+    setInterval(function () {
+      if (document.visibilityState !== 'visible') return;
+      revisaNube('reloj');
+      if (Object.keys(nube.pendientes).length && !nube.subiendo && !nube.conflictoAbierto) { clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 500); }
+    }, 5 * 60 * 1000);
   } catch (e) {}
   function bajaProyecto(fila, done) {
     var path = fila.path || rutaNube(nubeUid(), fila.id);
@@ -10521,6 +10544,7 @@
   $('#pmImport').addEventListener('click', function () { $('#fileProyectos').click(); });
   $('#fileProyectos').addEventListener('change', function () { pmImporta(this.files); this.value = ''; });
   $('#btnProyectos').addEventListener('click', pmAbrir);
+  $('#pjNube').addEventListener('click', nubeAhora);
   $('#pjLista').addEventListener('change', function () { abrirDeBiblioteca(this.value); });
   $('#pjNuevo').addEventListener('click', function () {
     if (!hayAlgoQueGuardar()) { setHint('Este proyecto ya está vacío'); return; }

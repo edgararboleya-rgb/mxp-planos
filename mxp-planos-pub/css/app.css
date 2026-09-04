@@ -555,6 +555,7 @@ svg.tool-erase { cursor: cell; }
 
 /* ☁ nube (7.3) y pantalla de proyectos (7.4) */
 .nubeBadge { flex: 1; font-size: 11px; color: #666; }
+.nubeBadge.clic { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .nubeBadge.ok { color: #0a8f3c; }
 .nubeBadge.subiendo, .nubeBadge.espera { color: #1c5fa8; }
 .nubeBadge.error { color: #a33; font-weight: 600; }
