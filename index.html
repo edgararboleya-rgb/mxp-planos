@@ -78,6 +78,7 @@
     <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>
     <input type="file" id="fileOpen" accept=".json,application/json,application/pdf,.pdf,image/*" hidden>
     <input type="file" id="fileProyectos" accept=".json,application/json" multiple hidden>
+    <input type="file" id="fileDxf" accept=".dxf,text/plain" hidden>
   </header>
 
   <div id="toolMenu" hidden></div>
@@ -169,6 +170,8 @@
           <g id="gElectrical"></g>
           <g id="gAnnot"></g>
           <g id="gCount"></g>
+          <g id="gBusca"></g>
+          <g id="gVisual"></g>
           <g id="gMeasure"></g>
           <g id="gPreview"></g>
           <g id="gSel"></g>
@@ -191,6 +194,7 @@
           <label class="lay"><input type="checkbox" data-layer="background" checked> Background (imported plan)</label>
           <div class="sub"><span>Opacity</span><input type="range" id="bgOpacity" min="10" max="100" value="70"></div>
           <div class="sub"><button id="btnBgScale" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Aplica la escala escrita en el plano (ej: 1/4&quot; = 1'-0&quot;) sin calibrar" data-ico="escala">Escala del plano</button></div>
+          <div class="sub"><button id="btnBuscaPdf" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Busca una palabra dentro del PDF del ingeniero (PANEL A, GFCI, 2-WAY...) y te lleva a donde está, en cualquier hoja del set" data-ico="buscar">Buscar texto en el plano</button></div>
           <div class="sub"><button id="btnBgLines" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" data-ico="tijera">Solo líneas (fondo transparente)</button></div>
           <div class="sub"><button id="btnBgDel" style="flex:1;padding:4px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px" title="Borra la imagen del plano importado y deja SOLO lo que dibujaste. No se puede deshacer." data-ico="papelera">Quitar el plano de fondo</button></div>
           <div class="sub"><button id="btnOv" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara 2 pisos: el plano base se pone AZUL y el otro ROJO — donde no cuadran, algo cambió" data-ico="overlay">Overlay: comparar con otro plano</button></div>
@@ -256,6 +260,26 @@
               <option value="full">Con carátula y leyenda</option>
             </select>
           </div>
+          <div class="row" title="El sello que va estampado sobre el plano al imprimir o exportar (como el de un plano de ingeniero)"><label>Sello</label>
+            <select id="pjSello" style="flex:1">
+              <option value="" selected>Sin sello</option>
+              <option value="FOR PERMIT">FOR PERMIT</option>
+              <option value="FOR CONSTRUCTION">FOR CONSTRUCTION</option>
+              <option value="AS-BUILT">AS-BUILT</option>
+              <option value="NOT FOR CONSTRUCTION">NOT FOR CONSTRUCTION</option>
+              <option value="FOR REVIEW / BID">FOR REVIEW / BID</option>
+              <option value="REVISION">REVISION</option>
+            </select>
+          </div>
+          <div class="row" title="Coge el PDF del ingeniero tal cual y le estampa encima tus marcas, en vector: su plano sigue nítido a cualquier zoom y su texto se sigue pudiendo buscar">
+            <label>PDF vector</label>
+            <button id="btnPdfVec" style="flex:1" title="PDF vectorial ENCIMA del original: el plano del ingeniero no se convierte en imagen. Solo funciona si esta hoja tiene un PDF de fondo." data-ico="pdf">Encima del original</button>
+          </div>
+          <div class="row" title="DXF: el formato con el que se habla con AutoCAD y Revit sin pasar por PDF">
+            <label>DXF</label>
+            <button id="btnDxfExp" style="flex:1" title="Exportar esta hoja a DXF, en pulgadas y por capas (A-WALL, E-POWR, A-ANNO…). Sale exactamente lo que se ve." data-ico="dxf">Exportar</button>
+            <button id="btnDxfImp" style="flex:1" title="Importar un DXF del ingeniero. Entra como líneas y rótulos: un DXF ajeno no dice cuál de sus líneas es una pared." data-ico="upload">Importar</button>
+          </div>
           <div class="row"><label>Print scale</label>
             <select id="pjScale" style="flex:1">
               <option value="fit" selected>Graphic (fit page)</option>
@@ -274,6 +298,31 @@
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
       </section>
     </aside>
+  </div>
+
+  <!-- ======= BUSCAR IGUALES EN EL PLANO → COUNT (5.9) ======= -->
+  <div id="visualBox" class="oculto">
+    <div id="visualCab">
+      <span id="visualTit">BUSCAR IGUALES EN EL PLANO</span>
+      <button id="visualCerrar" title="Cerrar" data-ico="close"></button>
+    </div>
+    <div id="visualCuerpo"></div>
+  </div>
+
+  <!-- ======= BUSCAR TEXTO EN EL PDF DEL INGENIERO (5.8) ======= -->
+  <div id="buscaBox" class="oculto">
+    <div id="buscaCab">
+      <span id="buscaTit">BUSCAR EN EL PLANO</span>
+      <span id="buscaN" class="muted small"></span>
+      <button id="buscaPrev" title="Anterior" data-ico="flechaArriba"></button>
+      <button id="buscaSig" title="Siguiente" data-ico="flechaAbajo"></button>
+      <button id="buscaCerrar" title="Cerrar" data-ico="close"></button>
+    </div>
+    <div id="buscaFiltro">
+      <input type="search" id="buscaTxt" placeholder="Palabra del plano… (PANEL A, GFCI, 2-WAY)">
+      <label class="lay" title="Buscar en todas las hojas del set que vengan del mismo PDF"><input type="checkbox" id="buscaTodas" checked> Todo el set</label>
+    </div>
+    <div id="buscaLista"></div>
   </div>
 
   <!-- ======= LISTA DE MARCAS (Markups List) — panel flotante, no modal: se queda abierto mientras recorres el plano ======= -->

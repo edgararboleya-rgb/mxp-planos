@@ -452,6 +452,34 @@ body.touch .cntChip { width: 15px; height: 15px; }
 #canvas g.cnt text { user-select: none; }
 svg.tool-count { cursor: crosshair; }
 svg.tool-match { cursor: copy; }
+svg.tool-trim { cursor: crosshair; }
+
+/* Barra flotante de propiedades (4.5): pegada a lo seleccionado, solo en dedo */
+#propFlot {
+  position: absolute; z-index: 62; display: flex; align-items: center; gap: 3px;
+  background: var(--mp-deep); border: 1px solid rgba(255,255,255,.16); border-radius: 14px;
+  padding: 4px; box-shadow: 0 8px 26px rgba(7,26,46,.45);
+}
+#propFlot[hidden] { display: none !important; }
+#propFlot button {
+  width: 44px; height: 44px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
+  background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.03));
+  color: #E8F3FA; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+#propFlot button:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.28); }
+#propFlot button:active { transform: translateY(1px); }
+#propFlot button.mal { color: #FF9A9A; border-color: rgba(255,120,120,.35); }
+#propFlot svg.ico { width: 21px; height: 21px; }
+
+/* Mi cofre (5.10): botones de las herramientas guardadas */
+.barra button.cofreBtn { min-width: 66px; padding-left: 8px; padding-right: 8px; }
+.barra button.cofreBtn label { max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock.vert .barra button.cofreBtn { min-width: 52px; width: 52px; padding: 3px 4px; }
+.cofIco { display: flex; align-items: center; justify-content: center; height: 20px; line-height: 1; }
+.cofIco svg { width: 22px; height: 18px; }
+#toolMenu .tmItem.k-off { opacity: .35; pointer-events: none; }
+
 
 /* ===== iconos de línea (js/icons.js) ===== */
 svg.ico { width: 18px; height: 18px; flex: none; display: block; pointer-events: none; }
@@ -580,6 +608,16 @@ body.sumandoSel #btnSumar { background: rgba(140,240,106,.18); color: var(--mp-l
 #printSheet .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 4px 8px; border: 1px solid #14161a; border-top: none; font-size: 9px; align-items: center; }
 #printSheet .legend .it { display: flex; align-items: center; gap: 4px; }
 #printSheet .legend svg { width: 26px; height: 20px; }
+/* sello del plano (4.3): estampado sobre el dibujo, arriba a la derecha */
+#printSheet .drawArea { position: relative; }
+#printSheet .selloPlano {
+  position: absolute; top: 6px; right: 8px; z-index: 3;
+  border: 2.5px solid #14161a; color: #14161a; border-radius: 4px;
+  padding: 3px 12px; font-weight: 800; font-size: 13px; letter-spacing: 2px;
+  background: rgba(255,255,255,.82);
+}
+#printSheet .selloPlano.ojo { border-color: #b3383b; color: #b3383b; }
+#printSheet .legend .it { display: flex; align-items: center; gap: 3px; }
 
 /* E-2 print tables */
 #printSheet .e2Area { padding: 8px 14px; overflow: hidden; }
@@ -853,6 +891,62 @@ body.touch #marcasCab #marcasMarcar { min-height: 44px; font-size: 13px; padding
 #marcasTabla td.n { text-align: right; font-variant-numeric: tabular-nums; min-width: 92px; padding-right: 14px; }
 #marcasTabla th:last-child { text-align: right; padding-right: 14px; }
 #marcasTabla td.k { color: var(--mp-ink-2); font-size: 11px; }
+/* Buscar iguales en el plano → Count (5.9) */
+#visualBox {
+  position: fixed; right: 276px; top: 78px; z-index: 61; width: 300px; max-width: calc(100vw - 16px);
+  background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 14px;
+  box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 20px 44px -14px rgba(7,26,46,.35); overflow: hidden;
+}
+#visualBox.oculto { display: none; }
+#visualCab { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line); cursor: move; touch-action: none; user-select: none; }
+#visualTit { font-weight: 600; font-size: 12px; flex: 1; letter-spacing: .1em; color: var(--mp-ink); }
+#visualCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+#visualCuerpo { padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+#visualCuerpo .bMuted { color: var(--mp-ink-2); line-height: 1.5; }
+#visualCuerpo .vN { font-size: 13px; }
+#visualCuerpo .row { display: flex; gap: 6px; align-items: center; }
+#visualCuerpo .row label { flex: none; width: 76px; font-size: 11px; color: var(--mp-ink-2); }
+#visualCuerpo select, #visualCuerpo button { padding: 5px 9px; border: 1px solid rgba(27,60,140,.18); border-radius: 9px; background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); color: var(--mp-navy); font-size: 12px; font-weight: 600; cursor: pointer; }
+#visualCuerpo button[disabled] { opacity: .45; cursor: default; }
+#canvas rect.visual { fill: rgba(10,143,60,.16); stroke: #0a8f3c; stroke-width: 0.8; pointer-events: none; }
+#canvas rect.visual.molde { stroke: #0b84ff; stroke-width: 1.4; fill: rgba(11,132,255,.14); }
+body.touch #visualBox { right: 8px; top: 76px; width: min(340px, calc(100vw - 16px)); }
+body.touch #visualCab button { width: 34px; height: 34px; }
+svg.tool-vsearch { cursor: crosshair; }
+
+/* Buscar texto en el PDF del ingeniero (5.8) */
+#buscaBox {
+  position: fixed; left: 250px; top: 78px; z-index: 61;
+  width: 380px; max-width: calc(100vw - 16px);
+  height: 340px; max-height: calc(100vh - 90px);
+  display: flex; flex-direction: column;
+  background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 14px;
+  box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 20px 44px -14px rgba(7,26,46,.35); overflow: hidden; resize: both;
+}
+#buscaBox.oculto { display: none; }
+#buscaCab {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line);
+  cursor: move; touch-action: none; user-select: none;
+}
+#buscaTit { font-weight: 600; font-size: 12.5px; flex: 1; letter-spacing: .11em; color: var(--mp-ink); }
+#buscaCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+#buscaCab button:hover { background: var(--mp-sky-2); border-color: var(--mp-blue); }
+#buscaFiltro { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
+#buscaFiltro input[type=search] { flex: 1; min-width: 0; padding: 6px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 12px; background: #fff; }
+#buscaFiltro input[type=search]:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
+#buscaFiltro .lay { flex: none; font-size: 11px; color: var(--mp-ink-2); white-space: nowrap; }
+#buscaLista { flex: 1; overflow: auto; padding: 4px 0; }
+#buscaLista .bMuted { color: var(--mp-ink-2); font-size: 12px; padding: 12px 12px; line-height: 1.5; }
+#buscaLista .bFila { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--mp-line); }
+#buscaLista .bFila:hover { background: var(--mp-sky-2); }
+#buscaLista .bFila.cur { background: var(--mp-sky-3); }
+#buscaLista .bHoja { flex: none; font-size: 10px; font-weight: 700; color: var(--mp-teal-text); min-width: 34px; }
+#buscaLista .bTxt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#canvas rect.busca { fill: rgba(242,194,48,.32); stroke: #E0A800; stroke-width: 0.6; pointer-events: none; }
+#canvas rect.busca.cur { fill: rgba(255,140,0,.42); stroke: #E06C00; stroke-width: 1.2; }
+body.touch #buscaBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 48vh; }
+body.touch #buscaCab button { width: 34px; height: 34px; }
 body.touch #marcasBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 55vh; }
 body.touch #marcasCab button { width: 34px; height: 34px; }
 

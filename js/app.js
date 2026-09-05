@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.E';
+  var APP_VERSION = 'v31.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -289,6 +289,49 @@
     clip: function () { return formatoClip ? { kind: formatoClip.kind, nom: formatoClip.nom, props: formatoClip.props } : null; }
   };
   window.__undoDbg = function () { return { n: undoStack.length, undo: function () { undo(); } }; };
+  window.__visualDbg = {
+    busca: function (rect, umbral, cb) {
+      visualArranca(rect, function (res) {
+        if (res.err) { cb({ err: res.err }); return; }
+        visual = { ctx0: res, umbral: umbral, hits: null };
+        visualBarre(res, umbral, null, function (hits) { visual.hits = hits; pintaVisual(); cb({ hits: hits }); });
+      });
+    },
+    mete: function (catId) { metVisualAlConteo(catId); },
+    estado: function () { return visual ? { n: visual.hits ? visual.hits.length : null, umbral: visual.umbral } : null; }
+  };
+  window.__pdfVecDbg = function (cb) { pdfEncimaDelOriginal(cb); };
+  window.__idbDbg = function (k, cb) { idbGet(k, cb); };
+  window.__pdfLiveDbg = function () { return pdfLive[state.curSheet]; };
+  window.__dxfDbg = {
+    exporta: function () { try { return dxfDelPlano(); } catch (e) { return { err: 'EXC ' + e.message }; } },
+    importa: function (txt) { var out = null; try { importaDxf(txt, function (r) { out = r; }); } catch (e) { return { err: 'EXC ' + e.message }; } return out; },
+    mete: function (r) { try { meteDxf(r); return true; } catch (e) { return 'EXC ' + e.message; } }
+  };
+  window.__trimDbg = {
+    modo: function (m) { trimModo = m; },
+    recorta: function (ref, p) { try { var r = recorta(ref, p); limpiaHuerfanas(); refresh(); return r; } catch (e) { return { ok: false, msg: 'EXC ' + e.message }; } },
+    alarga: function (ref, p) { try { var r = alarga(ref, p); refresh(); return r; } catch (e) { return { ok: false, msg: 'EXC ' + e.message }; } },
+    parte: function (ref, p) { try { var r = parte(ref, p); limpiaHuerfanas(); refresh(); return r; } catch (e) { return { ok: false, msg: 'EXC ' + e.message }; } },
+    cortes: function (x1, y1, x2, y2, excl) { return cortesEn(x1, y1, x2, y2, cortadores(excl)); }
+  };
+  window.__buscaDbg = function () { return { n: buscaRes.length, idx: buscaIdx, txts: buscaRes.map(function (r) { return r.txt; }), res: JSON.parse(JSON.stringify(buscaRes)) }; };
+  window.__hojaImpDbg = function (cont) { try { buildPrintFrame(cont); } catch (e) { return 'EXC ' + e.message; } };
+  window.__cofreDbg = {
+    items: function () { return JSON.parse(JSON.stringify(cofre)); },
+    guarda: function (ref, nom) {
+      var e = entityOf(ref); if (!e) return null;
+      var tl = toolDePieza(ref, e); if (!tl) return null;
+      cofre.push({ id: uid(), nom: nom, tool: tl, kind: ref.kind, cfg: cfgDePieza(ref, e) });
+      guardaCofre();
+      var k = layout.ocultas.indexOf('cofre'); if (k >= 0) { layout.ocultas.splice(k, 1); guardaLayout(); }
+      pintaBarras(); return cofre[cofre.length - 1].id;
+    },
+    usa: function (id) { usaCofre(id); },
+    quita: function (id) { cofre = cofre.filter(function (q) { return q.id !== id; }); guardaCofre(); pintaBarras(); },
+    mueve: function (id, d) { mueveEnCofre(id, d); },
+    pend: function () { return cofrePend ? { kind: cofrePend.kind, nom: cofrePend.nom } : null; }
+  };
   window.__encajaDbg = function () { try { encajarSel(); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
@@ -573,7 +616,7 @@
   function estadoVacio() {
     return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
       walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [], counts: [], countCats: [],
-      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
+      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', printSello: '', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
       project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '', id: nuevoIdProyecto(), rev: 0, creado: new Date().toISOString() }
     } };
   }
@@ -1263,6 +1306,7 @@
   }
   function applyView() {
     G.world.setAttribute('transform', 'translate(' + view.tx + ' ' + view.ty + ') scale(' + view.z + ')');
+    if (typeof pintaFlot === 'function') pintaFlot();
     var zl = $('#zoomLabel'); if (zl) zl.textContent = zoomPct() + '%';
     if (typeof scheduleHires === 'function') scheduleHires();
   }
@@ -4183,6 +4227,7 @@
     var e = { id: uid(), pts: pts, modo: d.modo, color: lastInk[d.modo].color, lw: lastInk[d.modo].lw };
     // presión media del Pencil: el trazo sale más gordo si se apretó (0.5 = normal)
     if (d.pres.length) { var pm = d.pres.reduce(function (a, b) { return a + b; }, 0) / d.pres.length; if (pm > 0.05 && Math.abs(pm - 0.5) > 0.08) e.k = +(0.6 + pm * 0.8).toFixed(2); }
+    estampaCofre('ink', e);
     state.inks.push(e);
     renderAnnot(); refreshCounts();
     if (typeof renderMarcas === 'function') renderMarcas();
@@ -4459,6 +4504,7 @@
       });
       s += rotHandleMarkup(selGroup);
       G.sel.innerHTML = s;
+      pintaFlot();
       return;
     }
     if (sel) {
@@ -4561,6 +4607,7 @@
       }
     }
     G.sel.innerHTML = s;
+    pintaFlot();
   }
 
   function findSel() {
@@ -4585,6 +4632,8 @@
   }
   function refresh() {
     renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderConteo(); renderBg(); renderGuia(); renderSel();
+    if (typeof pintaMarcasBusca === 'function') pintaMarcasBusca();
+    if (typeof pintaVisual === 'function') pintaVisual();
     refreshCounts(); showProps();
     if (typeof renderMarcas === 'function') renderMarcas();   // la Lista de marcas, si está abierta
   }
@@ -4828,7 +4877,9 @@
     window: 'Toca una pared para colocar la ventana',
     measure: 'Clic en dos puntos para medir (azul, no se imprime) · mantén SHIFT para línea recta',
     dim: 'Clic en dos puntos para colocar una cota · SHIFT = línea recta · doble clic en la cota edita la medida · arrástrala para separarla',
+    trim: 'RECORTAR: toca el pedazo de pared, cable o línea que SOBRA y se va (tiene que cruzarlo algo) · el ▾ cambia a Alargar o Partir · Esc para salir',
     match: 'COPIAR FORMATO: toca la marca cuyo aspecto quieres copiar y después las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir',
+    vsearch: 'BUSCAR IGUALES: encierra en un marco UN símbolo del plano del ingeniero (dos toques, esquina y esquina) y te busco todos los que se ven igual',
     count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
@@ -4873,6 +4924,11 @@
     /* MATCHPROP como en AutoCAD: si ya tienes una marca escogida, entrar al
        pincel COGE SU FORMATO — no te hace tocarla otra vez. */
     if (t !== 'match') pincelCogeOrigen = false;
+    if (t !== 'vsearch' && visual) { var vb = $('#visualBox'); if (vb) vb.classList.add('oculto'); visual = null; var gv = document.getElementById('gVisual'); if (gv) gv.innerHTML = ''; }
+    /* Lo pendiente del cofre solo vale para la herramienta que se encendió con
+       él: si cambias de herramienta por otro camino, se olvida (si no, el
+       siguiente texto saldría con el tamaño de la nota guardada). */
+    if (cofrePend && !cofreEncendiendo) { cofrePend = null; $$('.dock .cofreBtn.active').forEach(function (b) { b.classList.remove('active'); }); }
     if (t === 'match') {
       pincelPuestos = 0;
       if (sel && sel.kind !== 'opening' && entityOf(sel) && copiarFormato(sel)) {
@@ -5120,6 +5176,11 @@
       case 'text': return textDown(p);
       case 'count': return countDown(rawP);
       case 'match': return matchDown(rawP, ev);
+      case 'trim': return trimDown(rawP);
+      case 'vsearch':
+        if (drawing && drawing.mode === 'vsearch') { var a0 = drawing.a; drawing = null; G.prev.innerHTML = ''; vsearchFin(a0, rawP); }
+        else { drawing = { mode: 'vsearch', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente'); }
+        return;
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -5157,6 +5218,10 @@
         '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' + gp +
         '<text class="lbl" x="' + ((drawing.last[0] + b[0]) / 2 + 8) + '" y="' + ((drawing.last[1] + b[1]) / 2 - 8) + '" font-size="9" font-weight="bold">' + fmtFtIn(len) + '</text></g>';
       drawing.cursor = b;
+    } else if (drawing && drawing.mode === 'vsearch') {
+      var vx = Math.min(drawing.a[0], p[0]), vy = Math.min(drawing.a[1], p[1]);
+      G.prev.innerHTML = '<g class="preview"><rect x="' + vx + '" y="' + vy + '" width="' + Math.abs(p[0] - drawing.a[0]) +
+        '" height="' + Math.abs(p[1] - drawing.a[1]) + '" fill="rgba(11,132,255,.10)" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
     } else if (drawing && drawing.mode === 'shape2') {
       var spts = shapePts(drawing.kind === 'cloud' ? 'rect' : drawing.kind, drawing.a, [Math.round(p[0]), Math.round(p[1])], ev && ev.shiftKey);
       var d2 = drawing.kind === 'cloud' ? cloudPath(spts, true, cloudR({ arco: curCloudArc }))
@@ -5996,6 +6061,7 @@
   }
 
   function onDragEnd() {
+    setTimeout(pintaFlot, 0);   // el arrastre la escondía: vuelve donde quedó la pieza
     if (drag.mode === 'ink') { inkEnd(); drag = null; return; }
     if (drag.mode === 'erase') { if (drag.borrados) { pushUndo(drag.snap); refresh(); setHint('🧽 ' + drag.borrados + ' trazo(s) borrados · Ctrl+Z los devuelve'); } drag = null; return; }
     if (drag.mode === 'marquee') {
@@ -6085,6 +6151,7 @@
         return;
       }
       recortaPuntas(wNueva);
+      estampaCofre('wall', wNueva);
       state.walls.push(wNueva);
       ajustaVecinas(wNueva);
       // en cuanto la vuelta cierra, el forro del bloque salta solo al interior
@@ -6185,6 +6252,7 @@
     pushUndo();
     var e = { id: uid(), pts: pts, pattern: 'none', rot: 0 };
     if (isCloud) { e.lineStyle = 'cloud'; e.arco = curCloudArc; }
+    estampaCofre('area', e);
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
@@ -6223,6 +6291,8 @@
       recuerdaCirc(e.circ);
     }
     if (pendingAreaLabel) e.showLabel = true;
+    estampaCofre('area', e);
+    if (esHomerun) { e.lineStyle = 'homerun'; e.capS = 'arrow'; }   // el homerun manda sobre lo del cofre
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
@@ -6303,17 +6373,19 @@
       var wr = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, bulge: 0.22, lw: lastWireLw };
       if (lastWireCapS && lastWireCapS !== 'none') wr.capS = lastWireCapS;
       if (lastWireCapE && lastWireCapE !== 'none') wr.capE = lastWireCapE;
+      estampaCofre('wire', wr);
       state.wires.push(wr);
       sel = { kind: 'wire', id: wr.id };
       refresh();
     } else if (kind === 'leader') {
-      uiPromptArea('Texto de la nota (Enter = renglón nuevo; ej: GFI, Fridge Outlet, A-30):', '', function (txt) {
+      uiPromptArea('Texto de la nota (Enter = renglón nuevo; ej: GFI, Fridge Outlet, A-30):', textoDeCofre('leader'), function (txt) {
         if (!txt || !txt.trim()) return;
         pushUndo();
         var ld = { id: uid(), tx: a[0], ty: a[1], x: p[0], y: p[1], text: txt, size: 7 };
         // hereda el formato del último callout (fuente, tamaño, color, negrita…)
         var ref = state.leaders[state.leaders.length - 1];
         if (ref) ['size', 'font', 'bold', 'italic', 'color', 'align'].forEach(function (k) { if (ref[k] != null) ld[k] = ref[k]; });
+        estampaCofre('leader', ld);   // lo del cofre manda sobre lo heredado
         state.leaders.push(ld);
         sel = { kind: 'leader', id: ld.id };
         refresh();
@@ -6329,12 +6401,15 @@
       var ln = { id: uid(), open: true, pts: [[a[0], a[1]], [p[0], p[1]]], pattern: 'none' };
       if (curLineStyle !== 'solid') ln.lineStyle = curLineStyle;
       if (curLineCap && curLineCap !== 'none') ln.capE = curLineCap;
+      estampaCofre('area', ln);
       state.areas.push(ln);
       sel = { kind: 'area', id: ln.id };
       refresh();
     } else if (kind === 'dim') {
       pushUndo();
-      state.dims.push({ id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], off: 14 });
+      var dmC = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], off: 14 };
+      estampaCofre('dim', dmC);
+      state.dims.push(dmC);
       renderAnnot();
     } else if (kind === 'calibrate') {
       uiPrompt('Distancia REAL entre los dos puntos:\n(ejemplos:  4\' 6"   ·   12\'   ·   54")', '', function (input) {
@@ -6365,10 +6440,13 @@
   }
   function textDown(p) {
     enciendeCapaTexto();
-    uiPromptArea('Texto (Enter = renglón nuevo):', '', function (t) {
+    // si viene de Mi cofre, el texto guardado sale ya escrito: se acepta con
+    // Enter o se cambia. Propuesto, no impuesto.
+    uiPromptArea('Texto (Enter = renglón nuevo):', textoDeCofre('text'), function (t) {
       if (!t) return;
       pushUndo();
       var e = { id: uid(), x: p[0], y: p[1], text: t, size: 9 };
+      estampaCofre('text', e);
       state.texts.push(e);
       sel = { kind: 'text', id: e.id };
       refresh();
@@ -6394,6 +6472,7 @@
     if (esEcoDeDobleClic('sym:' + placingKey, p[0], p[1])) return;
     pushUndo();
     var e = { id: uid(), key: placingKey, x: Math.round(p[0]), y: Math.round(p[1]), rot: placingRot, scale: 1 };
+    estampaCofre('symbol', e);
     state.symbols.push(e);
     renderSymbols(); refreshCounts();
   }
@@ -7825,10 +7904,13 @@
         '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>';
     }
     if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area') + botonParecidos() + botonesFormato(false, 1);
+    html += '<button id="prCofre" style="width:100%;margin-top:2px" title="Guarda esta marca YA CONFIGURADA como herramienta tuya: después es un solo toque y sale otra igual. Se guarda en este aparato y sirve en todos tus proyectos.">' + ICO.svg('cofre') + ' Guardar como herramienta</button>';
     body.innerHTML = html;
     engancharCad();
     enganchaParecidos();
     if (sel.kind !== 'opening') enganchaFormato([sel]);
+    var bCof = $('#prCofre');
+    if (bCof) bCof.addEventListener('click', function () { guardaEnCofre(sel); });
 
     // cada control captura su propio nodo (n) para no leer el valor de otro
     function on(id, evt, fn) {
@@ -8316,7 +8398,10 @@
       return;
     }
     pushUndo();
-    state.counts.push({ id: uid(), x: x, y: y, cat: ct.id });
+    var cM = { id: uid(), x: x, y: y, cat: ct.id };
+    estampaCofre('count', cM);
+    cM.cat = ct.id;                    // la categoría activa manda, no la del cofre
+    state.counts.push(cM);
     renderConteo(); refreshCounts();
     var hj = conteoDeHoja()[ct.id] || 0, pr = conteoDelProyecto()[ct.id] || 0;
     setHint('✔ ' + ct.nom + ' — ' + hj + ' en esta hoja' +
@@ -8765,6 +8850,323 @@
     });
   }
 
+
+  /* ==================================================================
+     TOOL CHEST — MI COFRE (fase 5.10)
+     El Tool Chest de Bluebeam: dejas una marca CONFIGURADA como herramienta
+     tuya. Un GFCI a 48" con su circuito escrito, una nube de revisión roja
+     gruesa, una nota "WP — WEATHERPROOF", un EMT ½" con flecha: se guarda
+     una vez y después es un toque, no doce ajustes.
+
+     Vive en el APARATO (localStorage 'mxp_cofre'), no en el proyecto: las
+     herramientas de Edgar son suyas y le sirven en todos los trabajos, igual
+     que la disposición de las barras.
+     ================================================================== */
+  var COFRE_MAX = 40;
+  var cofre = [];            // se llena en cargaCofre(), abajo: necesita TOOL_DEFS
+  var cofrePend = null;      // lo que hay que estampar a la próxima pieza creada
+  var cofreEncendiendo = false;   // setTool viene DEL cofre: no borres lo pendiente
+
+  function cargaCofre() {
+    var g = null;
+    try { g = JSON.parse(localStorage.getItem('mxp_cofre') || 'null'); } catch (e) { g = null; }
+    var arr = (g && Array.isArray(g.items)) ? g.items : [];
+    var out = [];
+    arr.forEach(function (it) {
+      if (!it || typeof it !== 'object' || !it.id || !it.tool) return;
+      if (!defDe(it.tool) && it.tool !== 'place') return;      // herramienta que ya no existe
+      if (it.tool === 'place' && !(it.cfg && SYMBOLS[it.cfg.key])) return;   // símbolo retirado
+      out.push({ id: String(it.id).slice(0, 40), nom: String(it.nom || '').slice(0, 40) || 'Herramienta',
+                 tool: it.tool, kind: String(it.kind || ''), cfg: (it.cfg && typeof it.cfg === 'object') ? it.cfg : {} });
+    });
+    return out.slice(0, COFRE_MAX);
+  }
+  function guardaCofre() { try { localStorage.setItem('mxp_cofre', JSON.stringify({ v: 1, items: cofre })); } catch (e) {} }
+  function cofreDe(id) { for (var i = 0; i < cofre.length; i++) if (cofre[i].id === id) return cofre[i]; return null; }
+
+  /* De qué herramienta salió esta pieza: es lo que hay que volver a encender
+     para dibujar otra igual. */
+  function toolDePieza(ref, e) {
+    if (ref.kind === 'symbol') return 'place';
+    if (ref.kind === 'wall') return 'wall';
+    if (ref.kind === 'opening') return (e.type === 'window' ? 'window' : 'door');
+    if (ref.kind === 'text') return 'text';
+    if (ref.kind === 'leader') return 'leader';
+    if (ref.kind === 'dim') return e.meas ? 'measure' : 'dim';
+    if (ref.kind === 'wire') return 'wire';
+    if (ref.kind === 'ink') return e.modo === 'hi' ? 'hi' : 'pen';
+    if (ref.kind === 'count') return 'count';
+    if (ref.kind === 'area') {
+      if (e.circ) return 'homerun';
+      if (e.arco) return 'cloud';
+      if (e.open) return (e.pts && e.pts.length === 2) ? 'line' : 'pline';
+      return 'area';
+    }
+    return null;
+  }
+  /* Nombre que se propone al guardar: el de la pieza, para no hacerle
+     escribir cuando lo obvio ya se sabe. */
+  function nomPropuesto(ref, e) {
+    var base = nombreDe(ref);
+    if (ref.kind === 'text' || ref.kind === 'leader') {
+      var t = String(e.text || '').split(/\r?\n/)[0].trim();
+      if (t) return t.slice(0, 28);
+    }
+    if (ref.kind === 'symbol') {
+      var at = attrsTexto(e);
+      if (at.length) return (base + ' ' + at[0]).slice(0, 34);
+    }
+    return base;
+  }
+  /* Lo que hay que recordar de la pieza. El ASPECTO sale de formatoDe (el
+     mismo de Copiar formato: una sola definición de qué es formato), y
+     encima van los datos de identidad que el formato no lleva a propósito
+     — la clave del símbolo, el texto de la nota, el giro. */
+  function cfgDePieza(ref, e) {
+    var cfg = { props: {} };
+    var fmt = formatoDe(ref.kind, e) || {};
+    Object.keys(fmt).forEach(function (k) { if (fmt[k] !== null && fmt[k] !== undefined) cfg.props[k] = fmt[k]; });
+    if (ref.kind === 'symbol') {
+      cfg.key = e.key; cfg.rot = e.rot || 0;
+      if (e.attrs) cfg.props.attrs = JSON.parse(JSON.stringify(e.attrs));
+    } else if (ref.kind === 'wall') { cfg.type = e.type; }
+    else if (ref.kind === 'opening') { cfg.type = e.type; cfg.w = e.w; }
+    else if (ref.kind === 'text' || ref.kind === 'leader') { cfg.texto = String(e.text || ''); }
+    else if (ref.kind === 'wire') { cfg.style = e.style || 'dashed'; cfg.lw = e.lw || 0.7; cfg.capS = e.capS || 'none'; cfg.capE = e.capE || 'none'; }
+    else if (ref.kind === 'ink') { cfg.color = e.color; cfg.lw = e.lw; }
+    else if (ref.kind === 'count') { cfg.cat = e.cat; }
+    else if (ref.kind === 'area') {
+      cfg.pattern = e.pattern || 'none';
+      if (e.lineStyle) cfg.lineStyle = e.lineStyle;
+      if (e.arco) cfg.arco = e.arco;
+      if (e.capE) cfg.capE = e.capE;
+    }
+    return cfg;
+  }
+  function guardaEnCofre(ref) {
+    var e = entityOf(ref); if (!e) return;
+    var tl = toolDePieza(ref, e);
+    if (!tl) { setHint('⚠ De eso todavía no se puede hacer una herramienta'); return; }
+    if (cofre.length >= COFRE_MAX) { uiAlert('El cofre ya tiene ' + COFRE_MAX + ' herramientas. Borra alguna antes de guardar otra.'); return; }
+    uiPrompt('Nombre de la herramienta (así la vas a ver en Mi cofre):', nomPropuesto(ref, e), function (v) {
+      if (v == null) return;
+      var nom = String(v).trim().slice(0, 40);
+      if (!nom) return;
+      cofre.push({ id: uid(), nom: nom, tool: tl, kind: ref.kind, cfg: cfgDePieza(ref, e) });
+      guardaCofre();
+      // si la barra estaba oculta (nunca se había usado el cofre) se enciende
+      var k = layout.ocultas.indexOf('cofre');
+      if (k >= 0) { layout.ocultas.splice(k, 1); guardaLayout(); }
+      pintaBarras();
+      setHint('✔ "' + nom + '" guardada en Mi cofre — un toque y dibujas otra igual');
+    });
+  }
+  /* Encender una herramienta del cofre: se ponen los "últimos usados" que ya
+     usa cada herramienta, y lo que no tiene sitio en un global queda pendiente
+     para estamparlo en la pieza que se cree ahora. */
+  function usaCofre(id) {
+    var it = cofreDe(id); if (!it) return;
+    var c = it.cfg || {}, t = it.tool;
+    if (t === 'place') { if (!SYMBOLS[c.key]) { setHint('⚠ Ese símbolo ya no existe en el catálogo'); return; } placingKey = c.key; placingRot = c.rot || 0; }
+    else if (t === 'wall') { var wt = $('#wallType'); if (wt && WALL_TYPES[c.type]) wt.value = c.type; }
+    else if (t === 'door') { curDoorType = c.type || 'door'; curDoorW = c.w || 0; var ds = $('#doorSize'); if (ds) ds.value = (c.type === 'door') ? String(curDoorW || 0) : '0'; }
+    else if (t === 'window') { curWinType = c.type || 'window'; }
+    else if (t === 'area') { curAreaPattern = c.pattern || 'none'; if (c.lineStyle) curLineStyle = c.lineStyle; }
+    else if (t === 'cloud') { if (c.arco && CLOUD_ARCS[c.arco]) curCloudArc = c.arco; }
+    else if (t === 'line' || t === 'pline') { if (c.lineStyle) curLineStyle = c.lineStyle; if (c.capE) curLineCap = c.capE; }
+    else if (t === 'wire') { lastWireStyle = c.style || 'dashed'; lastWireLw = c.lw || 0.7; lastWireCapS = c.capS || 'none'; lastWireCapE = c.capE || 'none'; }
+    else if (t === 'pen' || t === 'hi') { if (c.color) lastInk[t].color = c.color; if (c.lw) lastInk[t].lw = c.lw; }
+    else if (t === 'count') { if (c.cat && catCount(c.cat)) catActiva = c.cat; else setHint('⚠ Esa categoría de conteo no está en este proyecto'); }
+    cofreEncendiendo = true;
+    try { setTool(t); } finally { cofreEncendiendo = false; }
+    cofrePend = { kind: it.kind, props: c.props || {}, texto: c.texto, nom: it.nom };
+    $$('.dock .cofreBtn').forEach(function (b) { b.classList.toggle('active', b.dataset.cofre === id); });
+    setHint('Mi cofre: ' + it.nom + ' — ' + (HINTS[t] || 'dibuja en el plano') );
+  }
+  /* Se estampa en la pieza recién creada lo que no cabía en un "último usado".
+     Se llama en cada sitio donde nace una pieza a mano. */
+  function estampaCofre(kind, e) {
+    if (!cofrePend || !e || cofrePend.kind !== kind) return;
+    var pr = cofrePend.props || {};
+    Object.keys(pr).forEach(function (k) {
+      var v = pr[k];
+      if (v === null || v === undefined) return;
+      if (k === 'attrs') { e.attrs = JSON.parse(JSON.stringify(v)); return; }
+      e[k] = v;
+    });
+  }
+  function textoDeCofre(kind) { return (cofrePend && cofrePend.kind === kind && cofrePend.texto) ? cofrePend.texto : ''; }
+  function borraDeCofre(id) {
+    var it = cofreDe(id); if (!it) return;
+    uiConfirm('¿Quitar "' + it.nom + '" de Mi cofre?', function (ok) {
+      if (!ok) return;
+      cofre = cofre.filter(function (q) { return q.id !== id; });
+      guardaCofre(); pintaBarras();
+      setHint('"' + it.nom + '" quitada del cofre');
+    });
+  }
+  function renombraEnCofre(id) {
+    var it = cofreDe(id); if (!it) return;
+    uiPrompt('Nombre de la herramienta:', it.nom, function (v) {
+      if (v == null) return;
+      var nom = String(v).trim().slice(0, 40); if (!nom) return;
+      it.nom = nom; guardaCofre(); pintaBarras();
+    });
+  }
+  function mueveEnCofre(id, d) {
+    var i = cofre.findIndex(function (q) { return q.id === id; });
+    var j = i + d;
+    if (i < 0 || j < 0 || j >= cofre.length) return;
+    var t = cofre[i]; cofre[i] = cofre[j]; cofre[j] = t;
+    guardaCofre(); pintaBarras();
+  }
+  /* El botón de cada herramienta del cofre: si es un símbolo se ve el SÍMBOLO,
+     que es como se reconoce de un vistazo; si no, el icono de su herramienta
+     teñido de su color. */
+  function btnCofre(it) {
+    var d = defDe(it.tool), c = it.cfg || {};
+    var ico;
+    if (it.tool === 'place' && SYMBOLS[c.key]) {
+      ico = '<span class="cofIco">' + symPreviewSvg(SYMBOLS[c.key], 22, 18) + '</span>';
+    } else {
+      var col = (c.props && c.props.color) || c.color || '';
+      ico = '<span class="cofIco"' + (col ? ' style="color:' + esc(col) + '"' : '') + '>' + ICO.svg(d ? d.ico : 'fav') + '</span>';
+    }
+    return '<button class="tool cofreBtn" data-cofre="' + esc(it.id) + '" title="' + esc(it.nom) + ' — herramienta tuya (' + esc(d ? d.nom : it.tool) + '). El ▾ la renombra, la mueve o la quita.">' +
+      ico + '<label>' + esc(it.nom) + '</label><span class="dd" data-cofmenu="' + esc(it.id) + '" title="Renombrar, mover o quitar">▾</span></button>';
+  }
+
+
+  /* ==================================================================
+     BARRA FLOTANTE DE PROPIEDADES (fase 4.5)
+     La brecha #1 contra Bluebeam en el iPad: allá seleccionas algo y la
+     barra con lo que más se usa aparece PEGADA a la marca. Aquí había que
+     abrir la gaveta de Propiedades cada vez, y la gaveta tapa medio plano.
+
+     Solo sale en pantalla de dedo: en la PC el panel de Propiedades está
+     siempre a la vista y otra barra encima sería estorbo.
+     Sustituye al antiguo botón flotante "🗑 Borrar" — que además llevaba
+     emoji, contra la guía de la casa.
+     ================================================================== */
+  var flotEl = null;
+  function creaFlot() {
+    if (flotEl) return flotEl;
+    flotEl = document.createElement('div');
+    flotEl.id = 'propFlot';
+    flotEl.hidden = true;
+    var w = $('#canvasWrap'); if (!w) return null;
+    w.appendChild(flotEl);
+    flotEl.addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('button');
+      if (b) accionFlot(b.dataset.a);
+    });
+    return flotEl;
+  }
+  /* Qué botones salen: lo que de verdad se usa en esa marca, no todo.
+     Máximo siete, para que quepan en el iPad sin achicarlos. */
+  function accionesFlot() {
+    var refs = selRefs();
+    if (!refs.length) return [];
+    var mismos = refs.every(function (r) { return r.kind === refs[0].kind; });
+    var k = mismos ? refs[0].kind : null;
+    var a = [{ id: 'props', ico: 'props', tip: 'Abrir Propiedades' }];
+    if (refs.length === 1 && (k === 'text' || k === 'leader')) a.push({ id: 'texto', ico: 'editar', tip: 'Cambiar el texto' });
+    if (k === 'text' || k === 'leader') {
+      a.push({ id: 'menos', ico: 'menos', tip: 'Letra más chica' });
+      a.push({ id: 'mas', ico: 'mas', tip: 'Letra más grande' });
+    } else if (k === 'symbol') {
+      a.push({ id: 'menos', ico: 'menos', tip: 'Más chico' });
+      a.push({ id: 'mas', ico: 'mas', tip: 'Más grande' });
+    }
+    if (k !== 'opening') a.push({ id: 'girar', ico: 'girar', tip: k === 'symbol' ? 'Girar 45°' : 'Girar 90°' });
+    if (k && k !== 'opening') a.push({ id: 'parecidos', ico: 'varita', tip: 'Marcar los parecidos de esta hoja' });
+    if (k !== 'opening') a.push({ id: 'fmt', ico: 'pincel', tip: formatoClip ? 'Pegar el formato copiado' : 'Copiar el formato de esto' });
+    if (k !== 'opening') a.push({ id: 'dup', ico: 'copiar', tip: 'Duplicar' });
+    a.push({ id: 'del', ico: 'papelera', tip: 'Borrar', clase: 'mal' });
+    return a;
+  }
+  function accionFlot(id) {
+    var refs = selRefs(); if (!refs.length) return;
+    var uno = refs.length === 1 ? refs[0] : null;
+    if (id === 'props') { var bq = $('#btnProps'); if (bq) bq.click(); return; }
+    if (id === 'del') { if (selGroup) deleteGroup(); else if (sel) deleteSelected(); return; }
+    if (id === 'dup') { copySel(); pasteClip(null, 24); return; }
+    if (id === 'parecidos') { seleccionaParecidos(); return; }
+    if (id === 'fmt') {
+      if (formatoClip) { var n = pegarFormatoEn(refs); if (n) setHint('✔ ' + n + ' con el formato de ' + formatoClip.nom); }
+      else if (uno && copiarFormato(uno)) { setTool('match'); showProps(); }
+      pintaFlot();
+      return;
+    }
+    if (id === 'girar') {
+      pushUndo();
+      if (uno && uno.kind === 'symbol') { var es = entityOf(uno); if (es) es.rot = ((es.rot || 0) + 45) % 360; }
+      else rotateRefs(refs, 90);
+      refresh(); renderSel();
+      return;
+    }
+    if (id === 'mas' || id === 'menos') {
+      var d = (id === 'mas') ? 1 : -1;
+      pushUndo();
+      refs.forEach(function (r) {
+        var e = entityOf(r); if (!e) return;
+        if (r.kind === 'text' || r.kind === 'leader') e.size = Math.max(3, Math.round(((e.size || 9) + d) * 2) / 2);
+        else if (r.kind === 'symbol') e.scale = Math.max(0.1, Math.round(((e.scale || 1) + d * 0.1) * 100) / 100);
+      });
+      refresh(); renderSel();
+      return;
+    }
+    if (id === 'texto' && uno) {
+      var et = entityOf(uno); if (!et) return;
+      uiPromptArea('Texto (Enter = renglón nuevo):', String(et.text || ''), function (t) {
+        if (t == null) return;
+        pushUndo(); et.text = t; refresh(); renderSel();
+      });
+    }
+  }
+  /* Se coloca ENCIMA de lo seleccionado; si arriba no cabe, debajo. Nunca se
+     sale del lienzo, y desaparece mientras se arrastra o se dibuja para no
+     estorbar la mano. */
+  function pintaFlot() {
+    if (!isTouch) return;
+    var el = creaFlot(); if (!el) return;
+    var refs = selRefs();
+    if (!refs.length || drawing || drag) { el.hidden = true; return; }
+    var acts = accionesFlot();
+    if (!acts.length) { el.hidden = true; return; }
+    var firma = acts.map(function (a) { return a.id; }).join(',');
+    if (el.dataset.firma !== firma) {
+      el.innerHTML = acts.map(function (a) {
+        return '<button data-a="' + a.id + '"' + (a.clase ? ' class="' + a.clase + '"' : '') + ' title="' + esc(a.tip) + '" aria-label="' + esc(a.tip) + '">' + ICO.svg(a.ico) + '</button>';
+      }).join('');
+      el.dataset.firma = firma;
+    }
+    /* La caja se saca de bboxDe, no de refsBBox: refsBBox de un texto es solo
+       su punto de anclaje, y la barra salía ENCIMA del rótulo en vez de
+       arriba (medido en el iPad). bboxDe sí mide la caja real. */
+    var x0 = null, x1 = null, y0 = null, y1 = null;
+    refs.forEach(function (r) {
+      var e = entityOf(r); if (!e) return;
+      var c = bboxDe(r.kind, e); if (!c) return;
+      if (x0 === null) { x0 = c.x; x1 = c.x + c.w; y0 = c.y; y1 = c.y + c.h; return; }
+      x0 = Math.min(x0, c.x); x1 = Math.max(x1, c.x + c.w);
+      y0 = Math.min(y0, c.y); y1 = Math.max(y1, c.y + c.h);
+    });
+    if (x0 === null) { el.hidden = true; return; }
+    el.hidden = false;
+    var wrap = $('#canvasWrap').getBoundingClientRect();
+    var sx = view.tx + ((x0 + x1) / 2) * view.z;             // centro, en píxeles del lienzo
+    var sTop = view.ty + y0 * view.z;
+    var sBot = view.ty + y1 * view.z;
+    var w = el.offsetWidth || 300, h = el.offsetHeight || 48;
+    var x = Math.max(6, Math.min(sx - w / 2, wrap.width - w - 6));
+    var y = sTop - h - 14;
+    if (y < 6) y = Math.min(sBot + 14, wrap.height - h - 6);
+    if (y < 6) y = 6;
+    el.style.left = Math.round(x) + 'px';
+    el.style.top = Math.round(y) + 'px';
+  }
+
   /* ---------------- conteo de materiales ----------------
      OJO (auditoría 08/28): las aberturas cuyo muro ya no existe seguían
      contando en el takeoff, el CSV y el estimado. Se cuenta solo lo vivo. */
@@ -8926,6 +9328,29 @@
      Es un panel FLOTANTE, no un modal: se queda abierto mientras recorres el
      plano fila por fila. Se arrastra por la barra y se redimensiona por la
      esquina, igual que el chat. */
+  /* Arrastrar un panel flotante por su barra. Estaba escrito a mano en la
+     Lista de marcas; ahora lo usan también el buscador del PDF y quien venga.
+     closest('button') y no ev.target.tagName: los botones de estas cabeceras
+     llevan dentro su icono SVG, así que el toque cae sobre el hijo y no sobre
+     el <button>. Con la comprobación vieja, tocar el icono arrastraba el panel
+     y se comía el clic. */
+  function arrastraPanel(cab, box) {
+    if (!cab || !box) return;
+    var ar = null;
+    cab.addEventListener('pointerdown', function (ev) {
+      if (ev.target.closest && ev.target.closest('button')) return;
+      var r = box.getBoundingClientRect();
+      ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+      cab.setPointerCapture(ev.pointerId); ev.preventDefault();
+    });
+    cab.addEventListener('pointermove', function (ev) {
+      if (!ar) return;
+      box.style.left = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - ar.dx)) + 'px';
+      box.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - ar.dy)) + 'px';
+    });
+    cab.addEventListener('pointerup', function () { ar = null; });
+    cab.addEventListener('pointercancel', function () { ar = null; });
+  }
   var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo', ink: 'Tinta', count: 'Conteo' };
   function filasMarcas() {
     var out = [];
@@ -9154,25 +9579,7 @@
     $('#marcasMarcar').addEventListener('click', marcarLista);
     $('#marcasBusca').addEventListener('input', renderMarcas);
     $('#marcasTipo').addEventListener('change', renderMarcas);
-    // arrastrar por la barra, igual que el chat
-    var cab = $('#marcasCab'), ar = null;
-    cab.addEventListener('pointerdown', function (ev) {
-      /* closest('button') y no ev.target.tagName: los botones de estas cabeceras
-         llevan dentro su icono SVG (y alguno su rótulo), así que el toque cae
-         sobre el hijo y no sobre el <button>. Con la comprobación vieja, tocar
-         el icono arrastraba el panel y se comía el clic. */
-      if (ev.target.closest && ev.target.closest('button')) return;
-      var r = box.getBoundingClientRect();
-      ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
-      cab.setPointerCapture(ev.pointerId); ev.preventDefault();
-    });
-    cab.addEventListener('pointermove', function (ev) {
-      if (!ar) return;
-      box.style.left = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - ar.dx)) + 'px';
-      box.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - ar.dy)) + 'px';
-    });
-    cab.addEventListener('pointerup', function () { ar = null; });
-    cab.addEventListener('pointercancel', function () { ar = null; });
+    arrastraPanel($('#marcasCab'), box);
   })();
 
   /* ---------------- exportar lista de materiales (estilo Markups List) ---------------- */
@@ -11476,6 +11883,7 @@
     pintaEscalas(); scheduleAutosave();
   });
   pintaEscalas();
+  (function () { var sl = $('#pjSello'); if (sl) sl.addEventListener('change', function () { state.printSello = sl.value; scheduleAutosave(); }); })();
   $('#pjScale').addEventListener('change', function () {
     state.printScale = this.value; scheduleAutosave();
   });
@@ -14002,9 +14410,11 @@
     $('#pjPrec').value = String(state.precision);
     pintaEscalas();
     state.printScale = o.state.printScale || 'fit';
+    state.printSello = o.state.printSello || '';
     $('#pjScale').value = state.printScale;
     ponEqName(!!o.state.eqNameOff);   // la casilla de los nombres viaja con el proyecto
     var hs = $('#pjSheet'); if (hs && o.state.printSheet) hs.value = o.state.printSheet;   // (auditoria 31/08) se guardaba y no se restauraba
+    var sl0 = $('#pjSello'); if (sl0 && o.state.printSello != null) sl0.value = o.state.printSello;
     // proyectos viejos (sin multi-hoja): se envuelven en una sola hoja
     if (!state.sheets || !state.sheets.length) {
       state.sheets = [{ no: state.project.sheetNo || 'E-1', title: state.project.sheetTitle || '', data: null }];
@@ -14195,7 +14605,7 @@
     // 'bgHires' (auditoria 31/08): la teja nitida del PDF de fondo es una
     // ayuda de PANTALLA que se pinta encima de la imagen del fondo; al PNG/PDF
     // iban las dos al 0.7 una sobre otra y salia un rectangulo mas oscuro
-    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia', 'bgHires'].forEach(function (id) {
+    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia', 'gBusca', 'gVisual', 'bgHires'].forEach(function (id) {
       var n = clone.querySelector('#' + id);
       if (n) n.parentNode.removeChild(n);
     });
@@ -14257,9 +14667,1391 @@
     var ps = document.getElementById('printSheet');
     if (ps) ps.classList.toggle('vert', !!vertical);
   }
+
+  /* ==================================================================
+     LA HOJA IMPRESA (fase 4.3)
+     Escala gráfica, leyenda dinámica de verdad y sello. Es lo que separa
+     "una captura del dibujo" de "un plano".
+     ================================================================== */
+  /* ESCALA GRÁFICA. Va DENTRO del SVG, en unidades del plano: así se imprime
+     exactamente a la misma escala que el dibujo y la regla sigue siendo
+     verdad aunque la hoja se reduzca en la copiadora — que es justo para lo
+     que existe una escala gráfica. La barra mide un número redondo de pies.
+     Devuelve el markup y cuánto alto hay que añadirle a la hoja. */
+  var ESC_GRAF_FT = [1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100, 200, 400];
+  function escalaGrafica(b, texto) {
+    if (!b || !(b.w > 0)) return null;
+    var objetivoFt = (b.w * 0.28) / 12;
+    var ft = ESC_GRAF_FT[0];
+    ESC_GRAF_FT.forEach(function (f) { if (f <= objetivoFt) ft = f; });
+    var L = ft * 12;                                   // largo de la barra, en pulgadas de obra
+    var h = Math.max(2, Math.min(b.w * 0.007, L / 22));   // grosor de la barra
+    var fs = h * 2.4;                                  // letra de los rótulos
+    var pad = h * 2;
+    var y = b.y + b.h + h * 3.2;
+    var x = b.x + pad;
+    var seg = L / 4, sw = h * 0.16;
+    var g = '<g id="escalaGraf" font-family="Arial, Helvetica, sans-serif">';
+    for (var i = 0; i < 4; i++) {
+      g += '<rect x="' + (x + seg * i).toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + seg.toFixed(2) + '" height="' + h.toFixed(2) +
+        '" fill="' + (i % 2 ? '#ffffff' : '#14161a') + '" stroke="#14161a" stroke-width="' + sw.toFixed(3) + '"/>';
+    }
+    [0, 2, 4].forEach(function (i) {
+      var v = ft * i / 4;
+      var etq = (v === Math.round(v) ? String(Math.round(v)) : String(Math.round(v * 10) / 10)) + (i === 4 ? " FT" : '');
+      g += '<text x="' + (x + seg * i).toFixed(2) + '" y="' + (y + h + fs * 1.05).toFixed(2) +
+        '" font-size="' + fs.toFixed(2) + '" fill="#14161a" text-anchor="middle">' + etq + '</text>';
+    });
+    if (texto) {
+      g += '<text x="' + (x + L + h * 2.4).toFixed(2) + '" y="' + (y + h * 0.85).toFixed(2) +
+        '" font-size="' + (fs * 0.95).toFixed(2) + '" fill="#14161a" font-weight="bold">SCALE: ' + esc(texto) + '</text>';
+    }
+    g += '</g>';
+    return { svg: g, alto: h * 3.2 + h + fs * 1.6 + pad, ft: ft };
+  }
+  /* LEYENDA DINÁMICA: solo lo que de verdad está en esta hoja — símbolos,
+     tipos de pared, tipos de línea, patrones de superficie y las categorías
+     del Count con su cantidad. Una leyenda que enseña lo que no se usó es
+     ruido; una que se olvida de lo que sí, es un plano que no se entiende. */
+  function leyendaHtml() {
+    var items = [];
+    var usados = {};
+    state.symbols.forEach(function (s) { usados[s.key] = (usados[s.key] || 0) + 1; });
+    Object.keys(usados).forEach(function (k) {
+      var d = SYMBOLS[k]; if (!d) return;
+      items.push('<span class="it">' + symPreviewSvg(d, 26, 20) + esc(d.short || d.name) + '</span>');
+    });
+    var wt = {};
+    state.walls.forEach(function (w) { if (WALL_TYPES[w.type]) wt[w.type] = 1; });
+    Object.keys(wt).forEach(function (k) {
+      items.push('<span class="it">' + wallSwatch(k) + esc(WALL_TYPES[k].name) + '</span>');
+    });
+    var pat = {}, lin = {};
+    state.areas.forEach(function (a) {
+      if (a.open) { if (a.lineStyle && LINE_STYLES[a.lineStyle]) lin[a.lineStyle] = 1; }
+      else if (a.pattern && a.pattern !== 'none' && AREA_PATTERNS[a.pattern]) pat[a.pattern] = 1;
+    });
+    state.wires.forEach(function (w) { if (WIRE_STYLE_NAMES[w.style || 'dashed']) lin['w:' + (w.style || 'dashed')] = 1; });
+    Object.keys(pat).forEach(function (k) {
+      items.push('<span class="it">' + patternSwatch(k) + esc(AREA_PATTERNS[k].name) + '</span>');
+    });
+    Object.keys(lin).forEach(function (k) {
+      if (k.indexOf('w:') === 0) {
+        items.push('<span class="it"><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#14161a" stroke-width="1.2" stroke-dasharray="5 3"/></svg>' +
+          esc(WIRE_STYLE_NAMES[k.slice(2)]) + '</span>');
+        return;
+      }
+      var st = LINE_STYLES[k];
+      items.push('<span class="it"><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#14161a" stroke-width="' +
+        (st.lw || 0.9) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/></svg>' +
+        esc(st.name.replace(/^[^A-Za-zÁ-ú]+/, '')) + '</span>');
+    });
+    var hoja = conteoDeHoja();
+    catsCount().forEach(function (c) {
+      var n = hoja[c.id] || 0; if (!n) return;
+      items.push('<span class="it"><svg width="16" height="14"><circle cx="8" cy="7" r="5.4" fill="' + esc(c.color) +
+        '" fill-opacity="0.9" stroke="#fff" stroke-width="1"/></svg>' + esc(c.nom) + ' (' + n + ')</span>');
+    });
+    if (!items.length) return '';
+    return '<div class="legend"><b style="font-size:8px">LEGEND:</b>' + items.join('') + '</div>';
+  }
+  /* EL SELLO. Un plano de ingeniero dice para qué sirve: FOR PERMIT, AS-BUILT,
+     NOT FOR CONSTRUCTION. Va estampado sobre el dibujo, arriba a la derecha,
+     donde se ve sin tapar el trabajo. */
+  function selloHtml() {
+    var sl = $('#pjSello');
+    var t = sl ? String(sl.value || '').trim() : '';
+    if (!t) return '';
+    var rojo = /NOT FOR|REVISION|REVIEW/.test(t);
+    return '<div class="selloPlano' + (rojo ? ' ojo' : '') + '">' + esc(t) + '</div>';
+  }
+
+
+  /* ==================================================================
+     BUSCAR TEXTO EN EL PDF DEL INGENIERO (fase 5.8)
+     "¿Dónde dice PANEL A?" en un set de doce hojas. Bluebeam lo hace y es de
+     las cosas que más tiempo ahorran: el PDF vectorial YA trae su texto, solo
+     hay que preguntárselo a pdf.js y llevar el resultado a coordenadas del
+     plano.
+
+     Ojo con la verdad: un PDF ESCANEADO (una foto de la hoja) no trae texto
+     ninguno. Ahí no hay nada que buscar sin OCR, y eso se dice tal cual en
+     vez de enseñar "0 resultados" y que parezca que la palabra no está.
+     ================================================================== */
+  var buscaCache = {};        // 'pdfId:pagina' → [{txt, x, y, w, h}] en coordenadas 0..1 de la página
+  var buscaRes = [];          // resultados vivos
+  var buscaIdx = -1;
+  function buscaAbierto() { var b = $('#buscaBox'); return b && !b.classList.contains('oculto'); }
+
+  /* Texto de una página, normalizado a 0..1 sobre el papel: así vale para
+     cualquier tamaño del fondo, y no hay que rehacerlo si se recalibra. */
+  function textoDePagina(rec, cb) {
+    if (!rec || !rec.doc) { cb(null); return; }
+    var k = (rec.key || 'x') + ':' + rec.page;
+    if (buscaCache[k]) { cb(buscaCache[k]); return; }
+    rec.doc.getPage(rec.page).then(function (page) {
+      var vp = page.getViewport({ scale: 1 });
+      return page.getTextContent().then(function (tc) {
+        var out = [];
+        (tc.items || []).forEach(function (it) {
+          var t = String(it.str == null ? '' : it.str);
+          if (!t.trim()) return;
+          var tr = pdfjsLib.Util.transform(vp.transform, it.transform);
+          /* OJO (medido, no supuesto): pdf.js ya devuelve item.width e
+             item.height EN PUNTOS del papel, no en unidades de texto. Al
+             multiplicarlos otra vez por la escala de la letra, la caja de
+             "PANEL A" salía 24 veces más alta y el recuadro caía FUERA de la
+             hoja, por encima del borde de arriba (y = -0.61 del papel). */
+          var escY = Math.hypot(tr[1], tr[3]) || 1;      // alto de la letra, en puntos
+          var an = (it.width > 0 ? it.width : t.length * escY * 0.5);
+          var al = (it.height > 0 ? it.height : escY);
+          out.push({
+            txt: t,
+            x: tr[4] / vp.width,
+            y: (tr[5] - al) / vp.height,        // tr[5] es la línea base: la caja empieza arriba
+            w: an / vp.width,
+            h: al * 1.25 / vp.height
+          });
+        });
+        buscaCache[k] = out;
+        cb(out);
+      });
+    }).catch(function () { cb(null); });
+  }
+  /* El fondo de una hoja cualquiera, sin cambiar de hoja: la activa se lee de
+     state, las demás de su data guardada. */
+  function fondoDeHoja(i) {
+    if (i === state.curSheet) return state.bg;
+    var sh = (state.sheets || [])[i];
+    if (!sh || typeof sh.data !== 'string') return null;
+    try { var o = JSON.parse(sh.data); return (o && o.bg) || null; } catch (e) { return null; }
+  }
+  function hojasConPdf(todas) {
+    var out = [];
+    (state.sheets || []).forEach(function (sh, i) {
+      if (!todas && i !== state.curSheet) return;
+      var rec = pdfLive[i], bg = fondoDeHoja(i);
+      if (rec && rec.doc && bg) out.push({ i: i, rec: { doc: rec.doc, page: rec.page, key: (bg.pdfId || '') }, bg: bg });
+    });
+    return out;
+  }
+  function buscaEnPdf() {
+    var q = String(($('#buscaTxt') || {}).value || '').trim();
+    var todas = !!($('#buscaTodas') || {}).checked;
+    buscaRes = []; buscaIdx = -1;
+    pintaBusca(q ? 'buscando' : '');
+    if (!q) { pintaMarcasBusca(); return; }
+    var hojas = hojasConPdf(todas);
+    if (!hojas.length) {
+      pintaBusca(state.bg ? 'sinpdf' : 'sinfondo');
+      return;
+    }
+    var pend = hojas.length, ql = q.toLowerCase(), conTexto = 0;
+    hojas.forEach(function (h) {
+      textoDePagina(h.rec, function (items) {
+        if (items && items.length) conTexto++;
+        (items || []).forEach(function (it) {
+          if (it.txt.toLowerCase().indexOf(ql) < 0) return;
+          buscaRes.push({
+            hoja: h.i, txt: it.txt,
+            x: h.bg.x + it.x * h.bg.w, y: h.bg.y + it.y * h.bg.h,
+            w: it.w * h.bg.w, h: it.h * h.bg.h
+          });
+        });
+        if (--pend === 0) {
+          buscaRes.sort(function (a, b) { return a.hoja - b.hoja || a.y - b.y || a.x - b.x; });
+          pintaBusca(conTexto ? '' : 'escaneado');
+          pintaMarcasBusca();
+        }
+      });
+    });
+  }
+  function pintaBusca(estado) {
+    var lista = $('#buscaLista'), n = $('#buscaN');
+    if (!lista) return;
+    if (estado === 'buscando') { lista.innerHTML = '<div class="bMuted">Buscando…</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'sinfondo') { lista.innerHTML = '<div class="bMuted">Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero con el botón <b>Fondo</b>.</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'sinpdf') { lista.innerHTML = '<div class="bMuted">El fondo de esta hoja es una <b>imagen</b>, no un PDF: no trae texto que buscar. Vuelve a importarlo como PDF y se puede buscar dentro.</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'escaneado') {
+      lista.innerHTML = '<div class="bMuted">Ese PDF <b>no trae texto</b>: está escaneado, es una foto de la hoja. Para buscar ahí haría falta OCR, y la app todavía no lo hace. La verdad es esa: no es que la palabra no esté, es que no hay texto que leer.</div>';
+      if (n) n.textContent = ''; return;
+    }
+    if (!estado && !String(($('#buscaTxt') || {}).value || '').trim()) { lista.innerHTML = '<div class="bMuted">Escribe una palabra del plano: PANEL A, GFCI, 2-WAY, DISHWASHER…</div>'; if (n) n.textContent = ''; return; }
+    if (n) n.textContent = buscaRes.length ? buscaRes.length + (buscaRes.length === 1 ? ' resultado' : ' resultados') : '';
+    if (!buscaRes.length) { lista.innerHTML = '<div class="bMuted">No aparece en el texto del PDF.</div>'; return; }
+    var h = '';
+    buscaRes.forEach(function (r, i) {
+      var sh = (state.sheets || [])[r.hoja] || {};
+      h += '<div class="bFila' + (i === buscaIdx ? ' cur' : '') + '" data-i="' + i + '">' +
+        '<span class="bHoja">' + esc(sh.no || ('H' + (r.hoja + 1))) + '</span>' +
+        '<span class="bTxt">' + esc(r.txt.length > 60 ? r.txt.slice(0, 60) + '…' : r.txt) + '</span></div>';
+    });
+    lista.innerHTML = h;
+    $$('#buscaLista .bFila').forEach(function (f) {
+      f.addEventListener('click', function () { vaAResultado(+f.dataset.i); });
+    });
+  }
+  /* Los recuadros amarillos sobre el plano: solo los de la hoja que se ve. */
+  function pintaMarcasBusca() {
+    var g = document.getElementById('gBusca'); if (!g) return;
+    if (!buscaAbierto() || !buscaRes.length) { g.innerHTML = ''; return; }
+    var s2 = '';
+    buscaRes.forEach(function (r, i) {
+      if (r.hoja !== state.curSheet) return;
+      var pad = Math.max(r.h * 0.12, 0.5);
+      s2 += '<rect class="busca' + (i === buscaIdx ? ' cur' : '') + '" x="' + (r.x - pad).toFixed(2) + '" y="' + (r.y - pad).toFixed(2) +
+        '" width="' + (r.w + pad * 2).toFixed(2) + '" height="' + (r.h + pad * 2).toFixed(2) + '"/>';
+    });
+    g.innerHTML = s2;
+  }
+  function vaAResultado(i) {
+    if (!buscaRes.length) return;
+    buscaIdx = ((i % buscaRes.length) + buscaRes.length) % buscaRes.length;
+    var r = buscaRes[buscaIdx];
+    if (r.hoja !== state.curSheet && state.sheets[r.hoja]) switchSheet(r.hoja);
+    var m = Math.max(r.w, r.h) * 2 + 24;
+    zoomToBox({ x: r.x - m, y: r.y - m, w: r.w + m * 2, h: r.h + m * 2 });
+    pintaBusca(''); pintaMarcasBusca();
+    setHint('“' + r.txt.trim().slice(0, 40) + '” — ' + (buscaIdx + 1) + ' de ' + buscaRes.length +
+      ' · hoja ' + ((state.sheets[r.hoja] || {}).no || (r.hoja + 1)));
+  }
+  (function () {
+    var vb = $('#visualBox'); if (!vb) return;
+    var bc = $('#visualCerrar'); if (bc) bc.addEventListener('click', cierraVisual);
+    arrastraPanel($('#visualCab'), vb);
+  })();
+  (function () {
+    var box = $('#buscaBox'); if (!box) return;
+    var bt = $('#btnBuscaPdf');
+    if (bt) bt.addEventListener('click', function () {
+      box.classList.toggle('oculto');
+      if (buscaAbierto()) { pintaBusca(''); pintaMarcasBusca(); var i = $('#buscaTxt'); if (i) { i.focus(); i.select(); } }
+      else { var g = document.getElementById('gBusca'); if (g) g.innerHTML = ''; }
+    });
+    var bc = $('#buscaCerrar');
+    if (bc) bc.addEventListener('click', function () { box.classList.add('oculto'); var g = document.getElementById('gBusca'); if (g) g.innerHTML = ''; });
+    var ti = null;
+    var inp = $('#buscaTxt');
+    if (inp) {
+      inp.addEventListener('input', function () { clearTimeout(ti); ti = setTimeout(buscaEnPdf, 260); });
+      inp.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        if (buscaRes.length) vaAResultado(buscaIdx + (ev.shiftKey ? -1 : 1)); else buscaEnPdf();
+      });
+    }
+    var tt = $('#buscaTodas'); if (tt) tt.addEventListener('change', buscaEnPdf);
+    var bp = $('#buscaPrev'); if (bp) bp.addEventListener('click', function () { vaAResultado(buscaIdx - 1); });
+    var bs = $('#buscaSig'); if (bs) bs.addEventListener('click', function () { vaAResultado(buscaIdx + 1); });
+    arrastraPanel($('#buscaCab'), box);
+  })();
+
+
+  /* ==================================================================
+     TRIM / EXTEND / BREAK  (fase 5.2)
+     Las tres de AutoCAD que en un plano se usan a diario: recortar lo que
+     sobra de una línea contra lo que se cruza, alargarla hasta que toque, y
+     partirla en dos.
+
+     Se hace en modo RÁPIDO, como el TRIM moderno de AutoCAD: no se pide
+     primero "el borde que corta". Tocas el pedazo que sobra y se va. Menos
+     pasos y menos que explicar.
+
+     Vale para lo que es una línea: paredes, cables y polilíneas/líneas
+     abiertas. Una superficie cerrada NO se recorta (dejaría de ser un área),
+     pero sí SIRVE de borde que corta.
+     ================================================================== */
+  /* Cruce de dos rectas infinitas, devolviendo el parámetro en cada una.
+     t es sobre AB (0 = A, 1 = B) y u sobre CD. Null si son paralelas. */
+  function cruceRectas(ax, ay, bx, by, cx, cy, dx, dy) {
+    var r1 = bx - ax, r2 = by - ay, s1 = dx - cx, s2 = dy - cy;
+    var den = r1 * s2 - r2 * s1;
+    if (Math.abs(den) < 1e-9) return null;
+    var qx = cx - ax, qy = cy - ay;
+    var t = (qx * s2 - qy * s1) / den;
+    var u = (qx * r2 - qy * r1) / den;
+    return { t: t, u: u, x: ax + r1 * t, y: ay + r2 * t };
+  }
+  /* Todos los segmentos que pueden servir de borde que corta, menos el propio
+     objeto. Una superficie cerrada cuenta como borde aunque no se pueda
+     recortar ella misma. */
+  function cortadores(excl) {
+    var out = [];
+    function pon(x1, y1, x2, y2) { if (Math.hypot(x2 - x1, y2 - y1) > 0.02) out.push({ x1: x1, y1: y1, x2: x2, y2: y2 }); }
+    state.walls.forEach(function (w) { if (!(excl && excl.kind === 'wall' && excl.id === w.id)) pon(w.x1, w.y1, w.x2, w.y2); });
+    state.wires.forEach(function (w) { if (!(excl && excl.kind === 'wire' && excl.id === w.id)) pon(w.x1, w.y1, w.x2, w.y2); });
+    state.areas.forEach(function (a) {
+      if (excl && excl.kind === 'area' && excl.id === a.id) return;
+      var pts = a.pts || [];
+      for (var i = 0; i + 1 < pts.length; i++) pon(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      if (!a.open && pts.length > 2) pon(pts[pts.length - 1][0], pts[pts.length - 1][1], pts[0][0], pts[0][1]);
+    });
+    return out;
+  }
+  /* La lista de puntos (parámetro t en 0..1) donde ALGO cruza este segmento. */
+  function cortesEn(x1, y1, x2, y2, segs) {
+    var ts = [];
+    segs.forEach(function (c) {
+      var r = cruceRectas(x1, y1, x2, y2, c.x1, c.y1, c.x2, c.y2);
+      if (!r) return;
+      if (r.t <= 1e-6 || r.t >= 1 - 1e-6) return;      // en la punta no cuenta
+      if (r.u < -1e-6 || r.u > 1 + 1e-6) return;       // fuera del borde
+      ts.push(r.t);
+    });
+    ts.sort(function (a, b) { return a - b; });
+    // dos cortes en el mismo sitio (esquina de dos paredes) son uno
+    var out = [];
+    ts.forEach(function (t) { if (!out.length || t - out[out.length - 1] > 1e-4) out.push(t); });
+    return out;
+  }
+  /* Dónde cayó el dedo sobre el segmento (0..1), pegado al segmento. */
+  function tDePunto(p, x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+    if (!L2) return 0;
+    return Math.max(0, Math.min(1, ((p[0] - x1) * dx + (p[1] - y1) * dy) / L2));
+  }
+  /* El tramo del segmento donde cayó el dedo, entre corte y corte (o entre
+     una punta y el primer corte). Devuelve [t0, t1] o null si no hay ningún
+     corte: ahí no hay nada que recortar y hay que decirlo. */
+  function tramoDe(ts, t) {
+    if (!ts.length) return null;
+    var a = 0, b = 1;
+    for (var i = 0; i < ts.length; i++) { if (ts[i] <= t) a = ts[i]; else { b = ts[i]; break; } }
+    return [a, b];
+  }
+  function ptEn(x1, y1, x2, y2, t) { return [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]; }
+
+  /* ---- RECORTAR ---- */
+  /* Reparte las puertas y ventanas de una pared entre los pedazos que quedan
+     vivos. Cada tramo dice qué id se lleva las suyas y cuánto hay que restarle
+     a 'pos' (que se mide desde x1, y x1 se pudo mover). La que no cae en
+     ningún tramo vivo se va: quedarse sería una puerta flotando en el aire,
+     inseleccionable y contando en materiales. */
+  function repartAberturas(wallId, tramos) {
+    var quitadas = 0;
+    state.openings = state.openings.filter(function (o) {
+      if (o.wallId !== wallId) return true;
+      for (var i = 0; i < tramos.length; i++) {
+        var tr = tramos[i];
+        if (o.pos >= tr.d0 - 0.01 && o.pos <= tr.d1 + 0.01) {
+          o.wallId = tr.destino;
+          o.pos = o.pos - tr.restar;
+          return true;
+        }
+      }
+      quitadas++;
+      return false;
+    });
+    return quitadas;
+  }
+  function recorta(ref, p) {
+    var e = entityOf(ref); if (!e) return { ok: false, msg: 'Eso ya no está' };
+    var segs = cortadores(ref);
+    if (ref.kind === 'area') return recortaPoli(ref, e, p, segs);
+    var ts = cortesEn(e.x1, e.y1, e.x2, e.y2, segs);
+    if (!ts.length) return { ok: false, msg: 'Nada la cruza: no hay por dónde recortarla. Cruza otra línea encima y vuelve a tocar aquí.' };
+    var t = tDePunto(p, e.x1, e.y1, e.x2, e.y2);
+    var tr = tramoDe(ts, t);
+    var L = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+    pushUndo();
+    var quitadas = 0, copia = null;
+    if (tr[0] <= 1e-6) {                                     // sobra el principio
+      var pA = ptEn(e.x1, e.y1, e.x2, e.y2, tr[1]);
+      // x1 se corre: lo que sobrevive empieza en tr[1], así que 'pos' baja igual
+      quitadas = repartAberturas(e.id, [{ d0: L * tr[1], d1: L, destino: e.id, restar: L * tr[1] }]);
+      e.x1 = Math.round(pA[0]); e.y1 = Math.round(pA[1]);
+    } else if (tr[1] >= 1 - 1e-6) {                          // sobra el final
+      var pB = ptEn(e.x1, e.y1, e.x2, e.y2, tr[0]);
+      quitadas = repartAberturas(e.id, [{ d0: 0, d1: L * tr[0], destino: e.id, restar: 0 }]);
+      e.x2 = Math.round(pB[0]); e.y2 = Math.round(pB[1]);
+    } else {                                                 // sobra un pedazo del medio: quedan dos
+      var q0 = ptEn(e.x1, e.y1, e.x2, e.y2, tr[0]);
+      var q1 = ptEn(e.x1, e.y1, e.x2, e.y2, tr[1]);
+      copia = JSON.parse(JSON.stringify(e));
+      copia.id = uid();
+      copia.x1 = Math.round(q1[0]); copia.y1 = Math.round(q1[1]);
+      quitadas = repartAberturas(e.id, [
+        { d0: 0, d1: L * tr[0], destino: e.id, restar: 0 },
+        { d0: L * tr[1], d1: L, destino: copia.id, restar: L * tr[1] }
+      ]);
+      e.x2 = Math.round(q0[0]); e.y2 = Math.round(q0[1]);
+      (ref.kind === 'wall' ? state.walls : state.wires).push(copia);
+    }
+    return { ok: true, msg: 'Recortado' + (copia ? ' — quedó partida en dos' : '') +
+      (quitadas ? ' · ' + quitadas + ' puerta(s)/ventana(s) que estaban en el pedazo quitado se fueron con él' : '') };
+  }
+  /* Polilínea abierta: el tramo que sobra se quita y, si estaba en el medio,
+     queda partida en dos. */
+  function recortaPoli(ref, e, p, segs) {
+    if (!e.open || !e.pts || e.pts.length < 2) return { ok: false, msg: 'Una superficie cerrada no se recorta: dejaría de ser un área. Sí sirve de borde para recortar otras.' };
+    var pts = e.pts, mejor = null;
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var d = distToSeg(p[0], p[1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      if (!mejor || d.d < mejor.d) mejor = { i: i, d: d.d, t: d.t };
+    }
+    if (!mejor) return { ok: false, msg: 'No entendí qué tramo tocaste' };
+    var i0 = mejor.i;
+    var a = pts[i0], b = pts[i0 + 1];
+    var ts = cortesEn(a[0], a[1], b[0], b[1], segs);
+    if (!ts.length) return { ok: false, msg: 'Ese tramo no lo cruza nada: no hay por dónde recortarlo' };
+    var tr = tramoDe(ts, mejor.t);
+    var q0 = ptEn(a[0], a[1], b[0], b[1], tr[0]);
+    var q1 = ptEn(a[0], a[1], b[0], b[1], tr[1]);
+    pushUndo();
+    var izq = pts.slice(0, i0 + 1), der = pts.slice(i0 + 1);
+    if (tr[0] > 1e-6) izq.push([Math.round(q0[0]), Math.round(q0[1])]);
+    if (tr[1] < 1 - 1e-6) der.unshift([Math.round(q1[0]), Math.round(q1[1])]);
+    var vivos = [];
+    if (izq.length >= 2) vivos.push(izq);
+    if (der.length >= 2) vivos.push(der);
+    if (!vivos.length) { state.areas = state.areas.filter(function (q) { return q.id !== e.id; }); return { ok: true, msg: 'Recortado — no quedó nada de esa línea' }; }
+    e.pts = vivos[0];
+    if (vivos[1]) {
+      var c2 = JSON.parse(JSON.stringify(e));
+      c2.id = uid(); c2.pts = vivos[1];
+      delete c2.circ;   // un homerun partido en dos no son dos circuitos
+      state.areas.push(c2);
+    }
+    return { ok: true, msg: 'Recortado' + (vivos[1] ? ' — quedó partida en dos' : '') };
+  }
+
+  /* ---- ALARGAR ---- */
+  function alarga(ref, p) {
+    var e = entityOf(ref); if (!e) return { ok: false, msg: 'Eso ya no está' };
+    var segs = cortadores(ref);
+    var A, B, ponPunta;
+    if (ref.kind === 'area') {
+      if (!e.open || !e.pts || e.pts.length < 2) return { ok: false, msg: 'Una superficie cerrada no se alarga' };
+      var pts = e.pts;
+      var dIni = Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]);
+      var dFin = Math.hypot(p[0] - pts[pts.length - 1][0], p[1] - pts[pts.length - 1][1]);
+      if (dIni <= dFin) { A = pts[1]; B = pts[0]; ponPunta = function (q) { pts[0] = q; }; }
+      else { A = pts[pts.length - 2]; B = pts[pts.length - 1]; ponPunta = function (q) { pts[pts.length - 1] = q; }; }
+      A = [A[0], A[1]]; B = [B[0], B[1]];
+    } else {
+      var d1 = Math.hypot(p[0] - e.x1, p[1] - e.y1), d2 = Math.hypot(p[0] - e.x2, p[1] - e.y2);
+      if (d1 <= d2) { A = [e.x2, e.y2]; B = [e.x1, e.y1]; ponPunta = function (q) { e.x1 = q[0]; e.y1 = q[1]; }; }
+      else { A = [e.x1, e.y1]; B = [e.x2, e.y2]; ponPunta = function (q) { e.x2 = q[0]; e.y2 = q[1]; }; }
+    }
+    // rayo desde B alejándose de A: el primer borde que toque manda
+    var mejor = null;
+    segs.forEach(function (c) {
+      var r = cruceRectas(A[0], A[1], B[0], B[1], c.x1, c.y1, c.x2, c.y2);
+      if (!r) return;
+      if (r.t <= 1 + 1e-6) return;                       // detrás o dentro de lo que ya hay
+      if (r.u < -1e-6 || r.u > 1 + 1e-6) return;
+      if (!mejor || r.t < mejor.t) mejor = r;
+    });
+    if (!mejor) return { ok: false, msg: 'Por ese lado no hay nada que la pare: alargarla sería inventar hasta dónde' };
+    pushUndo();
+    ponPunta([Math.round(mejor.x), Math.round(mejor.y)]);
+    var cuanto = Math.hypot(mejor.x - B[0], mejor.y - B[1]);
+    return { ok: true, msg: 'Alargada ' + fmtFtIn(cuanto) + ' hasta la línea que la para' };
+  }
+
+  /* ---- PARTIR ---- */
+  function parte(ref, p) {
+    var e = entityOf(ref); if (!e) return { ok: false, msg: 'Eso ya no está' };
+    if (ref.kind === 'area') {
+      if (!e.open || !e.pts || e.pts.length < 2) return { ok: false, msg: 'Una superficie cerrada no se parte por un punto' };
+      var pts = e.pts, mejor = null;
+      for (var i = 0; i + 1 < pts.length; i++) {
+        var d = distToSeg(p[0], p[1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+        if (!mejor || d.d < mejor.d) mejor = { i: i, d: d.d, t: d.t };
+      }
+      if (!mejor) return { ok: false, msg: 'No entendí dónde partirla' };
+      var a = pts[mejor.i], b = pts[mejor.i + 1];
+      var q = ptEn(a[0], a[1], b[0], b[1], mejor.t).map(Math.round);
+      var izq = pts.slice(0, mejor.i + 1).concat([q]);
+      var der = [q].concat(pts.slice(mejor.i + 1));
+      if (izq.length < 2 || der.length < 2) return { ok: false, msg: 'Ahí no se puede partir: cae justo en una punta' };
+      pushUndo();
+      var c2 = JSON.parse(JSON.stringify(e));
+      c2.id = uid(); c2.pts = der; delete c2.circ;
+      e.pts = izq;
+      state.areas.push(c2);
+      return { ok: true, msg: 'Partida en dos' };
+    }
+    var t = tDePunto(p, e.x1, e.y1, e.x2, e.y2);
+    var L = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+    if (t * L < 1 || (1 - t) * L < 1) return { ok: false, msg: 'Ahí no se puede partir: cae justo en la punta' };
+    var qp = ptEn(e.x1, e.y1, e.x2, e.y2, t).map(Math.round);
+    pushUndo();
+    var copia = JSON.parse(JSON.stringify(e));
+    copia.id = uid();
+    copia.x1 = qp[0]; copia.y1 = qp[1];
+    // las puertas y ventanas pasadas del corte se van con el segundo pedazo
+    if (ref.kind === 'wall') {
+      var corte = L * t;
+      state.openings.forEach(function (o) {
+        if (o.wallId !== e.id || o.pos <= corte) return;
+        o.wallId = copia.id; o.pos = o.pos - corte;
+      });
+    }
+    e.x2 = qp[0]; e.y2 = qp[1];
+    (ref.kind === 'wall' ? state.walls : state.wires).push(copia);
+    return { ok: true, msg: 'Partida en dos por ahí' };
+  }
+
+  var trimModo = 'trim';    // trim | extend | break
+  var TRIM_NOM = { trim: 'Recortar', extend: 'Alargar', break: 'Partir' };
+  function trimDown(p) {
+    var h = hitTest(p);
+    if (!h || (h.kind !== 'wall' && h.kind !== 'wire' && h.kind !== 'area')) {
+      setHint('Toca una pared, un cable o una línea — es lo que se puede ' + TRIM_NOM[trimModo].toLowerCase());
+      return;
+    }
+    var r = trimModo === 'extend' ? alarga(h, p) : trimModo === 'break' ? parte(h, p) : recorta(h, p);
+    if (r.ok) {
+      limpiaHuerfanas();
+      ponSel([]);
+      refresh(); refreshCounts(); scheduleAutosave();
+      setHint('✔ ' + r.msg + ' · sigue tocando · Esc para salir');
+    } else {
+      setHint('⚠ ' + r.msg);
+    }
+  }
+
+
+  /* ==================================================================
+     DXF — EXPORTAR E IMPORTAR (fase 5.12)
+     Para hablar con el ingeniero y con el arquitecto sin pasar por PDF: el
+     DXF entra en AutoCAD, Revit, LibreCAD, QCAD y en casi todo.
+
+     EXPORTAR: en vez de traducir pieza por pieza (paredes sí, símbolos no,
+     puertas a medias…), se recorre el DIBUJO YA HECHO — el mismo SVG que se
+     ve en pantalla — y se pasa a DXF cada trazo con su capa. Así lo que sale
+     es exactamente lo que se ve: los arcos de las puertas, el glifo de cada
+     símbolo, el patrón de la superficie. Se escribe DXF R12 (AC1009) con solo
+     LINE, CIRCLE y TEXT, que es el que abre en todas partes.
+
+     El eje Y se voltea: en un plano de CAD la Y sube y aquí baja.
+     ================================================================== */
+  var DXF_CAPAS = {
+    gWalls: ['A-WALL', 7], gAreas: ['A-AREA', 3], gFurniture: ['A-FURN', 4],
+    gElectrical: ['E-POWR', 1], gAnnot: ['A-ANNO', 2], gCount: ['M-COUNT', 6],
+    gBackground: ['X-BACKGROUND', 8]
+  };
+  var DXF_MAX_SEG = 120000;      // tope de trazos: pasado eso el archivo no lo abre nadie con gusto
+
+  function dxfNum(v) { return (Math.round(v * 1000) / 1000).toFixed(3); }
+  function dxfPar(cod, val) { return cod + '\n' + val + '\n'; }
+  function dxfLinea(capa, x1, y1, x2, y2) {
+    return '0\nLINE\n' + dxfPar(8, capa) +
+      dxfPar(10, dxfNum(x1)) + dxfPar(20, dxfNum(-y1)) + dxfPar(30, '0.0') +
+      dxfPar(11, dxfNum(x2)) + dxfPar(21, dxfNum(-y2)) + dxfPar(31, '0.0');
+  }
+  function dxfCirculo(capa, cx, cy, r) {
+    return '0\nCIRCLE\n' + dxfPar(8, capa) +
+      dxfPar(10, dxfNum(cx)) + dxfPar(20, dxfNum(-cy)) + dxfPar(30, '0.0') + dxfPar(40, dxfNum(r));
+  }
+  function dxfTexto(capa, x, y, alto, txt, rot) {
+    // el DXF R12 no lleva acentos fuera de ASCII con garantías: se pasan a su
+    // letra sin tilde antes que salga un símbolo raro en AutoCAD
+    var t = String(txt).replace(/\r?\n/g, ' ').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '');
+    if (!t) return '';
+    return '0\nTEXT\n' + dxfPar(8, capa) +
+      dxfPar(10, dxfNum(x)) + dxfPar(20, dxfNum(-y)) + dxfPar(30, '0.0') +
+      dxfPar(40, dxfNum(alto)) + dxfPar(1, t) + (rot ? dxfPar(50, dxfNum(-rot)) : '');
+  }
+  /* La capa DXF de un nodo: el <g> de más arriba que la app conoce. */
+  function dxfCapaDe(el, raiz) {
+    var n = el;
+    while (n && n !== raiz) {
+      if (n.id && DXF_CAPAS[n.id]) return DXF_CAPAS[n.id][0];
+      n = n.parentNode;
+    }
+    return '0';
+  }
+  /* Trocea el atributo d de un <path> en subtrazos: si no, el muestreo une el
+     final de un subtrazo con el principio del siguiente y salen rayas que en
+     el dibujo no existen (la vuelta de una nube, por ejemplo). */
+  function dxfSubtrazos(d) {
+    var out = [], cur = '';
+    var re = /[MmZzLlHhVvCcSsQqTtAa][^MmZz]*/g, m;
+    while ((m = re.exec(d))) {
+      var c = m[0];
+      if (/^[Mm]/.test(c)) { if (cur.trim()) out.push(cur); cur = c; }
+      else if (/^[Zz]/.test(c)) { cur += c; out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    if (cur.trim()) out.push(cur);
+    return out.filter(function (q) { return /[MmLlHhVvCcSsQqTtAa]/.test(q.slice(1)) || /[Zz]/.test(q); });
+  }
+  /* ── UN SOLO RECORRIDO DEL DIBUJO ──
+     Tanto el DXF como el PDF vectorial necesitan lo mismo: recorrer el SVG que
+     se ve y sacar cada trazo en coordenadas del plano, con su capa y su
+     estilo. Se hace UNA vez y los dos formatos lo usan; si mañana se arregla
+     algo aquí, se arregla en los dos.
+     Devuelve por callback piezas { tipo:'poli'|'circ'|'texto', ... }. */
+  var DIBUJO_FUERA = { gGridBase: 1, gSel: 1, gPreview: 1, gMeasure: 1, gGuia: 1, gBusca: 1, gVisual: 1, bgHires: 1, gBackground: 1 };
+  function recorreDibujo(cb) {
+    var world = G.world;
+    var inv = world.getScreenCTM();
+    if (!inv) return 0;
+    inv = inv.inverse();
+    var pt = svg.createSVGPoint();
+    var n = 0;
+    function aMundo(m, x, y) { pt.x = x; pt.y = y; var q = pt.matrixTransform(m); return [q.x, q.y]; }
+    var tmpPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    world.appendChild(tmpPath);
+    tmpPath.style.display = 'none';
+    function estiloDe(el) {
+      var cs = getComputedStyle(el);
+      var trazo = cs.stroke && cs.stroke !== 'none' ? cs.stroke : null;
+      var relleno = cs.fill && cs.fill !== 'none' && cs.fill.indexOf('url(') < 0 ? cs.fill : null;
+      var lw = parseFloat(cs.strokeWidth) || 0;
+      var op = parseFloat(cs.opacity);
+      return { trazo: trazo, relleno: relleno, lw: lw, op: isFinite(op) ? op : 1, patron: (cs.fill || '').indexOf('url(') === 0 };
+    }
+    var todos = world.querySelectorAll('line, polyline, polygon, rect, circle, ellipse, path, text');
+    for (var i = 0; i < todos.length; i++) {
+      var el = todos[i];
+      if (el === tmpPath) continue;
+      var salta = false, n2 = el;
+      while (n2 && n2 !== world) {
+        if (n2.id && DIBUJO_FUERA[n2.id]) { salta = true; break; }
+        if (n2.style && n2.style.display === 'none') { salta = true; break; }
+        n2 = n2.parentNode;
+      }
+      if (salta) continue;
+      var m = el.getScreenCTM();
+      if (!m) continue;
+      m = inv.multiply(m);
+      var capa = dxfCapaDe(el, world);
+      var est = estiloDe(el);
+      var tag = el.tagName.toLowerCase();
+      if (tag === 'line') {
+        cb({ tipo: 'poli', capa: capa, est: est, cerrado: false, pts: [aMundo(m, +el.getAttribute('x1') || 0, +el.getAttribute('y1') || 0), aMundo(m, +el.getAttribute('x2') || 0, +el.getAttribute('y2') || 0)] }); n++;
+      } else if (tag === 'rect') {
+        var rx = +el.getAttribute('x') || 0, ry = +el.getAttribute('y') || 0;
+        var rw = +el.getAttribute('width') || 0, rh = +el.getAttribute('height') || 0;
+        if (rw > 6000 && rh > 6000) continue;      // el rectángulo blanco del fondo, no es dibujo
+        cb({ tipo: 'poli', capa: capa, est: est, cerrado: true, pts: [[rx, ry], [rx + rw, ry], [rx + rw, ry + rh], [rx, ry + rh]].map(function (q) { return aMundo(m, q[0], q[1]); }) }); n++;
+      } else if (tag === 'polyline' || tag === 'polygon') {
+        var ps = (el.getAttribute('points') || '').trim().split(/[\s,]+/).map(Number), arr = [];
+        for (var k = 0; k + 1 < ps.length; k += 2) arr.push(aMundo(m, ps[k], ps[k + 1]));
+        if (arr.length >= 2) { cb({ tipo: 'poli', capa: capa, est: est, cerrado: tag === 'polygon', pts: arr }); n++; }
+      } else if (tag === 'circle' || tag === 'ellipse') {
+        var cx = +(el.getAttribute('cx') || 0), cy = +(el.getAttribute('cy') || 0);
+        var r1 = +(el.getAttribute('r') || el.getAttribute('rx') || 0);
+        var r2 = +(el.getAttribute('r') || el.getAttribute('ry') || 0);
+        if (!r1 || !r2) continue;
+        var c0 = aMundo(m, cx, cy), cA = aMundo(m, cx + r1, cy), cB = aMundo(m, cx, cy + r2);
+        var ra = Math.hypot(cA[0] - c0[0], cA[1] - c0[1]), rb = Math.hypot(cB[0] - c0[0], cB[1] - c0[1]);
+        if (Math.abs(ra - rb) < Math.max(ra, rb) * 0.02) { cb({ tipo: 'circ', capa: capa, est: est, c: c0, r: (ra + rb) / 2 }); n++; }
+        else {
+          var el2 = [];
+          for (var a2 = 0; a2 <= 40; a2++) { var th = a2 / 40 * Math.PI * 2; el2.push(aMundo(m, cx + r1 * Math.cos(th), cy + r2 * Math.sin(th))); }
+          cb({ tipo: 'poli', capa: capa, est: est, cerrado: true, pts: el2 }); n++;
+        }
+      } else if (tag === 'path') {
+        var d = el.getAttribute('d'); if (!d) continue;
+        dxfSubtrazos(d).forEach(function (sd) {
+          tmpPath.setAttribute('d', sd);
+          var L = 0;
+          try { L = tmpPath.getTotalLength(); } catch (e) { L = 0; }
+          if (!(L > 0)) return;
+          var pasos = Math.max(2, Math.min(96, Math.ceil(L / 1.2)));
+          var pts2 = [];
+          for (var q2 = 0; q2 <= pasos; q2++) { var pp = tmpPath.getPointAtLength(L * q2 / pasos); pts2.push(aMundo(m, pp.x, pp.y)); }
+          cb({ tipo: 'poli', capa: capa, est: est, cerrado: /[Zz]\s*$/.test(sd), pts: pts2 }); n++;
+        });
+      } else if (tag === 'text') {
+        var tx = +(el.getAttribute('x') || 0), ty = +(el.getAttribute('y') || 0);
+        var fs = parseFloat(el.getAttribute('font-size') || getComputedStyle(el).fontSize) || 9;
+        var pw = aMundo(m, tx, ty), pw2 = aMundo(m, tx, ty - fs);
+        var alto = Math.hypot(pw2[0] - pw[0], pw2[1] - pw[1]) || fs;
+        var ang = Math.atan2(pw2[0] - pw[0], -(pw2[1] - pw[1])) * 180 / Math.PI;
+        var anc = getComputedStyle(el).textAnchor || el.getAttribute('text-anchor') || 'start';
+        cb({ tipo: 'texto', capa: capa, est: est, p: pw, alto: alto, rot: ang, txt: el.textContent, anchor: anc, ancho: (el.getComputedTextLength ? el.getComputedTextLength() : 0) });
+        n++;
+      }
+    }
+    world.removeChild(tmpPath);
+    return n;
+  }
+  function dxfDelPlano() {
+    var ent = '', nSeg = 0, cortado = false;
+    function pon(capa, a, b) {
+      if (nSeg >= DXF_MAX_SEG) { cortado = true; return; }
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.01) return;
+      ent += dxfLinea(capa, a[0], a[1], b[0], b[1]);
+      nSeg++;
+    }
+    recorreDibujo(function (o) {
+      if (o.tipo === 'poli') {
+        for (var i = 0; i + 1 < o.pts.length; i++) pon(o.capa, o.pts[i], o.pts[i + 1]);
+        if (o.cerrado && o.pts.length > 2) pon(o.capa, o.pts[o.pts.length - 1], o.pts[0]);
+      } else if (o.tipo === 'circ') {
+        if (nSeg < DXF_MAX_SEG) { ent += dxfCirculo(o.capa, o.c[0], o.c[1], o.r); nSeg++; }
+      } else if (o.tipo === 'texto') {
+        if (nSeg < DXF_MAX_SEG) { var t = dxfTexto(o.capa, o.p[0], o.p[1], o.alto, o.txt, o.rot); if (t) { ent += t; nSeg++; } }
+      }
+    });
+
+    var capas = Object.keys(DXF_CAPAS).map(function (k) { return DXF_CAPAS[k]; }).concat([['0', 7]]);
+    var tabla = '0\nTABLE\n' + dxfPar(2, 'LAYER') + dxfPar(70, capas.length);
+    capas.forEach(function (c) {
+      tabla += '0\nLAYER\n' + dxfPar(2, c[0]) + dxfPar(70, 0) + dxfPar(62, c[1]) + dxfPar(6, 'CONTINUOUS');
+    });
+    tabla += '0\nENDTAB\n';
+
+    var dxf = '0\nSECTION\n' + dxfPar(2, 'HEADER') +
+      dxfPar(9, '$ACADVER') + dxfPar(1, 'AC1009') +
+      dxfPar(9, '$INSUNITS') + dxfPar(70, 1) +          // 1 = pulgadas
+      '0\nENDSEC\n' +
+      '0\nSECTION\n' + dxfPar(2, 'TABLES') + tabla + '0\nENDSEC\n' +
+      '0\nSECTION\n' + dxfPar(2, 'ENTITIES') + ent + '0\nENDSEC\n0\nEOF\n';
+    return { dxf: dxf, n: nSeg, cortado: cortado };
+  }
+  function exportaDxf() {
+    var r = null;
+    try { r = dxfDelPlano(); } catch (e) { uiAlert('No se pudo armar el DXF: ' + (e && e.message)); return; }
+    if (!r || !r.n) { uiAlert('No hay nada dibujado en esta hoja para exportar.'); return; }
+    var nom = (state.project.name || 'plano') + '_' + ((state.sheets[state.curSheet] || {}).no || 'H1') + '.dxf';
+    saveFile(nom, r.dxf);
+    setHint((r.cortado ? '⚠ ' : '✔ ') + r.n + ' trazos exportados a DXF (pulgadas, capas A-WALL / E-POWR / A-ANNO…)' +
+      (r.cortado ? ' — se cortó en ' + DXF_MAX_SEG + ': el plano es enorme y un DXF más grande no lo abre nadie con gusto' : ''));
+  }
+
+  /* ---------------- IMPORTAR DXF ----------------
+     Se lee lo que de verdad se usa en un plano: LINE, LWPOLYLINE, POLYLINE,
+     CIRCLE, ARC y TEXT. Todo entra como LÍNEAS y RÓTULOS, no como paredes:
+     un DXF ajeno no dice cuál de sus líneas es una pared de 4½" y cuál es la
+     acera. Después, con "Convertir en paredes" de Propiedades, Edgar decide
+     cuáles lo son. Señalar, no obligar. */
+  var DXF_UNIDADES = { 1: 1, 2: 12, 4: 1 / 25.4, 5: 1 / 2.54, 6: 1000 / 25.4, 0: 1 };
+  function parseaDxf(txt) {
+    var lin = String(txt).split(/\r\n|\r|\n/);
+    var pares = [];
+    for (var i = 0; i + 1 < lin.length; i += 2) {
+      var c = parseInt(lin[i], 10);
+      if (isNaN(c)) { i -= 1; continue; }       // archivo con líneas sueltas: se resincroniza
+      pares.push([c, lin[i + 1]]);
+    }
+    var uds = 1, enHeader = false, esperaUnid = false;
+    var ents = [], cur = null, sec = '';
+    pares.forEach(function (pr) {
+      var c = pr[0], v = pr[1];
+      if (c === 0) {
+        if (cur) ents.push(cur);
+        cur = null;
+        if (v === 'SECTION') { sec = '?'; return; }
+        if (v === 'ENDSEC') { sec = ''; enHeader = false; return; }
+        if (v === 'EOF') return;
+        if (sec === 'ENTITIES') cur = { tipo: v, cap: '0', x: [], y: [], v: {} };
+        return;
+      }
+      if (sec === '?' && c === 2) { sec = v; enHeader = (v === 'HEADER'); return; }
+      if (enHeader) {
+        if (c === 9) { esperaUnid = (v === '$INSUNITS'); return; }
+        if (esperaUnid && c === 70) { uds = DXF_UNIDADES[parseInt(v, 10)] || 1; esperaUnid = false; }
+        return;
+      }
+      if (!cur) return;
+      if (c === 8) { cur.cap = v; return; }
+      if (c === 10 || c === 11) { cur.x.push(parseFloat(v)); return; }
+      if (c === 20 || c === 21) { cur.y.push(parseFloat(v)); return; }
+      if (c === 1) { cur.v.txt = v; return; }
+      if (c === 40) { cur.v.r = parseFloat(v); return; }
+      if (c === 50) { cur.v.a1 = parseFloat(v); return; }
+      if (c === 51) { cur.v.a2 = parseFloat(v); return; }
+      if (c === 70) { cur.v.flags = parseInt(v, 10) || 0; return; }
+    });
+    if (cur) ents.push(cur);
+    return { ents: ents, uds: uds };
+  }
+  function importaDxf(txt, cb) {
+    var r;
+    try { r = parseaDxf(txt); } catch (e) { cb({ err: 'El archivo no se pudo leer como DXF' }); return; }
+    var U = r.uds;
+    var lineas = [], textos = [], vertices = null;
+    function P(x, y) { return [Math.round(x * U), Math.round(-y * U)]; }   // la Y del CAD sube; la nuestra baja
+    r.ents.forEach(function (e) {
+      var t = e.tipo;
+      if (t === 'LINE' && e.x.length >= 2 && e.y.length >= 2) {
+        lineas.push([P(e.x[0], e.y[0]), P(e.x[1], e.y[1])]);
+      } else if (t === 'LWPOLYLINE' && e.x.length) {
+        var pl = [];
+        for (var i = 0; i < e.x.length && i < e.y.length; i++) pl.push(P(e.x[i], e.y[i]));
+        if ((e.v.flags & 1) && pl.length > 2) pl.push(pl[0]);
+        if (pl.length >= 2) lineas.push(pl);
+      } else if (t === 'POLYLINE') {
+        vertices = { pts: [], cerrada: !!(e.v.flags & 1) };
+      } else if (t === 'VERTEX' && vertices && e.x.length && e.y.length) {
+        vertices.pts.push(P(e.x[0], e.y[0]));
+      } else if (t === 'SEQEND' && vertices) {
+        if (vertices.cerrada && vertices.pts.length > 2) vertices.pts.push(vertices.pts[0]);
+        if (vertices.pts.length >= 2) lineas.push(vertices.pts);
+        vertices = null;
+      } else if (t === 'CIRCLE' && e.v.r > 0 && e.x.length) {
+        var cc = [];
+        for (var a = 0; a <= 36; a++) { var th = a / 36 * Math.PI * 2; cc.push(P(e.x[0] + e.v.r * Math.cos(th), e.y[0] + e.v.r * Math.sin(th))); }
+        lineas.push(cc);
+      } else if (t === 'ARC' && e.v.r > 0 && e.x.length) {
+        var a1 = (e.v.a1 || 0) * Math.PI / 180, a2 = (e.v.a2 == null ? 360 : e.v.a2) * Math.PI / 180;
+        if (a2 <= a1) a2 += Math.PI * 2;
+        var ar = [], pasos = Math.max(6, Math.round((a2 - a1) / (Math.PI / 18)));
+        for (var b2 = 0; b2 <= pasos; b2++) { var th2 = a1 + (a2 - a1) * b2 / pasos; ar.push(P(e.x[0] + e.v.r * Math.cos(th2), e.y[0] + e.v.r * Math.sin(th2))); }
+        lineas.push(ar);
+      } else if ((t === 'TEXT' || t === 'MTEXT') && e.v.txt && e.x.length) {
+        textos.push({ p: P(e.x[0], e.y[0]), txt: String(e.v.txt).replace(/\\P/g, ' ').replace(/\\[A-Za-z][^;]*;/g, '').trim(), h: (e.v.r || 6) * U });
+      }
+    });
+    if (vertices && vertices.pts.length >= 2) lineas.push(vertices.pts);
+    cb({ lineas: lineas, textos: textos, uds: U });
+  }
+  function meteDxf(res) {
+    if (!res.lineas.length && !res.textos.length) { uiAlert('Ese DXF no trae líneas ni textos que la app sepa leer.\n\nSe leen LINE, LWPOLYLINE, POLYLINE, CIRCLE, ARC y TEXT. Los bloques (INSERT) todavía no.'); return; }
+    pushUndo();
+    var nuevos = [];
+    res.lineas.forEach(function (pl) {
+      var a = { id: uid(), open: true, pts: pl, pattern: 'none', lineStyle: 'solid' };
+      state.areas.push(a);
+      nuevos.push({ kind: 'area', id: a.id });
+    });
+    res.textos.forEach(function (t) {
+      var e = { id: uid(), x: t.p[0], y: t.p[1], text: t.txt, size: Math.max(3, Math.round(t.h)) };
+      state.texts.push(e);
+      nuevos.push({ kind: 'text', id: e.id });
+    });
+    refresh(); zoomFit(); refreshCounts(); scheduleAutosave();
+    ponSel(nuevos.slice(0, 3000));
+    setHint('✔ DXF importado: ' + res.lineas.length + ' línea(s) y ' + res.textos.length + ' rótulo(s) — quedan SELECCIONADOS. ' +
+      'Entran como líneas, no como paredes: con "Convertir en paredes" de Propiedades decides tú cuáles lo son.');
+  }
+
+  /* Los botones del DXF viven en el panel Proyecto, con las demás opciones de
+     salida (hoja, sello, escala). Arriba no caben: la fila 1 ya estaba llena y
+     en el iPad se partía en tres, dejando el plano por debajo del 70 % de la
+     pantalla (lo midió la regresión antes de que se subiera nada). */
+  (function () {
+    var bv = $('#btnPdfVec'); if (bv) bv.addEventListener('click', exportaPdfEncima);
+    var be = $('#btnDxfExp'); if (be) be.addEventListener('click', exportaDxf);
+    var bi = $('#btnDxfImp'); if (bi) bi.addEventListener('click', function () { var f = $('#fileDxf'); if (f) { f.value = ''; f.click(); } });
+    var fd = $('#fileDxf');
+    if (fd) fd.addEventListener('change', function () {
+      var f = fd.files && fd.files[0]; if (!f) return;
+      if (f.size > 60 * 1024 * 1024) { uiAlert('Ese DXF pesa más de 60 MB: el navegador no lo va a poder con él.'); return; }
+      setHint('⏳ Leyendo el DXF…');
+      var rd = new FileReader();
+      rd.onload = function () {
+        importaDxf(rd.result, function (res) {
+          if (res.err) { uiAlert(res.err); setHint(''); return; }
+          meteDxf(res);
+        });
+      };
+      rd.onerror = function () { uiAlert('No se pudo leer el archivo.'); setHint(''); };
+      rd.readAsText(f);
+    });
+  })();
+
+
+  /* ==================================================================
+     PDF VECTORIAL ENCIMA DEL ORIGINAL (fase 5.11)
+     Hoy el PDF que sale lleva NUESTRO dibujo en vector, pero el plano del
+     ingeniero va de fondo como imagen: al acercarse se pixela y su texto deja
+     de poder buscarse. Esto es lo otro: se coge el PDF ORIGINAL tal cual y se
+     le estampan encima nuestras marcas, también en vector. El plano del
+     ingeniero sigue siendo el suyo — nítido a cualquier zoom y con su texto
+     buscable — y encima van nuestros trazos.
+
+     Se hace con una ACTUALIZACIÓN INCREMENTAL: no se reescribe el archivo, se
+     le añaden objetos al final y un xref nuevo que apunta al viejo. Es la
+     forma estándar de anotar un PDF sin tocar lo que ya tiene.
+
+     LO QUE NO SE PUEDE, DICHO: hay PDF (los de 1.5 en adelante, con xref
+     comprimido u objetos dentro de un ObjStm) donde la página no se puede
+     alcanzar sin reescribir medio archivo. Ahí NO se inventa: se avisa y se
+     usa el PDF de siempre. Un PDF corrupto entregado en un permiso es mucho
+     peor que un PDF con el fondo en imagen.
+     ================================================================== */
+  function pdfEsc(t) { return String(t).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'); }
+  function pdfNum(v) { return (Math.round(v * 100) / 100).toFixed(2); }
+  function colorPdf(c) {
+    var m = String(c || '').match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+    if (!m) return [0, 0, 0];
+    return [(+m[1]) / 255, (+m[2]) / 255, (+m[3]) / 255];
+  }
+  /* El contenido que se estampa: nuestros trazos, en el sistema de la página
+     del PDF (puntos, con la Y hacia arriba). */
+  function contenidoEncima(bg, view) {
+    var vx0 = view[0], vy0 = view[1], pw = view[2] - view[0], ph = view[3] - view[1];
+    var kx = pw / bg.w, ky = ph / bg.h;
+    function X(wx) { return vx0 + (wx - bg.x) * kx; }
+    function Y(wy) { return view[3] - (wy - bg.y) * ky; }
+    var esc = (kx + ky) / 2;               // de pulgadas de obra a puntos del papel
+    var out = ['q', '1 J 1 j'], n = 0, hayTexto = false;
+    var ultimo = null;
+    function estilo(e, relleno) {
+      var s2 = '';
+      var col = colorPdf(relleno ? e.relleno : e.trazo);
+      var clave = (relleno ? 'f' : 's') + col.join(',') + '|' + pdfNum(Math.max(e.lw * esc, 0.24)) + '|' + e.op;
+      if (clave === ultimo) return '';
+      ultimo = clave;
+      s2 += pdfNum(col[0]) + ' ' + pdfNum(col[1]) + ' ' + pdfNum(col[2]) + (relleno ? ' rg' : ' RG') + '\n';
+      if (!relleno) s2 += pdfNum(Math.max(e.lw * esc, 0.24)) + ' w\n';
+      return s2;
+    }
+    recorreDibujo(function (o) {
+      var e = o.est;
+      if (o.tipo === 'poli') {
+        if (!e.trazo && !e.relleno) return;
+        if (o.pts.length < 2) return;
+        var d = pdfNum(X(o.pts[0][0])) + ' ' + pdfNum(Y(o.pts[0][1])) + ' m\n';
+        for (var i = 1; i < o.pts.length; i++) d += pdfNum(X(o.pts[i][0])) + ' ' + pdfNum(Y(o.pts[i][1])) + ' l\n';
+        if (o.cerrado) d += 'h\n';
+        var op = e.relleno && e.trazo ? 'B' : e.relleno ? 'f' : 'S';
+        out.push(estilo(e, !!e.relleno) + (e.relleno && e.trazo ? estilo(e, false) : '') + d + op);
+        n++;
+      } else if (o.tipo === 'circ') {
+        // círculo con cuatro bézier, que es como se dibuja un círculo en PDF
+        var k = 0.5523, cx = X(o.c[0]), cy = Y(o.c[1]), r = o.r * esc;
+        var d2 = pdfNum(cx + r) + ' ' + pdfNum(cy) + ' m\n';
+        d2 += pdfNum(cx + r) + ' ' + pdfNum(cy + r * k) + ' ' + pdfNum(cx + r * k) + ' ' + pdfNum(cy + r) + ' ' + pdfNum(cx) + ' ' + pdfNum(cy + r) + ' c\n';
+        d2 += pdfNum(cx - r * k) + ' ' + pdfNum(cy + r) + ' ' + pdfNum(cx - r) + ' ' + pdfNum(cy + r * k) + ' ' + pdfNum(cx - r) + ' ' + pdfNum(cy) + ' c\n';
+        d2 += pdfNum(cx - r) + ' ' + pdfNum(cy - r * k) + ' ' + pdfNum(cx - r * k) + ' ' + pdfNum(cy - r) + ' ' + pdfNum(cx) + ' ' + pdfNum(cy - r) + ' c\n';
+        d2 += pdfNum(cx + r * k) + ' ' + pdfNum(cy - r) + ' ' + pdfNum(cx + r) + ' ' + pdfNum(cy - r * k) + ' ' + pdfNum(cx + r) + ' ' + pdfNum(cy) + ' c\n';
+        var op2 = e.relleno && e.trazo ? 'B' : e.relleno ? 'f' : 'S';
+        out.push(estilo(e, !!e.relleno) + (e.relleno && e.trazo ? estilo(e, false) : '') + d2 + op2);
+        n++;
+      } else if (o.tipo === 'texto') {
+        var t = String(o.txt || '').replace(/\s+/g, ' ').trim();
+        if (!t) return;
+        hayTexto = true;
+        var col = colorPdf(e.relleno || e.trazo || 'rgb(20,22,26)');
+        var h = o.alto * esc;
+        var rad = (o.rot || 0) * Math.PI / 180, ca = Math.cos(rad), sa = Math.sin(rad);
+        var px = X(o.p[0]), py = Y(o.p[1]);
+        // la alineación del SVG no existe en PDF: se corrige moviendo el punto
+        var an = (o.ancho || t.length * h * 0.5);
+        if (o.anchor === 'middle') { px -= an / 2 * ca; py += an / 2 * sa; }
+        else if (o.anchor === 'end') { px -= an * ca; py += an * sa; }
+        out.push('BT\n' + pdfNum(col[0]) + ' ' + pdfNum(col[1]) + ' ' + pdfNum(col[2]) + ' rg\n/MXPF ' + pdfNum(h) + ' Tf\n' +
+          pdfNum(ca) + ' ' + pdfNum(-sa) + ' ' + pdfNum(sa) + ' ' + pdfNum(ca) + ' ' + pdfNum(px) + ' ' + pdfNum(py) + ' Tm\n(' + pdfEsc(t) + ') Tj\nET');
+        ultimo = null;
+        n++;
+      }
+    });
+    out.push('Q');
+    return { txt: out.join('\n') + '\n', n: n, hayTexto: hayTexto };
+  }
+  /* Busca el objeto "num gen obj … endobj" en el archivo original. Devuelve
+     null si no está suelto (estará dentro de un ObjStm comprimido). */
+  function objRaw(str, num, gen) {
+    var re = new RegExp('(^|[^0-9])' + num + '\\s+' + gen + '\\s+obj\\b', 'g'), m, mejor = null;
+    while ((m = re.exec(str))) mejor = m.index + m[1].length;   // el último gana: es el más nuevo
+    if (mejor == null) return null;
+    var ini = str.indexOf('obj', mejor) + 3;
+    var fin = str.indexOf('endobj', ini);
+    if (fin < 0) return null;
+    return { desde: mejor, cuerpoIni: ini, cuerpoFin: fin, cuerpo: str.slice(ini, fin) };
+  }
+  function pdfEncimaDelOriginal(cb) {
+    var bg = state.bg, rec = pdfLive[state.curSheet];
+    if (!bg || !bg.pdfId || !rec || !rec.doc) { cb({ err: 'Esta hoja no tiene un PDF del ingeniero de fondo. El PDF vectorial encima solo tiene sentido si hay uno debajo.' }); return; }
+    idbGet(bg.pdfId, function (bytes) {
+      if (!bytes) { cb({ err: 'El PDF original ya no está guardado en este aparato. Vuelve a importarlo y prueba otra vez.' }); return; }
+      rec.doc.getPage(rec.page).then(function (page) {
+        if ((page.rotate || 0) % 360 !== 0) { cb({ err: 'Esa página del PDF viene girada ' + page.rotate + '°. Todavía no sé estampar encima de una página girada sin arriesgarme a dejarla torcida.' }); return; }
+        var view = page.view;                       // [x0,y0,x1,y1] en puntos
+        var ref = page.ref;
+        if (!ref || ref.num == null) { cb({ err: 'No pude localizar la página dentro del PDF.' }); return; }
+        var u8 = new Uint8Array(bytes.slice ? bytes.slice(0) : bytes);
+        var str = '';
+        for (var i = 0; i < u8.length; i += 32768) str += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + 32768, u8.length)));
+
+        // el trailer clásico: si no está, el PDF usa xref comprimido y aquí no entramos
+        var iTr = str.lastIndexOf('trailer');
+        var iSx = str.lastIndexOf('startxref');
+        if (iTr < 0 || iSx < 0) { cb({ err: 'Ese PDF usa el índice comprimido (PDF 1.5 o más nuevo). Para estamparle encima habría que reescribir medio archivo, y un PDF corrupto entregado en un permiso es mucho peor que un PDF con el fondo en imagen. Usa el botón PDF de siempre.' }); return; }
+        var mRoot = str.slice(iTr).match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+        var mSize = str.slice(iTr).match(/\/Size\s+(\d+)/);
+        var startxrefViejo = parseInt((str.slice(iSx).match(/startxref\s+(\d+)/) || [])[1], 10);
+        if (!mRoot || !mSize || !isFinite(startxrefViejo)) { cb({ err: 'El final de ese PDF no tiene la forma que sé leer. Usa el botón PDF de siempre.' }); return; }
+
+        var pg = objRaw(str, ref.num, ref.gen || 0);
+        if (!pg) { cb({ err: 'La página está comprimida dentro del PDF (ObjStm) y no la puedo reescribir sin riesgo. Usa el botón PDF de siempre.' }); return; }
+
+        var cont = contenidoEncima(bg, view);
+        if (!cont.n) { cb({ err: 'No hay nada dibujado encima del plano: no hay marcas que estampar.' }); return; }
+
+        var siguiente = parseInt(mSize[1], 10);
+        var numFont = siguiente++, numCont = siguiente++;
+        var nuevos = [];       // { num, txt }
+        var cuerpo = pg.cuerpo;
+
+        // 1) /Contents: se le añade el nuestro al final, sea uno o una lista
+        var mC = cuerpo.match(/\/Contents\s*(\[[^\]]*\]|\d+\s+\d+\s+R)/);
+        if (!mC) { cb({ err: 'Esa página no declara su contenido de una forma que sepa ampliar. Usa el botón PDF de siempre.' }); return; }
+        var nuevoContents = mC[1].charAt(0) === '['
+          ? mC[1].replace(/\]\s*$/, ' ' + numCont + ' 0 R]')
+          : '[' + mC[1] + ' ' + numCont + ' 0 R]';
+        cuerpo = cuerpo.slice(0, mC.index) + '/Contents ' + nuevoContents + cuerpo.slice(mC.index + mC[0].length);
+
+        // 2) /Resources: hace falta meter nuestra fuente. Si están en línea se
+        //    amplían aquí; si son un objeto aparte, se reescribe ese objeto.
+        var resObj = null;
+        var mR = cuerpo.match(/\/Resources\s*(\d+)\s+(\d+)\s+R/);
+        function meteFuente(dic) {
+          var mF = dic.match(/\/Font\s*<</);
+          if (mF) return dic.slice(0, mF.index + mF[0].length) + ' /MXPF ' + numFont + ' 0 R ' + dic.slice(mF.index + mF[0].length);
+          if (/\/Font\s+\d+\s+\d+\s+R/.test(dic)) return null;    // fuentes en otro objeto: no me meto
+          var i2 = dic.indexOf('<<');
+          if (i2 < 0) return null;
+          return dic.slice(0, i2 + 2) + ' /Font << /MXPF ' + numFont + ' 0 R >> ' + dic.slice(i2 + 2);
+        }
+        if (mR) {
+          var ro = objRaw(str, parseInt(mR[1], 10), parseInt(mR[2], 10));
+          if (!ro) { cb({ err: 'Los recursos de esa página están comprimidos y no los puedo ampliar sin riesgo. Usa el botón PDF de siempre.' }); return; }
+          var nd = meteFuente(ro.cuerpo);
+          if (nd == null) { cb({ err: 'Las fuentes de esa página están montadas de una forma que no sé ampliar sin arriesgarme. Usa el botón PDF de siempre.' }); return; }
+          resObj = { num: parseInt(mR[1], 10), gen: parseInt(mR[2], 10), txt: nd };
+        } else {
+          var mRi = cuerpo.match(/\/Resources\s*<</);
+          if (!mRi) {
+            cuerpo = cuerpo.replace(/<</, '<< /Resources << /Font << /MXPF ' + numFont + ' 0 R >> >> ');
+          } else {
+            // se recorta el diccionario de recursos contando << y >>
+            var j = mRi.index + mRi[0].length - 2, prof = 0, fin2 = -1;
+            for (var q = j; q < cuerpo.length - 1; q++) {
+              if (cuerpo[q] === '<' && cuerpo[q + 1] === '<') { prof++; q++; }
+              else if (cuerpo[q] === '>' && cuerpo[q + 1] === '>') { prof--; q++; if (!prof) { fin2 = q + 1; break; } }
+            }
+            if (fin2 < 0) { cb({ err: 'No pude leer los recursos de esa página. Usa el botón PDF de siempre.' }); return; }
+            var dicR = cuerpo.slice(j, fin2);
+            var nd2 = meteFuente(dicR);
+            if (nd2 == null) { cb({ err: 'Las fuentes de esa página están montadas de una forma que no sé ampliar sin arriesgarme. Usa el botón PDF de siempre.' }); return; }
+            cuerpo = cuerpo.slice(0, j) + nd2 + cuerpo.slice(fin2);
+          }
+        }
+
+        nuevos.push({ num: numFont, gen: 0, txt: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>' });
+        nuevos.push({ num: numCont, gen: 0, txt: '<< /Length ' + cont.txt.length + ' >>\nstream\n' + cont.txt + 'endstream' });
+        nuevos.push({ num: ref.num, gen: ref.gen || 0, txt: cuerpo.trim() });
+        if (resObj) nuevos.push(resObj);
+
+        // 3) se pega todo al final con su xref nuevo, apuntando al viejo
+        var salida = str;
+        if (!/\n$/.test(salida)) salida += '\n';
+        var offs = {};
+        nuevos.forEach(function (o) {
+          offs[o.num] = salida.length;
+          salida += o.num + ' ' + (o.gen || 0) + ' obj\n' + o.txt + '\nendobj\n';
+        });
+        var nums = Object.keys(offs).map(Number).sort(function (a, b) { return a - b; });
+        var xrefPos = salida.length;
+        var xref = 'xref\n';
+        var i3 = 0;
+        while (i3 < nums.length) {
+          var j3 = i3;
+          while (j3 + 1 < nums.length && nums[j3 + 1] === nums[j3] + 1) j3++;
+          xref += nums[i3] + ' ' + (j3 - i3 + 1) + '\n';
+          for (var k3 = i3; k3 <= j3; k3++) {
+            var off = String(offs[nums[k3]]);
+            while (off.length < 10) off = '0' + off;
+            xref += off + ' 00000 n \n';
+          }
+          i3 = j3 + 1;
+        }
+        salida += xref + 'trailer\n<< /Size ' + siguiente + ' /Root ' + mRoot[1] + ' ' + mRoot[2] + ' R /Prev ' + startxrefViejo + ' >>\nstartxref\n' + xrefPos + '\n%%EOF\n';
+
+        var bin = new Uint8Array(salida.length);
+        for (var b2 = 0; b2 < salida.length; b2++) bin[b2] = salida.charCodeAt(b2) & 0xff;
+        cb({ bytes: bin, n: cont.n });
+      }).catch(function (e) { cb({ err: 'No pude leer esa página del PDF: ' + (e && e.message || e) }); });
+    });
+  }
+  /* NO se entrega sin comprobarlo: el archivo hecho se vuelve a abrir con
+     pdf.js y se mira que la página siga ahí y que el texto del ingeniero se
+     siga pudiendo leer. Si algo no cuadra, no se baja nada. */
+  function exportaPdfEncima() {
+    setHint('⏳ Armando el PDF vectorial encima del original…');
+    pdfEncimaDelOriginal(function (r) {
+      if (r.err) { uiAlert(r.err); setHint(''); return; }
+      pdfjsLib.getDocument({ data: r.bytes.slice(0), isEvalSupported: false }).promise.then(function (doc2) {
+        return doc2.getPage(pdfLive[state.curSheet].page).then(function (pg2) {
+          return pg2.getTextContent().then(function (tc) {
+            var nom = (state.project.name || 'plano') + '_' + ((state.sheets[state.curSheet] || {}).no || 'H1') + '_marcado.pdf';
+            saveFile(nom, r.bytes);
+            setHint('✔ PDF vectorial encima del original: ' + r.n + ' marcas estampadas · el plano del ingeniero sigue nítido y con sus ' +
+              (tc.items || []).length + ' textos buscables');
+          });
+        });
+      }).catch(function (e) {
+        uiAlert('El archivo que salió no se pudo volver a abrir, así que NO se ha bajado nada.\n\n' +
+          'Detalle: ' + (e && e.message || e) + '\n\nUsa el botón PDF de siempre; ese sale seguro.');
+        setHint('');
+      });
+    });
+  }
+
+
+  /* ==================================================================
+     BÚSQUEDA VISUAL → COUNT (fase 5.9)
+     Contar los símbolos DEL INGENIERO. Encierras uno en un marco, la app
+     busca en el plano todos los que se ven igual y los mete en el conteo de
+     un toque. Es el Visual Search de Bluebeam.
+
+     Cómo: el plano de fondo es una imagen. Se pasa a blanco y negro (un plano
+     es tinta sobre papel), se saca el molde del marco y se recorre la hoja
+     comparando. Para que no tarde una vida hay dos trucos:
+       · una IMAGEN INTEGRAL de la tinta: antes de comparar 3.600 píxeles se
+         mira en una resta si la ventana tiene siquiera una cantidad de tinta
+         parecida. Tira más del 95 % de las ventanas en una operación.
+       · el parecido se mide como tinta en común / tinta total (Jaccard), que
+         es lo que aguanta bien un dibujo de líneas.
+     Y se hace por tandas con pausas, para que la app no se quede tiesa.
+
+     Lo que NO es: esto no lee el plano ni entiende qué es un receptáculo.
+     Compara dibujos. Si el plano tiene dos símbolos casi iguales, los va a
+     confundir — por eso los resultados se ENSEÑAN antes de contarlos y hay
+     una barra de "cuánto se tienen que parecer".
+     ================================================================== */
+  var visual = null;      // { rect, img, cv, ctx, esc, tpl, hits, umbral }
+  function visualCargaFondo(cb) {
+    var bg = state.bg;
+    if (!bg || !bg.url) { cb(null); return; }
+    var im = new Image();
+    im.onload = function () {
+      var MAXW = 2600;
+      var esc = Math.min(1, MAXW / im.naturalWidth);
+      var cw = Math.max(1, Math.round(im.naturalWidth * esc)), ch = Math.max(1, Math.round(im.naturalHeight * esc));
+      var cv = document.createElement('canvas');
+      cv.width = cw; cv.height = ch;
+      var ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(im, 0, 0, cw, ch);
+      var d = ctx.getImageData(0, 0, cw, ch).data;
+      // tinta = oscuro. El umbral 175 deja pasar la línea fina gris de un plano
+      var tinta = new Uint8Array(cw * ch);
+      for (var i = 0, j = 0; i < d.length; i += 4, j++) {
+        tinta[j] = ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000) < 175 ? 1 : 0;
+      }
+      /* TINTA ENGORDADA 1 px. En un plano las líneas tienen 1-2 px: si la
+         ventana cae desplazada UN píxel, dos dibujos idénticos no comparten
+         casi nada y el parecido se desploma. Comparando contra la versión
+         engordada, un píxel de desajuste deja de importar. Sin esto la prueba
+         encontraba 4 de 7 símbolos iguales — medido. */
+      var gorda = new Uint8Array(cw * ch);
+      for (var gy = 0; gy < ch; gy++) {
+        for (var gx = 0; gx < cw; gx++) {
+          if (!tinta[gy * cw + gx]) continue;
+          for (var dy = -1; dy <= 1; dy++) {
+            var yy2 = gy + dy; if (yy2 < 0 || yy2 >= ch) continue;
+            for (var dx = -1; dx <= 1; dx++) {
+              var xx2 = gx + dx; if (xx2 < 0 || xx2 >= cw) continue;
+              gorda[yy2 * cw + xx2] = 1;
+            }
+          }
+        }
+      }
+      // imagen integral: suma de tinta de (0,0) a (x,y)
+      var W = cw + 1, integ = new Int32Array(W * (ch + 1));
+      for (var y = 0; y < ch; y++) {
+        var fila = 0;
+        for (var x = 0; x < cw; x++) {
+          fila += tinta[y * cw + x];
+          integ[(y + 1) * W + (x + 1)] = integ[y * W + (x + 1)] + fila;
+        }
+      }
+      cb({ w: cw, h: ch, tinta: tinta, gorda: gorda, integ: integ, W: W, esc: esc });
+    };
+    im.onerror = function () { cb(null); };
+    im.src = bg.url;
+  }
+  function integTinta(F, x0, y0, x1, y1) {
+    var W = F.W;
+    return F.integ[y1 * W + x1] - F.integ[y0 * W + x1] - F.integ[y1 * W + x0] + F.integ[y0 * W + x0];
+  }
+  /* Del rectángulo del plano (pulgadas) al de la imagen (píxeles). */
+  function rectAImagen(F, r) {
+    var bg = state.bg;
+    var kx = F.w / bg.w, ky = F.h / bg.h;
+    return {
+      x0: Math.max(0, Math.round((r.x0 - bg.x) * kx)), y0: Math.max(0, Math.round((r.y0 - bg.y) * ky)),
+      x1: Math.min(F.w, Math.round((r.x1 - bg.x) * kx)), y1: Math.min(F.h, Math.round((r.y1 - bg.y) * ky))
+    };
+  }
+  function visualArranca(rectMundo, cb) {
+    visualCargaFondo(function (F) {
+      if (!F) { cb({ err: 'Esta hoja no tiene plano de fondo donde buscar. Importa el PDF o la imagen del ingeniero.' }); return; }
+      var R2 = rectAImagen(F, rectMundo);
+      var tw = R2.x1 - R2.x0, th = R2.y1 - R2.y0;
+      if (tw < 6 || th < 6) { cb({ err: 'El marco salió muy chico para reconocer nada. Encierra el símbolo completo, con un poco de aire alrededor.' }); return; }
+      if (tw > 400 || th > 400) { cb({ err: 'El marco salió enorme. Encierra UN símbolo, no medio plano.' }); return; }
+      var tpl = new Uint8Array(tw * th), tplG = new Uint8Array(tw * th), tint = 0;
+      for (var y = 0; y < th; y++) for (var x = 0; x < tw; x++) {
+        var v = F.tinta[(R2.y0 + y) * F.w + (R2.x0 + x)];
+        tpl[y * tw + x] = v; tint += v;
+        tplG[y * tw + x] = F.gorda[(R2.y0 + y) * F.w + (R2.x0 + x)];
+      }
+      if (tint < 8) { cb({ err: 'En ese marco casi no hay dibujo: no hay nada que reconocer.' }); return; }
+      cb({ F: F, tpl: tpl, tplG: tplG, tw: tw, th: th, tint: tint, rectImg: R2 });
+    });
+  }
+  /* El barrido. Por tandas de filas, con pausa, para no congelar la app. */
+  function visualBarre(ctx0, umbral, onPaso, cb) {
+    var F = ctx0.F, tw = ctx0.tw, th = ctx0.th, tpl = ctx0.tpl, tplG = ctx0.tplG, tint = ctx0.tint;
+    // el paso tiene que ser fino: con la tinta engordada 1 px se aguanta un
+    // píxel de desajuste, no cuatro
+    var paso = Math.max(1, Math.min(4, Math.round(Math.min(tw, th) / 24)));
+    var hits = [];
+    var y = 0, filas = F.h - th;
+    var tMin = tint * 0.55, tMax = tint * 1.9;
+    function tanda() {
+      var t0 = Date.now();
+      while (y <= filas) {
+        for (var x = 0; x + tw <= F.w; x += paso) {
+          // primer filtro, de una resta: ¿hay siquiera tinta parecida aquí?
+          var s = integTinta(F, x, y, x + tw, y + th);
+          if (s < tMin || s > tMax) continue;
+          /* Parecido en los dos sentidos, contra la tinta engordada:
+             · cuánto del MOLDE aparece en la ventana (¿está el dibujo?)
+             · cuánto de la VENTANA cabe en el molde (¿o hay de más?)
+             y se juntan en una sola nota (media armónica). Así ni un símbolo
+             a medias ni un borrón lleno de tinta pasan por bueno. */
+          var enc1 = 0, enc2 = 0, tw2 = 0;
+          for (var yy = 0; yy < th; yy++) {
+            var of1 = yy * tw, of2 = (y + yy) * F.w + x;
+            for (var xx = 0; xx < tw; xx++) {
+              var a = tpl[of1 + xx], b = F.tinta[of2 + xx];
+              if (a && F.gorda[of2 + xx]) enc1++;
+              if (b) { tw2++; if (tplG[of1 + xx]) enc2++; }
+            }
+          }
+          var rec = enc1 / (tint || 1), pre = enc2 / (tw2 || 1);
+          var sc = (rec + pre) ? (2 * rec * pre / (rec + pre)) : 0;
+          if (sc >= umbral) hits.push({ x: x, y: y, sc: sc });
+        }
+        y += paso;
+        if (Date.now() - t0 > 40) break;      // se suelta el hilo cada 40 ms
+      }
+      if (onPaso) onPaso(Math.min(1, y / (filas || 1)));
+      if (y <= filas) { setTimeout(tanda, 0); return; }
+      // se quedan los mejores y se tiran los vecinos: un símbolo, un resultado
+      hits.sort(function (a, b) { return b.sc - a.sc; });
+      var dmin = Math.max(tw, th) * 0.62, buenos = [];
+      hits.forEach(function (h) {
+        for (var i = 0; i < buenos.length; i++) {
+          if (Math.abs(buenos[i].x - h.x) < dmin && Math.abs(buenos[i].y - h.y) < dmin) return;
+        }
+        buenos.push(h);
+      });
+      var bg = state.bg, kx = bg.w / F.w, ky = bg.h / F.h;
+      cb(buenos.map(function (h) {
+        return {
+          sc: h.sc,
+          x: bg.x + (h.x + tw / 2) * kx, y: bg.y + (h.y + th / 2) * ky,
+          w: tw * kx, h: th * ky
+        };
+      }));
+    }
+    setTimeout(tanda, 0);
+  }
+  /* ---- la parte que se ve ---- */
+  function pintaVisual() {
+    var g = document.getElementById('gVisual'); if (!g) return;
+    if (!visual || !visual.hits) return;
+    var s2 = '';
+    visual.hits.forEach(function (h, i) {
+      s2 += '<rect class="visual' + (i === 0 ? ' molde' : '') + '" x="' + (h.x - h.w / 2).toFixed(1) + '" y="' + (h.y - h.h / 2).toFixed(1) +
+        '" width="' + h.w.toFixed(1) + '" height="' + h.h.toFixed(1) + '"/>';
+    });
+    g.innerHTML = s2;
+  }
+  function abreVisual() {
+    var b = $('#visualBox'); if (!b) return;
+    b.classList.remove('oculto');
+    pintaPanelVisual();
+  }
+  function cierraVisual() {
+    var b = $('#visualBox'); if (b) b.classList.add('oculto');
+    visual = null;
+    var g = document.getElementById('gVisual'); if (g) g.innerHTML = '';
+    if (tool === 'vsearch') setTool('select');
+  }
+  function pintaPanelVisual(estado) {
+    var c = $('#visualCuerpo'); if (!c) return;
+    if (estado) { c.innerHTML = '<div class="bMuted">' + estado + '</div>'; return; }
+    if (!visual || !visual.hits) {
+      c.innerHTML = '<div class="bMuted">Encierra en un marco UN símbolo del plano del ingeniero — un can, un receptáculo — y te busco todos los que se ven igual.</div>';
+      return;
+    }
+    var cats = catsCount();
+    var h = '<div class="vN"><b>' + visual.hits.length + '</b> encontrado(s)' + (visual.hits.length ? ' — mira los recuadros en el plano' : '') + '</div>';
+    h += '<div class="row"><label>Se parecen</label><input id="vUmbral" type="range" min="40" max="95" step="1" value="' + Math.round(visual.umbral * 100) + '" style="flex:1"><span id="vUmbralN" class="muted small" style="width:34px;text-align:right">' + Math.round(visual.umbral * 100) + '%</span></div>';
+    h += '<div class="muted small">Bájalo si faltan; súbelo si está cogiendo cosas que no son.</div>';
+    h += '<div class="row"><label>Contar como</label><select id="vCat" style="flex:1">' +
+      cats.map(function (q) { return '<option value="' + esc(q.id) + '"' + (catActiva === q.id ? ' selected' : '') + '>' + esc(q.nom) + '</option>'; }).join('') +
+      '<option value="__nueva">＋ Categoría nueva…</option></select></div>';
+    h += '<button id="vAdd" style="width:100%;margin-top:6px"' + (visual.hits.length ? '' : ' disabled') + '>Añadir los ' + visual.hits.length + ' al conteo</button>';
+    h += '<div class="muted small" style="margin-top:6px">Esto compara dibujos, no lee el plano: si hay dos símbolos casi iguales los va a confundir. Por eso los ves antes de contarlos.</div>';
+    c.innerHTML = h;
+    var u = $('#vUmbral'), un = $('#vUmbralN');
+    if (u) {
+      u.addEventListener('input', function () { if (un) un.textContent = u.value + '%'; });
+      u.addEventListener('change', function () { visual.umbral = (+u.value) / 100; relanzaVisual(); });
+    }
+    var ba = $('#vAdd');
+    if (ba) ba.addEventListener('click', function () {
+      var sel2 = $('#vCat');
+      var id = sel2 ? sel2.value : '';
+      if (id === '__nueva') {
+        uiPrompt('Nombre de lo que estás contando:', '', function (v) {
+          if (v == null) return;
+          pushUndo();
+          var c2 = nuevaCatCount(v); catActiva = c2.id;
+          metVisualAlConteo(c2.id, true);
+        });
+        return;
+      }
+      pushUndo();
+      metVisualAlConteo(id || catActivaSegura().id, true);
+    });
+  }
+  function metVisualAlConteo(catId, yaUndo) {
+    if (!visual || !visual.hits || !visual.hits.length) return;
+    if (!catCount(catId)) catId = catActivaSegura().id;
+    if (!yaUndo) pushUndo();
+    visual.hits.forEach(function (h) {
+      state.counts.push({ id: uid(), x: Math.round(h.x), y: Math.round(h.y), cat: catId });
+    });
+    var n = visual.hits.length;
+    var nom = (catCount(catId) || {}).nom || '';
+    cierraVisual();
+    refresh(); refreshCounts(); scheduleAutosave();
+    setHint('✔ ' + n + ' marca(s) añadidas al conteo de ' + nom + ' · revísalas y borra las que no sean · Ctrl+Z las quita todas');
+  }
+  function relanzaVisual() {
+    if (!visual || !visual.ctx0) return;
+    pintaPanelVisual('Buscando… 0 %');
+    visualBarre(visual.ctx0, visual.umbral,
+      function (pc) { pintaPanelVisual('Buscando… ' + Math.round(pc * 100) + ' %'); },
+      function (hits) { visual.hits = hits; pintaVisual(); pintaPanelVisual(); });
+  }
+  function vsearchFin(a, b) {
+    var r = { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+    abreVisual();
+    pintaPanelVisual('Preparando el molde…');
+    visualArranca(r, function (res) {
+      if (res.err) { pintaPanelVisual(res.err); visual = null; return; }
+      visual = { ctx0: res, umbral: 0.66, hits: null };
+      relanzaVisual();
+    });
+  }
+
   function buildPrintFrame(container) {
     var b = contentBBox();
     ponOrientacion(b.h > b.w * 1.02);
+    var hojaSel0 = $('#pjSheet');
+    var modo0 = hojaSel0 ? hojaSel0.value : 'limpia';
+    /* La escala gráfica va DENTRO del dibujo, así que la hoja tiene que
+       crecer para dejarle sitio ANTES de clonar (si no, se le encimaba al
+       plano por abajo). */
+    var barra = (modo0 !== 'limpia') ? escalaGrafica(b, null) : null;
+    if (barra) b = { x: b.x, y: b.y, w: b.w, h: b.h + barra.alto };
     var clone = cleanSvgClone(b);
     clone.removeAttribute('width'); clone.removeAttribute('height');
     clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
@@ -14297,29 +16089,26 @@
       clone.style.display = 'block';
       scaleText = PRINT_SCALES[scaleVal];
     }
-
-    // leyenda: solo símbolos usados
-    var used = {};
-    state.symbols.forEach(function (s) { used[s.key] = true; });
-    var legend = '';
-    Object.keys(used).forEach(function (k) {
-      var d = SYMBOLS[k]; if (!d) return;
-      legend += '<span class="it">' + symPreviewSvg(d, 26, 20) + esc(d.short || d.name) + '</span>';
-    });
+    // la barra ya se midió arriba; ahora se pinta con el texto de la escala
+    if (barra) {
+      var b0 = { x: b.x, y: b.y, w: b.w, h: b.h - barra.alto };
+      var barra2 = escalaGrafica(b0, scaleText);
+      if (barra2) clone.insertAdjacentHTML('beforeend', barra2.svg);
+    }
 
     // QUE SALE EN LA HOJA (Edgar, 08/30: "que sea como un plano de ingeniero,
     // que salga solo el plano como una hoja"). La leyenda y la caratula
     // quedan de opcion, no de obligacion: la presentacion buena se hara
     // aparte. 'limpia' = ni marco; 'marco' = la hoja con su recuadro.
-    var hojaSel = $('#pjSheet');
-    var hoja = hojaSel ? hojaSel.value : 'limpia';
+    var hoja = modo0;
     state.printSheet = hoja;
+    state.printSello = ($('#pjSello') || {}).value || '';
 
     var frame = document.createElement('div');
     frame.className = 'sheetFrame' + (hoja === 'limpia' ? ' sinMarco' : '');
-    frame.innerHTML = '  <div class="drawArea"></div>' +
+    frame.innerHTML = '  <div class="drawArea">' + (hoja !== 'limpia' ? selloHtml() : '') + '</div>' +
       (hoja === 'full'
-        ? ((legend ? '<div class="legend"><b style="font-size:8px">SYMBOL LEGEND:</b>' + legend + '</div>' : '') +
+        ? (leyendaHtml() +
            titleBlockHtml(state.project.sheetNo || 'E-1', state.project.sheetTitle || 'PLANO', scaleText))
         : '');
     frame.querySelector('.drawArea').appendChild(clone);
@@ -15008,6 +16797,7 @@
       case 't': case 'T': setTool('text'); break;
       case 'o': case 'O': setTool('count'); break;
       case 'f': case 'F': setTool('match'); break;
+      case 'g': case 'G': setTool('trim'); break;
       case 'p': case 'P': setTool('pen'); break;   // (H es la mano/pan: el resaltador va por el botón)
       case 'k': case 'K': setTool('calibrate'); break;
       case 'Enter':
@@ -15049,6 +16839,7 @@
     { id: 'ellipse', grp: 'shape', ico: 'ellipse', nom: 'Ellipse', tip: 'Elipse / círculo (2 clics, SHIFT = círculo)' },
     { id: 'line', grp: 'shape', ico: 'line', nom: 'Line', tip: 'Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)', menu: 'line', menuTip: 'Elegir tipo de línea y punta' },
     { id: 'pline', grp: 'shape', ico: 'pline', nom: 'Polyline', tip: 'Polilínea: línea de varios tramos (doble clic o Enter termina)', menu: 'pline', menuTip: 'Elegir tipo de línea' },
+    { id: 'trim', grp: 'shape', ico: 'trim', nom: 'Trim', key: 'G', tip: 'Trim / Extend / Break (G): recorta lo que sobra de una pared, cable o línea contra lo que se cruza · alárgala hasta que toque · pártela en dos. El ▾ elige cuál de las tres.', menu: 'trim', menuTip: 'Recortar, alargar o partir' },
     { id: 'cloud', grp: 'shape', ico: 'cloud', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
     { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
     { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
@@ -15073,14 +16864,15 @@
   ];
   var BARRAS = {
     favs: { nom: 'Mis herramientas', tip: 'Las herramientas que más usas, a un toque. Añade o quita con la ☆ de cada grupo, o en ⋮⋮ Barras.' },
-    grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' }
+    grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' },
+    cofre: { nom: 'Mi cofre', tip: 'Tus herramientas guardadas: una marca ya configurada (color, tamaño, circuito, texto) a un solo toque. Se guardan desde Propiedades con "Guardar como herramienta".' }
   };
   var DOCKS = ['top', 'bottom', 'left', 'right'];
   var DOCK_NOM = { top: 'Arriba', bottom: 'Abajo', left: 'Izquierda', right: 'Derecha' };
   var LAYOUT_DEF = {
     v: 1,
-    docks: { top: ['favs', 'grupos'], bottom: [], left: [], right: [] },
-    ocultas: [],
+    docks: { top: ['favs', 'grupos', 'cofre'], bottom: [], left: [], right: [] },
+    ocultas: ['cofre'],
     favs: ['text', 'leader', 'wire', 'homerun', 'dim', 'measure', 'rect', 'cloud'],
     ultima: {},
     uso: {}
@@ -15118,6 +16910,7 @@
     return L;
   }
   var layout = cargaLayout();
+  cofre = cargaCofre();      // aquí sí: TOOL_DEFS y SYMBOLS ya existen
   var guardaLayoutT = null;
   function guardaLayout() {
     clearTimeout(guardaLayoutT); guardaLayoutT = null;
@@ -15157,6 +16950,9 @@
       if (!layout.favs.length) html += '<button class="act" data-act="barras" title="Todavía no hay herramientas aquí: toca para elegir las tuyas">＋<label>Elegir</label></button>';
     } else if (id === 'grupos') {
       html += gruposVisibles().map(function (g) { return btnGrupo(g, dock === 'left' || dock === 'right'); }).join('');
+    } else if (id === 'cofre') {
+      html += cofre.map(btnCofre).join('');
+      if (!cofre.length) html += '<button class="act" data-act="cofre" title="Todavía no hay ninguna. Selecciona una marca ya configurada y usa &quot;Guardar como herramienta&quot; en Propiedades.">＋<label>Guardar</label></button>';
     }
     div.innerHTML = html + '</div>';
     return div;
@@ -15314,7 +17110,11 @@
   document.addEventListener('click', function (ev) {
     var b = ev.target.closest && ev.target.closest('.dock button, #navFijo button');
     if (!b) return;
-    if (b.classList.contains('tool')) {
+    if (b.dataset.cofre) {
+      var ddC = ev.target.closest && ev.target.closest('.dd');
+      if (ddC) { showToolMenu('cofreItem', b, ddC.dataset.cofmenu); return; }
+      usaCofre(b.dataset.cofre);
+    } else if (b.classList.contains('tool')) {
       var dd = ev.target.closest && ev.target.closest('.dd');
       if (eligeTool(b.dataset.tool, b)) return;
       if (dd) showToolMenu(dd.dataset.menu, b);
@@ -15341,6 +17141,7 @@
     else if (act === 'zoomOut') zoomBy(0.8);
     else if (act === 'zoomFit') zoomFit();
     else if (act === 'barras') abrePanelBarras();
+    else if (act === 'cofre') setHint('Mi cofre: selecciona en el plano una marca ya configurada y pulsa "Guardar como herramienta" en Propiedades');
   }
 
   /* ---------- arrastrar una barra por su agarradera ---------- */
@@ -15599,9 +17400,35 @@
     renderBg(); zoomFit(); refresh();
     setHint('✔ Plano a escala ' + bgScaleName(f) + ' — ya puedes medir directo (M) sin calibrar.');
   }
-  function showToolMenu(kind, anchor) {
+  function showToolMenu(kind, anchor, extra) {
     var tm = $('#toolMenu');
     var html = '';
+    if (kind === 'cofreItem') {
+      var itC = cofreDe(extra);
+      if (!itC) return;
+      var iC = cofre.findIndex(function (q) { return q.id === extra; });
+      html += '<div class="tmHead">' + esc(itC.nom) + '</div>';
+      html += '<div class="tmItem" data-k="usa"><span>Usarla ahora</span></div>';
+      html += '<div class="tmItem" data-k="ren"><span>Renombrar…</span></div>';
+      html += '<div class="tmItem' + (iC <= 0 ? ' k-off' : '') + '" data-k="izq"><span>Moverla antes</span></div>';
+      html += '<div class="tmItem' + (iC >= cofre.length - 1 ? ' k-off' : '') + '" data-k="der"><span>Moverla después</span></div>';
+      html += '<div class="tmItem" data-k="del"><span>Quitarla del cofre…</span></div>';
+      tm.innerHTML = html;
+      tm.dataset.kind = 'cofreItem';
+      colocaMenu(tm, anchor, '');
+      $$('#toolMenu .tmItem').forEach(function (itm) {
+        itm.addEventListener('click', function () {
+          var k = itm.dataset.k;
+          tm.hidden = true;
+          if (k === 'usa') usaCofre(extra);
+          else if (k === 'ren') renombraEnCofre(extra);
+          else if (k === 'izq') mueveEnCofre(extra, -1);
+          else if (k === 'der') mueveEnCofre(extra, 1);
+          else if (k === 'del') borraDeCofre(extra);
+        });
+      });
+      return;
+    }
     if (kind === 'wall') {
       html += '<div class="tmHead">Tipo de pared</div>';
       var cur = $('#wallType').value;
@@ -15687,6 +17514,12 @@
         html += '<div class="tmItem" data-k="__origen"><span>El próximo toque coge el origen</span></div>';
       }
       html += '<div class="tmPie">Viaja el ASPECTO — color, grosor, tamaño, tipo. No viaja ni la posición, ni el giro, ni el texto escrito.</div>';
+    } else if (kind === 'trim') {
+      html += '<div class="tmHead">¿Qué le hago a la línea?</div>';
+      html += '<div class="tmItem' + (trimModo === 'trim' ? ' cur' : '') + '" data-k="trim"><span><b>Recortar</b> — toca el pedazo que sobra y se va</span></div>';
+      html += '<div class="tmItem' + (trimModo === 'extend' ? ' cur' : '') + '" data-k="extend"><span><b>Alargar</b> — toca cerca de la punta y llega hasta lo que la para</span></div>';
+      html += '<div class="tmItem' + (trimModo === 'break' ? ' cur' : '') + '" data-k="break"><span><b>Partir</b> — toca el punto y queda en dos</span></div>';
+      html += '<div class="tmPie">Vale para paredes, cables y líneas o polilíneas abiertas. Una superficie cerrada no se recorta, pero sí sirve de borde.</div>';
     } else if (kind === 'count') {
       html += '<div class="tmHead">¿Qué estás contando?</div>';
       var catsM = catsCount();
@@ -15698,6 +17531,8 @@
           '<span class="cntChip" style="background:' + esc(c.color) + '"></span><span>' + esc(c.nom) +
           ' <span class="muted">· ' + nH + ' en esta hoja</span></span></div>';
       });
+      html += '<div class="tmHead">Contar lo que ya trae el plano</div>';
+      html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
       if (catsM.length) {
         html += '<div class="tmHead">Categorías</div>';
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
@@ -15803,10 +17638,15 @@
             setTool('pline'); pendingAreaLabel = true;
             setHint('MEDIR PERÍMETRO: marca los puntos de la línea (doble clic o Enter termina) — la longitud total queda escrita en el plano');
           }
+        } else if (kind === 'trim') {
+          if (TRIM_NOM[k]) trimModo = k;
+          setTool('trim');
+          setHint(TRIM_NOM[trimModo] + ': ' + (trimModo === 'trim' ? 'toca el pedazo que sobra' : trimModo === 'extend' ? 'toca cerca de la punta que quieres alargar' : 'toca el punto donde quieres partirla') + ' · Esc para salir');
         } else if (kind === 'match') {
           if (k === '__origen') { pincelCogeOrigen = true; setTool('match'); setHint('El próximo toque coge el formato de esa marca'); }
           else if (k === '__olvida') { formatoClip = null; pincelPuestos = 0; setTool('match'); setHint('Formato olvidado — toca la marca cuyo aspecto quieres copiar'); showProps(); }
         } else if (kind === 'count') {
+          if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
           if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
@@ -15872,31 +17712,22 @@
     // (línea pegada al dedo), aparece este botón para cancelarlo
     var cbtn = document.createElement('button');
     cbtn.id = 'cancelDraw';
-    cbtn.textContent = '✕ Cancelar trazo';
+    cbtn.innerHTML = ICO.svg('close', 17) + ' Cancelar trazo';
     cbtn.style.cssText = 'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
       'padding:12px 22px;border-radius:24px;border:0;background:#c62828;color:#fff;' +
-      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
+      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none;align-items:center;gap:7px';
     $('#canvasWrap').appendChild(cbtn);
     cbtn.addEventListener('click', function () {
       drawing = null; G.prev.innerHTML = '';
       drag = null; pinch = null; ptrs.clear();
       setHint('Trazo cancelado');
     });
-    // 🗑 flotante: en iPad no hay tecla Delete — aparece al seleccionar algo
-    var dbtn = document.createElement('button');
-    dbtn.id = 'touchDel';
-    dbtn.textContent = '🗑 Borrar';
-    dbtn.style.cssText = 'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
-      'padding:12px 22px;border-radius:24px;border:0;background:#14161a;color:#fff;' +
-      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
-    $('#canvasWrap').appendChild(dbtn);
-    dbtn.addEventListener('click', function () {
-      if (selGroup) deleteGroup();
-      else if (sel) deleteSelected();
-    });
+    /* El antiguo botón flotante "🗑 Borrar" ya no hace falta: lo sustituye la
+       BARRA FLOTANTE DE PROPIEDADES (4.5), que trae borrar y seis cosas más
+       pegadas a la marca. Y de paso se va el emoji, contra la guía de la casa. */
+    creaFlot(); pintaFlot();
     setInterval(function () {
-      cbtn.style.display = drawing ? 'block' : 'none';
-      dbtn.style.display = !drawing && (sel || selGroup) ? 'block' : 'none';
+      cbtn.style.display = drawing ? 'flex' : 'none';
     }, 400);
     // iOS muestra los PDF "en gris" en la app de Archivos cuando el selector trae
     // filtro de tipos — se lo quitamos y la app valida el archivo por dentro
