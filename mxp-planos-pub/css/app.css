@@ -197,11 +197,15 @@ body.touch #grpAjustes select { max-width: 108px; }
    botón, para que el dedo la encuentre); en el grupo, todo el botón abre el
    menú y la flechita solo avisa. */
 .barra button.tool, .barra button.grpBtn { position: relative; }
-.barra button.tool:has(.dd), .barra button.grpBtn { padding-right: 20px; }
-.barra button.tool:has(.dd) { padding-left: 8px; min-width: 66px; }
-.dock.vert .barra button.tool:has(.dd) { padding: 3px 16px 3px 4px; min-width: 52px; height: 54px; }
+/* RELLENO SIMÉTRICO SIEMPRE: la flechita flota en la esquina (absoluta) y no
+   reserva sitio. Cualquier relleno desigual descentra el nombre — y eso solo
+   se notaba en las barras de lado/abajo, donde no manda la regla de #toolbar
+   (Edgar, 05/09: "las palabras de unos botones están en el medio y las otras
+   no"). */
+.barra button.tool:has(.dd) { padding-left: 8px; padding-right: 8px; min-width: 66px; }
+.dock.vert .barra button.tool:has(.dd) { padding: 3px 4px; min-width: 52px; height: 54px; }
 /* botón de GRUPO: icono de la última herramienta usada + nombre del grupo */
-.barra button.grpBtn { min-width: 64px; height: 46px; padding: 3px 20px 3px 8px; overflow: hidden; }
+.barra button.grpBtn { min-width: 64px; height: 46px; padding: 3px 8px; overflow: hidden; }
 .barra button.grpBtn .gIco { display: flex; align-items: center; justify-content: center; line-height: 1; }
 .barra button.grpBtn label { font-size: 9px; opacity: .85; letter-spacing: .02em; text-transform: none; }
 .barra button.grpBtn.abierto { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.35); }
@@ -630,16 +634,14 @@ body.touch .barra .bLbl { font-size: 9.5px; }
 body.touch .barra .grip { width: 32px; }
 body.touch .barra button.tool { min-width: 58px; height: 54px; font-size: 18px; }
 body.touch .barra button.grpBtn { min-width: 70px; height: 54px; }
-body.touch .dock.vert .barra button.grpBtn { padding-right: 20px; }
 body.touch .barra button.grpBtn label { font-size: 10px; }
-body.touch .barra button.tool:has(.dd) { padding-right: 24px; padding-left: 8px; min-width: 74px; }
-body.touch .barra button.grpBtn { padding-right: 24px; }
+body.touch .barra button.tool:has(.dd) { padding-left: 8px; padding-right: 8px; min-width: 74px; }
 body.touch .barra .tool .dd, body.touch .barra button.grpBtn::after { width: 22px; font-size: 11px; padding-top: 4px; }
 body.touch .dock.vert { width: 74px; }
 body.touch .dock.vert .barra .grip { width: 58px; height: 28px; }
 body.touch .dock.vert .barra button.tool, body.touch .dock.vert .barra button.grpBtn, body.touch .dock.vert .barra button.act { width: 58px; min-width: 58px; height: 58px; }
 body.touch .dock.vert .barra button.tool label, body.touch .dock.vert .barra button.grpBtn label, body.touch .dock.vert .barra button.act label { font-size: 9px; max-width: 54px; }
-body.touch .dock.vert .barra button.tool:has(.dd) { padding: 3px 20px 3px 4px; min-width: 58px; height: 58px; }
+body.touch .dock.vert .barra button.tool:has(.dd) { padding: 3px 4px; min-width: 58px; height: 58px; }
 body.touch .dock.vert .barra .tool .dd, body.touch .dock.vert .barra button.grpBtn::after { width: 20px; font-size: 11px; }
 body.touch .barra button.act { min-width: 56px; height: 54px; }
 body.touch .barra button.act.zo { min-width: 44px; width: 44px; }
