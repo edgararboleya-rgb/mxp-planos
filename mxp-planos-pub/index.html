@@ -168,6 +168,7 @@
           <g id="gWalls"></g>
           <g id="gElectrical"></g>
           <g id="gAnnot"></g>
+          <g id="gCount"></g>
           <g id="gMeasure"></g>
           <g id="gPreview"></g>
           <g id="gSel"></g>
@@ -207,6 +208,7 @@
           <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
           <label class="lay"><input type="checkbox" data-layer="electrical" checked> Electrical</label>
           <label class="lay"><input type="checkbox" data-layer="annotation" checked> Dims &amp; Text</label>
+          <label class="lay" title="Las marcas del Count (conteo manual sobre el plano del ingeniero)"><input type="checkbox" data-layer="count" checked> Count (conteo)</label>
           <label class="lay"><input type="checkbox" data-layer="grid" checked> Grid</label>
           <label class="lay" title="Esconde el nombre impreso en el equipo del riser (PANEL, DISC, ATS, METER). El dibujo se queda igual."><input type="checkbox" id="cbEqName" checked> Nombres del equipo (riser)</label>
         </div>
@@ -288,6 +290,7 @@
       <select id="marcasTipo">
         <option value="">Todo</option>
         <option value="wall">Paredes</option>
+        <option value="count">Conteo (Count)</option>
         <option value="ink">Tinta (lápiz y resaltador)</option>
         <option value="opening">Puertas y ventanas</option>
         <option value="symbol">Símbolos</option>

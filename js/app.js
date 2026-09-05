@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.C';
+  var APP_VERSION = 'v31.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -238,6 +238,9 @@
     wires: [],     // {id,x1,y1,x2,y2,style,side,bulge}
     leaders: [],   // {id,tx,ty,x,y,text,size}
     inks: [],      // {id,pts:[[x,y]…],modo:'pen'|'hi',color,lw,op} — tinta del Apple Pencil (fase 5.4)
+    counts: [],    // {id,x,y,cat} — marcas del Count (fase 5.5); van POR HOJA, como todo el dibujo
+    countCats: [], // {id,nom,color,forma,num} — las categorías del conteo. Son del PROYECTO, no de la hoja:
+                   // el mismo "Recept 20A" se cuenta en E-1, E-2 y E-3 y suma en el total del set.
     bg: null,      // {url,x,y,w,h,opacity}
     bg2: null,     // overlay de comparación (plano rojo encima del azul)
     panels: [],    // panel schedules E-2
@@ -270,6 +273,15 @@
   };
   window.__loadSheetDbg = function (j) { try { loadSheetData(j); } catch (e) {} };
   window.__selGrupoDbg = function (g) { selGroup = g; sel = null; renderSel(); showProps(); };
+  window.__mxpSelDbg = function () { return sel ? { kind: sel.kind, id: sel.id } : (selGroup ? { grupo: selGroup.length } : null); };
+  window.__conteoDbg = {
+    hoja: function () { return conteoDeHoja(); },
+    set: function () { return conteoDelProyecto(); },
+    nueva: function (nom) { var c = nuevaCatCount(nom); catActiva = c.id; setTool('count'); refreshCounts(); return c.id; },
+    activa: function (id) { catActiva = id; },
+    cats: function () { return catsCount().slice(); }
+  };
+  window.__hojaDbg = { nueva: function (no) { addSheet(no); }, cambia: function (i) { switchSheet(i); } };
   window.__encajaDbg = function () { try { encajarSel(); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
@@ -293,7 +305,7 @@
   var svg = $('#canvas');
   var G = {
     grid: $('#gGridBase'), bg: $('#gBackground'), areas: $('#gAreas'), walls: $('#gWalls'),
-    furn: $('#gFurniture'), elec: $('#gElectrical'), annot: $('#gAnnot'),
+    furn: $('#gFurniture'), elec: $('#gElectrical'), annot: $('#gAnnot'), count: $('#gCount'),
     meas: $('#gMeasure'), prev: $('#gPreview'), sel: $('#gSel'), world: $('#world')
   };
 
@@ -307,6 +319,7 @@
       guia: state.guia,
       huecos: state.huecos,
       inks: state.inks,
+      counts: state.counts, countCats: state.countCats,
       bgMeta: state.bg ? { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h, opacity: state.bg.opacity } : null,
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
@@ -552,7 +565,7 @@
   }
   function estadoVacio() {
     return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
-      walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [],
+      walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [], counts: [], countCats: [],
       bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
       project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '', id: nuevoIdProyecto(), rev: 0, creado: new Date().toISOString() }
     } };
@@ -1159,6 +1172,8 @@
     state.texts = o.texts; state.dims = o.dims; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.inks = o.inks || [];
+    state.counts = o.counts || [];
+    state.countCats = o.countCats || [];
     state.panels = o.panels || [];
     state.guia = o.guia || [];
     state.huecos = o.huecos || [];
@@ -4408,6 +4423,10 @@
       var twS = textAncho(e, sz), txS = textIzq(e, sz);
       return '<rect class="sel" x="' + (txS - 3) + '" y="' + (e.y - sz) + '" width="' + (twS + 6) + '" height="' + (textAlto(e, sz) + 4) + '"' + rotT + '/>';
     }
+    if (kind === 'count') {
+      var rC = countR() + 2;
+      return '<rect class="sel" x="' + (e.x - rC) + '" y="' + (e.y - rC) + '" width="' + (rC * 2) + '" height="' + (rC * 2) + '"/>';
+    }
     if (kind === 'wire') return '<path class="sel" d="' + wirePath(e).d + '"/>';
     if (kind === 'ink') return '<path class="sel" d="M' + e.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + '" style="stroke-width:' + (inkLw(e) + 4 / view.z) + '"/>';
     if (kind === 'dim') {
@@ -4455,6 +4474,8 @@
               s += '<circle class="handle" cx="' + c5[0] + '" cy="' + c5[1] + '" r="' + shr + '"/>';
             });
           }
+        } else if (sel.kind === 'count') {
+          s += selShapeMarkup('count', e);
         } else if (sel.kind === 'opening') {
           var w = state.walls.find(function (x) { return x.id === e.wallId; });
           if (w) {
@@ -4550,13 +4571,13 @@
     '<text x="' + state.guia[0].x1 + '" y="' + (state.guia[0].y1 - 8) + '" font-size="' + (11 / (view.z || 1) * 1.2) + '" fill="#8a8fa3">CONTORNO (guía — no cuenta en materiales)</text>';
   }
   function refresh() {
-    renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderBg(); renderGuia(); renderSel();
+    renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderConteo(); renderBg(); renderGuia(); renderSel();
     refreshCounts(); showProps();
     if (typeof renderMarcas === 'function') renderMarcas();   // la Lista de marcas, si está abierta
   }
 
   /* ---------------- hit testing ---------------- */
-  var layerVisible = { background: true, architecture: true, areas: true, furniture: true, electrical: true, annotation: true, grid: true };
+  var layerVisible = { background: true, architecture: true, areas: true, furniture: true, electrical: true, annotation: true, count: true, grid: true };
 
   function hitTest(p) {
     /* QUÉ AGARRA EL CLIC (Edgar, 08/30: "paso mucho trabajo para seleccionar
@@ -4597,6 +4618,15 @@
       var fy = Math.max(0, Math.abs(ly - (def.by || 0)) - def.h / 2) * scy;
       var ds = Math.hypot(fx, fy);
       if (ds <= PX(4)) pon('symbol', e.id, ds, def.layer === 'electrical' ? 9 : 8);
+    }
+    // marcas del Count: se dibujan encima de todo, asi que tambien se tocan
+    // primero (prio 10). El radio de captura es el de la propia marca.
+    if (layerVisible.count) {
+      for (i = 0; i < state.counts.length; i++) {
+        e = state.counts[i];
+        var dC = Math.hypot(p[0] - e.x, p[1] - e.y) - countR();
+        if (dC <= PX(3)) pon('count', e.id, Math.max(0, dC), 10);
+      }
     }
     if (layerVisible.architecture) {
       // aberturas (van encima de su pared)
@@ -4785,6 +4815,7 @@
     window: 'Toca una pared para colocar la ventana',
     measure: 'Clic en dos puntos para medir (azul, no se imprime) · mantén SHIFT para línea recta',
     dim: 'Clic en dos puntos para colocar una cota · SHIFT = línea recta · doble clic en la cota edita la medida · arrástrala para separarla',
+    count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
     place: 'Clic para colocar · R para rotar 45° · Esc para terminar'
@@ -5062,6 +5093,7 @@
       case 'wire': return twoPointDown(p, 'wire');
       case 'leader': return twoPointDown(p, 'leader');
       case 'text': return textDown(p);
+      case 'count': return countDown(rawP);
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -5184,7 +5216,7 @@
 
   /* --- selección y arrastre --- */
   function entityOf(ref) {
-    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders, ink: state.inks }[ref.kind];
+    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders, ink: state.inks, count: state.counts }[ref.kind];
     return pool ? pool.find(function (e) { return e.id === ref.id; }) : null;
   }
   function inGroup(h) {
@@ -5359,7 +5391,7 @@
       if (!e) return;
       if (k === 'wall' || k === 'dim' || k === 'wire') {
         e.x1 = o.x1 + dx; e.y1 = o.y1 + dy; e.x2 = o.x2 + dx; e.y2 = o.y2 + dy;
-      } else if (k === 'symbol' || k === 'text') {
+      } else if (k === 'symbol' || k === 'text' || k === 'count') {
         e.x = o.x + dx; e.y = o.y + dy;
       } else if (k === 'leader') {
         e.x = o.x + dx; e.y = o.y + dy; e.tx = o.tx + dx; e.ty = o.ty + dy;
@@ -5487,6 +5519,10 @@
       var d = SYMBOLS[e.key], capa = d && d.layer === 'furniture' ? 'furniture' : 'electrical';
       nom = d ? d.name : 'símbolo';
       if (LV[capa]) state.symbols.forEach(function (s) { if (s.key === e.key) out.push({ kind: 'symbol', id: s.id }); });
+    } else if (ref.kind === 'count') {
+      var ctC = catCount(e.cat);
+      nom = ctC ? ctC.nom : 'conteo';
+      if (LV.count) state.counts.forEach(function (c) { if (c.cat === e.cat) out.push({ kind: 'count', id: c.id }); });
     } else if (ref.kind === 'wall') {
       nom = (WALL_TYPES[e.type] && WALL_TYPES[e.type].name) || 'pared';
       if (LV.architecture) state.walls.forEach(function (w) { if (w.type === e.type) out.push({ kind: 'wall', id: w.id }); });
@@ -5575,6 +5611,11 @@
         if (dentro) g.push({ kind: 'ink', id: k.id });
       });
     }
+    if (LV.count) state.counts.forEach(function (c) {
+      // la marca es un disco: para 'toca' vale que el marco roce el disco
+      var dentro = toca ? cajaCortaRect(r, [[c.x - countR(), c.y - countR()], [c.x + countR(), c.y - countR()], [c.x + countR(), c.y + countR()], [c.x - countR(), c.y + countR()]]) : inside(c.x, c.y);
+      if (dentro) g.push({ kind: 'count', id: c.id });
+    });
     if (LV.electrical) state.wires.forEach(function (w) {
       // el cable se curva: para 'toca' se prueba también su punto medio real
       var dentro = toca
@@ -5646,7 +5687,7 @@
           }
         }
       }
-      renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
+      renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderConteo(); renderSel();
       return;
     }
     if (drag.mode === 'rotate') {
@@ -5892,6 +5933,9 @@
       } else if (drag.kind === 'text') {
         e.x = Math.round(o.x + dx); e.y = Math.round(o.y + dy);
         renderAnnot(); renderSel();
+      } else if (drag.kind === 'count') {
+        e.x = Math.round(o.x + dx); e.y = Math.round(o.y + dy);
+        renderConteo(); renderSel();
       } else if (drag.kind === 'wall') {
         e.x1 = Math.round(o.x1 + dx); e.y1 = Math.round(o.y1 + dy);
         e.x2 = Math.round(o.x2 + dx); e.y2 = Math.round(o.y2 + dy);
@@ -6453,6 +6497,9 @@
       } else if (it.kind === 'opening') {
         d.wallId = wallMap[d.wallId];
         if (d.wallId) state.openings.push(d);
+      } else if (it.kind === 'count') {
+        d.x += dx; d.y += dy;
+        state.counts.push(d); newRefs.push({ kind: 'count', id: d.id });
       } else if (it.kind === 'symbol' || it.kind === 'text') {
         d.x += dx; d.y += dy;
         state[it.kind === 'symbol' ? 'symbols' : 'texts'].push(d);
@@ -6703,6 +6750,8 @@
         if (e.rot) e.rot = ((vertical ? 180 - e.rot : -e.rot) % 360 + 360) % 360;
         // (auditoría texto 03/09) se cambiaba e.anchor, un campo que nadie lee
         if (vertical) { var alT = e.align || 'left'; if (alT === 'left') e.align = 'right'; else if (alT === 'right') e.align = 'left'; }
+      } else if (r.kind === 'count') {
+        e.x = mx(e.x); e.y = my(e.y);
       } else if (r.kind === 'leader') {
         e.x = mx(e.x); e.y = my(e.y); e.tx = mx(e.tx); e.ty = my(e.ty);
       } else if (r.kind === 'area') {
@@ -7311,7 +7360,7 @@
       } else {
         // 'ink' faltaba: el marco lo seleccionaba y Supr no lo borraba (con el
         // marco que TOCA pasa a cada rato, antes casi nunca)
-        var pool = { symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks' }[r.kind];
+        var pool = { symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks', count: 'counts' }[r.kind];
         if (pool) state[pool] = state[pool].filter(function (x) { return x.id !== r.id; });
       }
     });
@@ -7455,6 +7504,24 @@
         html += '<div class="row"><button id="prFlipHinge" title="A qué lado corre la hoja y dónde queda el bolsillo dentro de la pared">↔ Lado del bolsillo</button></div>';
       }
       html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
+    } else if (sel.kind === 'count') {
+      var ctP = catCount(e.cat);
+      var nOrd = 0, vistos = 0;
+      state.counts.forEach(function (q) { if (q.cat === e.cat) { vistos++; if (q.id === e.id) nOrd = vistos; } });
+      html += '<div><b>' + esc(ctP ? ctP.nom : '(categoría borrada)') + '</b>' +
+        (nOrd ? ' <span class="muted small">· la n.º ' + nOrd + ' de ' + vistos + ' en esta hoja</span>' : '') + '</div>';
+      if (!ctP) {
+        html += '<div class="muted small">Esta marca es de una categoría que ya no existe (se borró en otra hoja). ' +
+          'Bórrala, o vuelve a crear la categoría con ese nombre y cámbiala aquí.</div>';
+      }
+      html += '<div class="row"><label>Cuenta como</label><select id="prCntCat">';
+      catsCount().forEach(function (c) {
+        html += '<option value="' + esc(c.id) + '"' + (c.id === e.cat ? ' selected' : '') + '>' + esc(c.nom) + '</option>';
+      });
+      if (!ctP) html += '<option value="" selected>(categoría borrada)</option>';
+      html += '</select></div>';
+      html += '<div class="muted small">Cambiarla aquí la pasa de una cuenta a la otra: los totales de las dos se ajustan solos.</div>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar esta marca</button>';
     } else if (sel.kind === 'symbol') {
       var def = SYMBOLS[e.key];
       html += '<div><b>' + esc(def.name) + '</b></div>';
@@ -7750,6 +7817,13 @@
       renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
     });
     on('prOpac', 'change', function () { prOpacUndo = false; refreshCounts(); scheduleAutosave(); });
+    on('prCntCat', 'change', function (n) {
+      var q = findSel(); if (!q || !n.value || !catCount(n.value)) return;
+      pushUndo();
+      q.cat = n.value;
+      refresh(); refreshCounts();
+      setHint('Esta marca ahora cuenta como ' + catCount(n.value).nom);
+    });
     on('prDelete', 'click', deleteSelected);
     on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
     on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
@@ -8086,11 +8160,254 @@
       state.walls = state.walls.filter(function (w) { return w.id !== e.id; });
       state.openings = state.openings.filter(function (o) { return o.wallId !== e.id; });
     } else {
-      var pool = { opening: 'openings', symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks' }[sel.kind];
+      var pool = { opening: 'openings', symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks', count: 'counts' }[sel.kind];
       state[pool] = state[pool].filter(function (x) { return x.id !== e.id; });
     }
     sel = null;
     refresh();
+  }
+
+
+  /* ==================================================================
+     COUNT — CONTEO MANUAL (fase 5.5)
+     Para lo que NO dibujas: el plano del ingeniero ya trae los 47 cans y
+     los 63 receptáculos, y hay que contarlos para cotizar. Aquí se marca
+     cada uno con un toque y el total va corriendo por hoja y por set.
+
+     Las CATEGORÍAS son del PROYECTO (state.countCats), no de la hoja: el
+     mismo "Recept 20A" se cuenta en E-1, E-2 y E-3 y suma en el set.
+     Las MARCAS (state.counts) van por hoja, como el resto del dibujo.
+     ================================================================== */
+  var COUNT_FORMAS = { circ: 'Círculo', cuad: 'Cuadrado', rombo: 'Rombo', tri: 'Triángulo', equis: 'Equis', cruz: 'Cruz' };
+  var COUNT_COLORES = [['#d62828', 'Rojo'], ['#0b84ff', 'Azul'], ['#0a8f3c', 'Verde'], ['#f08c00', 'Naranja'],
+                       ['#8b3dbe', 'Morado'], ['#0b7285', 'Turquesa'], ['#c2255c', 'Fucsia'], ['#14161a', 'Negro']];
+  var COUNT_FORMA_ORDEN = ['circ', 'cuad', 'rombo', 'tri', 'equis', 'cruz'];
+  var catActiva = null;          // la categoría con la que se está contando
+
+  function catsCount() { if (!Array.isArray(state.countCats)) state.countCats = []; return state.countCats; }
+  function catCount(id) { var a = catsCount(); for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i]; return null; }
+  /* El tamaño de la marca sigue al de los devices: si Edgar bajó los símbolos
+     porque "están muy grandes", las marcas del conteo bajan con ellos. */
+  function countR() { return 9 * ((state.symEsc || 0.5) / 0.5); }
+
+  function nuevaCatCount(nom) {
+    var a = catsCount();
+    var col = COUNT_COLORES[a.length % COUNT_COLORES.length][0];
+    var frm = COUNT_FORMA_ORDEN[Math.floor(a.length / COUNT_COLORES.length) % COUNT_FORMA_ORDEN.length];
+    var c = { id: uid(), nom: String(nom || '').trim().slice(0, 60) || ('Conteo ' + (a.length + 1)), color: col, forma: frm, num: true };
+    a.push(c);
+    return c;
+  }
+  /* Si no hay ninguna categoría todavía, se crea una en el acto: contar no
+     puede empezar con un formulario. Se llama "Conteo 1" y se renombra
+     cuando quiera desde el ▾ o desde Propiedades. */
+  function catActivaSegura() {
+    var c = catActiva ? catCount(catActiva) : null;
+    if (!c) c = catsCount()[0] || nuevaCatCount('');
+    catActiva = c.id;
+    return c;
+  }
+
+  /* --- el dibujo de una marca --- */
+  function countFormaPath(forma, x, y, r) {
+    if (forma === 'cuad') return '<rect x="' + (x - r) + '" y="' + (y - r) + '" width="' + (r * 2) + '" height="' + (r * 2) + '" rx="' + (r * 0.22).toFixed(2) + '"/>';
+    if (forma === 'rombo') return '<path d="M' + x + ',' + (y - r) + ' L' + (x + r) + ',' + y + ' L' + x + ',' + (y + r) + ' L' + (x - r) + ',' + y + ' Z"/>';
+    if (forma === 'tri') return '<path d="M' + x + ',' + (y - r) + ' L' + (x + r * 0.93) + ',' + (y + r * 0.62) + ' L' + (x - r * 0.93) + ',' + (y + r * 0.62) + ' Z"/>';
+    if (forma === 'equis' || forma === 'cruz') return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '"/>';
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '"/>';
+  }
+  function countMarkup(c, n) {
+    var ct = catCount(c.cat);
+    var col = ct ? ct.color : '#8a8578';
+    var r = countR();
+    var g = '<g class="cnt" data-id="' + c.id + '"' + opAttr(c) + '>';
+    g += '<g fill="' + col + '" fill-opacity="0.9" stroke="#ffffff" stroke-width="' + (r * 0.16).toFixed(2) + '">' +
+      countFormaPath(ct ? ct.forma : 'circ', c.x, c.y, r) + '</g>';
+    if (ct && ct.forma === 'equis') {
+      var q = r * 0.5;
+      g += '<path d="M' + (c.x - q) + ',' + (c.y - q) + ' L' + (c.x + q) + ',' + (c.y + q) +
+        ' M' + (c.x + q) + ',' + (c.y - q) + ' L' + (c.x - q) + ',' + (c.y + q) +
+        '" stroke="#ffffff" stroke-width="' + (r * 0.24).toFixed(2) + '" fill="none" stroke-linecap="round"/>';
+    } else if (ct && ct.forma === 'cruz') {
+      var q2 = r * 0.55;
+      g += '<path d="M' + (c.x - q2) + ',' + c.y + ' L' + (c.x + q2) + ',' + c.y +
+        ' M' + c.x + ',' + (c.y - q2) + ' L' + c.x + ',' + (c.y + q2) +
+        '" stroke="#ffffff" stroke-width="' + (r * 0.24).toFixed(2) + '" fill="none" stroke-linecap="round"/>';
+    } else if (!ct || ct.num !== false) {
+      // el número que lleva: es lo que deja VERIFICAR que no se saltó ninguno
+      g += '<text x="' + c.x + '" y="' + (c.y + r * 0.38) + '" text-anchor="middle" font-size="' + (r * 1.15).toFixed(2) +
+        '" font-weight="700" fill="#ffffff" style="paint-order:stroke" stroke="none">' + n + '</text>';
+    }
+    return g + '</g>';
+  }
+  function renderConteo() {
+    if (!G.count) return;
+    var ord = {}, s2 = '';
+    state.counts.forEach(function (c) {
+      ord[c.cat] = (ord[c.cat] || 0) + 1;
+      s2 += countMarkup(c, ord[c.cat]);
+    });
+    G.count.innerHTML = s2;
+  }
+
+  /* --- totales --- */
+  function conteoDeHoja() {
+    var m = {};
+    state.counts.forEach(function (c) { m[c.cat] = (m[c.cat] || 0) + 1; });
+    return m;
+  }
+  /* El total del SET. La hoja viva se cuenta de state (lo que se ve ahora
+     mismo, sin esperar al syncSheet); las demás, leyendo su data guardada.
+     Una hoja con datos dañados no rompe el total: se salta y se dice. */
+  function conteoDelProyecto() {
+    var m = {}, rotas = 0;
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet) { state.counts.forEach(function (c) { m[c.cat] = (m[c.cat] || 0) + 1; }); return; }
+      if (!sh || typeof sh.data !== 'string') return;
+      var o = null;
+      try { o = JSON.parse(sh.data); } catch (e) { rotas++; return; }
+      if (!o || !Array.isArray(o.counts)) return;
+      o.counts.forEach(function (c) { if (c && c.cat) m[c.cat] = (m[c.cat] || 0) + 1; });
+    });
+    m.__rotas = rotas;
+    return m;
+  }
+
+  /* --- colocar una marca --- */
+  function countDown(p) {
+    var ct = catActivaSegura();
+    var x = Math.round(p[0]), y = Math.round(p[1]);
+    // mismo cuidado que al colocar símbolos: el segundo clic de un doble clic
+    // metía una marca gemela debajo y el total salía inflado
+    if (esEcoDeDobleClic('cnt:' + ct.id, x, y)) return;
+    if (!layerVisible.count) {
+      setHint('⚠ La capa Count está apagada: enciéndela en Capas para ver lo que marcas');
+      return;
+    }
+    pushUndo();
+    state.counts.push({ id: uid(), x: x, y: y, cat: ct.id });
+    renderConteo(); refreshCounts();
+    var hj = conteoDeHoja()[ct.id] || 0, pr = conteoDelProyecto()[ct.id] || 0;
+    setHint('✔ ' + ct.nom + ' — ' + hj + ' en esta hoja' +
+      ((state.sheets || []).length > 1 ? ' · ' + pr + ' en todo el set' : '') +
+      ' · toca otro, o Esc para salir');
+  }
+
+  /* --- gestión de categorías --- */
+  function pideNuevaCat() {
+    uiPrompt('Nombre de lo que vas a contar (ej: Recept 20A, Can 6", Switch 3-way)', '', function (v) {
+      if (v == null) return;
+      pushUndo();
+      var c = nuevaCatCount(v);
+      catActiva = c.id;
+      setTool('count');
+      refreshCounts();
+      setHint('Contando ' + c.nom + ' — toca cada uno en el plano');
+    });
+  }
+  function renombraCat(id) {
+    var c = catCount(id); if (!c) return;
+    uiPrompt('Nombre de la categoría', c.nom, function (v) {
+      if (v == null) return;
+      pushUndo();
+      c.nom = String(v).trim().slice(0, 60) || c.nom;
+      refresh(); refreshCounts();
+    });
+  }
+  function borraCat(id) {
+    var c = catCount(id); if (!c) return;
+    var enHoja = conteoDeHoja()[id] || 0, enSet = conteoDelProyecto()[id] || 0;
+    var otras = enSet - enHoja;
+    uiConfirm('Borrar la categoría "' + c.nom + '" y sus ' + enHoja + ' marca(s) de esta hoja' +
+      (otras > 0 ? '.\n\nOJO: en otras hojas quedan ' + otras + ' marca(s) de esta categoría. Esas NO se borran aquí; se van a ver en gris como "(categoría borrada)" hasta que abras esa hoja y las quites.' : '.'),
+      function (ok) {
+        if (!ok) return;
+        pushUndo();
+        state.counts = state.counts.filter(function (q) { return q.cat !== id; });
+        state.countCats = catsCount().filter(function (q) { return q.id !== id; });
+        if (catActiva === id) catActiva = null;
+        // lo que quedaba seleccionado de esa categoría ya no existe
+        ponSel(selRefs());
+        refresh(); refreshCounts();
+        setHint('Categoría "' + c.nom + '" borrada' + (otras > 0 ? ' — quedan ' + otras + ' marca(s) suyas en otras hojas' : ''));
+      });
+  }
+  function marcaCatEnHoja(id) {
+    var c = catCount(id); if (!c) return;
+    if (!layerVisible.count) { setHint('⚠ La capa Count está apagada: enciéndela para poder marcarlas'); return; }
+    var refs = state.counts.filter(function (q) { return q.cat === id; }).map(function (q) { return { kind: 'count', id: q.id }; });
+    if (!refs.length) { setHint('No hay ninguna marca de "' + c.nom + '" en esta hoja'); return; }
+    if (tool !== 'select') setTool('select');
+    var n = ponSel(refs);
+    setHint('✔ ' + n + ' marca(s) de ' + c.nom + ' seleccionadas — Supr las borra todas');
+  }
+  /* El CSV del conteo: una fila por categoría y hoja, más el total. Es lo
+     que va al estimado, así que lleva las dos columnas separadas. */
+  function conteoCsv() {
+    var cats = catsCount();
+    if (!cats.length) { uiAlert('Todavía no hay ninguna categoría de conteo.'); return; }
+    var hojas = state.sheets || [];
+    var porHoja = hojas.map(function (sh, i) {
+      if (i === state.curSheet) return conteoDeHoja();
+      var m = {};
+      if (sh && typeof sh.data === 'string') {
+        try {
+          var o = JSON.parse(sh.data);
+          if (o && Array.isArray(o.counts)) o.counts.forEach(function (c) { if (c && c.cat) m[c.cat] = (m[c.cat] || 0) + 1; });
+        } catch (e) {}
+      }
+      return m;
+    });
+    var rows = [['Categoría'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
+    cats.forEach(function (c) {
+      var tot = 0;
+      var fila = [c.nom].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
+      fila.push(tot);
+      rows.push(fila);
+    });
+    var csv = '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+    saveFile((state.project.name || 'proyecto') + '_conteo.csv', csv);
+    setHint('Conteo exportado a CSV (' + cats.length + ' categoría(s) × ' + hojas.length + ' hoja(s))');
+  }
+
+  /* --- el bloque del conteo dentro del panel Materiales --- */
+  function conteoBloqueHtml() {
+    var cats = catsCount();
+    var hoja = conteoDeHoja(), set = conteoDelProyecto();
+    var varias = (state.sheets || []).length > 1;
+    var h = '<tr class="cat"><td colspan="2">Conteo manual (Count)' + (varias ? ' — esta hoja / todo el set' : '') + '</td></tr>';
+    if (!cats.length) {
+      h += '<tr><td colspan="2" class="muted small">Sin categorías todavía — coge Count en la barra y toca el plano</td></tr>';
+      return h;
+    }
+    var totH = 0, totS = 0;
+    cats.forEach(function (c) {
+      var nh = hoja[c.id] || 0, ns = set[c.id] || 0;
+      totH += nh; totS += ns;
+      h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
+        '<td><span class="cntChip" style="background:' + esc(c.color) + '"></span>' + esc(c.nom) +
+        (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
+        '<td class="n">' + nh + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
+    });
+    h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
+    if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
+    h += '<tr><td colspan="2" style="padding-top:6px">' +
+      '<button id="cntNueva" style="width:100%;margin-bottom:4px" title="Crear otra categoría de conteo">Nueva categoría de conteo</button>' +
+      '<button id="cntCsv" style="width:100%" title="Exportar el conteo a CSV: una columna por hoja y el total del set">Conteo a CSV</button></td></tr>';
+    return h;
+  }
+  function enganchaConteoPanel() {
+    var bN = $('#cntNueva'); if (bN) bN.addEventListener('click', pideNuevaCat);
+    var bC = $('#cntCsv'); if (bC) bC.addEventListener('click', conteoCsv);
+    $$('#countsBody tr.cntFila').forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        catActiva = tr.dataset.cat;
+        setTool('count');
+        var c = catCount(catActiva);
+        refreshCounts();
+        setHint('Contando ' + (c ? c.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+      });
+    });
   }
 
   /* ---------------- conteo de materiales ----------------
@@ -8230,7 +8547,11 @@
         rows += '<tr><td>' + esc(WALL_TYPES[k] ? WALL_TYPES[k].name : k) + '</td><td class="n">' + (wallLen[k] / 12).toFixed(1) + ' ft</td></tr>';
       });
     }
+    // el Count va al final: es conteo de lo que YA está en el plano del
+    // ingeniero, no de lo que dibujamos nosotros
+    if (catsCount().length || state.counts.length) rows += conteoBloqueHtml();
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
+    enganchaConteoPanel();
     var bcp = $('#btnCircPanel');
     if (bcp) bcp.addEventListener('click', function () {
       pushUndo();
@@ -8250,7 +8571,7 @@
      Es un panel FLOTANTE, no un modal: se queda abierto mientras recorres el
      plano fila por fila. Se arrastra por la barra y se redimensiona por la
      esquina, igual que el chat. */
-  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo', ink: 'Tinta' };
+  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo', ink: 'Tinta', count: 'Conteo' };
   function filasMarcas() {
     var out = [];
     state.walls.forEach(function (w) {
@@ -8265,6 +8586,14 @@
       var an = d.w * (sy.scale || 1) * (sy.sx || 1) * symK(d), al = d.h * (sy.scale || 1) * (sy.sy || 1) * symK(d);
       var atx = attrsTexto(sy);
       out.push({ kind: 'symbol', tipo: 'symbol', id: sy.id, nombre: d.name, det: (SYMBOL_CATS[d.cat] || d.cat) + (atx.length ? ' · ' + atx.join(' ') : ''), medida: (d.layer === 'furniture' || d.cat === 'riser' || d.cat === 'site' || d.cat === 'siteplan') ? fmtFtIn(an) + ' × ' + fmtFtIn(al) : '', num: 1 });
+    });
+    // el Count: cada marca es una fila, con el numero que lleva en su categoria
+    var ordCat = {};
+    state.counts.forEach(function (c) {
+      var ct = catCount(c.cat);
+      ordCat[c.cat] = (ordCat[c.cat] || 0) + 1;
+      out.push({ kind: 'count', tipo: 'count', id: c.id, nombre: ct ? ct.nom : '(categoría borrada)',
+        det: ct ? (COUNT_FORMAS[ct.forma] || '') : '', medida: '#' + ordCat[c.cat], num: ordCat[c.cat] });
     });
     state.texts.forEach(function (t) {
       out.push({ kind: 'text', tipo: 'text', id: t.id, nombre: String(t.text || '').replace(/\n/g, ' / '), det: t.style === 'circle' ? 'burbuja' : t.style === 'hex' ? 'hexágono' : '', medida: '', num: 0 });
@@ -8307,6 +8636,7 @@
       var w = state.walls.find(function (q) { return q.id === e.wallId; });
       if (w) { var g = wallGeom(w), P = ptAlong(w, g, e.pos); xs.push(P[0] - e.w / 2, P[0] + e.w / 2); ys.push(P[1] - e.w / 2, P[1] + e.w / 2); }
     }
+    else if (kind === 'count') { var rB = countR() + 2; xs.push(e.x - rB, e.x + rB); ys.push(e.y - rB, e.y + rB); }
     else if (kind === 'symbol') { var cs = symCorners(e) || [[e.x, e.y]]; cs.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
     else if (kind === 'text') {
       // (auditoría texto 03/09, GRAVE) se llamaba textAncho(e.text…) con el
@@ -8383,6 +8713,7 @@
     }
     if (kind === 'wire') return !!LV.electrical;
     if (kind === 'area') return !!LV.areas;
+    if (kind === 'count') return !!LV.count;
     if (kind === 'text' || kind === 'dim' || kind === 'leader' || kind === 'ink') return !!LV.annotation;
     return true;
   }
@@ -8818,7 +9149,7 @@
   });
 
   /* ---------------- capas ---------------- */
-  var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], grid: ['gGridBase'] };
+  var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], count: ['gCount'], grid: ['gGridBase'] };
   /* NOMBRES DEL EQUIPO DEL RISER (Edgar, 31/08). Es una casilla, no una
      decisión mía: el que arma el riser decide si quiere el nombre impreso
      dentro de cada caja o la caja limpia. Se guarda con el proyecto. */
@@ -9566,6 +9897,18 @@
     }
     if (state.guia && state.guia.length) {
       L.push('HAY GUÍA en la hoja (' + state.guia.length + ' tramos): el contorno del survey o la casa fantasma — referencia, no cuenta en materiales.');
+    }
+    // el Count: lo que Edgar contó A MANO sobre el plano del ingeniero. No son
+    // piezas que él dibujó, son piezas que YA estaban: si te preguntan cuántos
+    // cans hay, esto es la respuesta buena.
+    if (state.counts && state.counts.length) {
+      var hj = conteoDeHoja(), st = conteoDelProyecto(), variasH = (state.sheets || []).length > 1;
+      L.push('CONTEO A MANO (Count) — lo que Edgar contó del plano del ingeniero' + (variasH ? ', esta hoja / todo el set:' : ':'));
+      catsCount().forEach(function (c) {
+        var a = hj[c.id] || 0, b2 = st[c.id] || 0;
+        if (!a && !b2) return;
+        L.push(' · ' + c.nom + ': ' + a + (variasH ? ' en esta hoja, ' + b2 + ' en todo el set' : ''));
+      });
     }
     // Aquí iba el "diagnóstico ya medido por la app". Fuera: ese diagnóstico
     // medía las paredes contra los ejes DEL PAPEL, y en una casa girada un
@@ -10948,7 +11291,7 @@
       walls: state.walls, openings: state.openings, symbols: state.symbols,
       texts: state.texts, dims: state.dims, areas: state.areas,
       wires: state.wires, leaders: state.leaders, bg: state.bg, bg2: state.bg2,
-      guia: state.guia, huecos: state.huecos, inks: state.inks,
+      guia: state.guia, huecos: state.huecos, inks: state.inks, counts: state.counts,
       view: { tx: view.tx, ty: view.ty, z: view.z }
     });
   }
@@ -10992,6 +11335,16 @@
     (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
+    state.counts = (state.counts || []).filter(function (o) { return o && typeof o === 'object'; });
+    state.counts.forEach(function (o) { nums(o, ['x', 'y']); if (o.cat != null) o.cat = String(o.cat).slice(0, 40); });
+    state.countCats = (state.countCats || []).filter(function (o) { return o && typeof o === 'object' && o.id; });
+    state.countCats.forEach(function (o) {
+      o.id = String(o.id).slice(0, 40);
+      o.nom = String(o.nom == null ? '' : o.nom).slice(0, 60) || 'Sin nombre';
+      o.color = colorSeguro(o.color, '#d62828');
+      if (!COUNT_FORMAS[o.forma]) o.forma = 'circ';
+      o.num = o.num === false ? false : true;
+    });
     ['bg', 'bg2'].forEach(function (k) {
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
       if (!urlFondoSegura(b.url)) { state[k] = null; return; }
@@ -11013,6 +11366,7 @@
     state.dims = o.dims || []; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.inks = o.inks || [];
+    state.counts = o.counts || [];
     state.bg = o.bg || null;
     state.bg2 = o.bg2 || null;
     state.guia = o.guia || []; state.huecos = o.huecos || [];
@@ -13203,7 +13557,7 @@
     return totals;
   }
 
-  var COLECCIONES = ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks'];
+  var COLECCIONES = ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks', 'counts', 'countCats'];
   /* VALIDAR ANTES DE TOCAR (auditoría robustez 03/09): un archivo con
      walls:"hola" o sheets:[null] destruía el proyecto abierto, dejaba la app
      muerta y el autosave lo perpetuaba tras F5. Devuelve un texto de error o
@@ -13242,7 +13596,7 @@
     return null;
   }
   function hayContenido() {
-    return COLECCIONES.some(function (k) { return k !== 'panels' && k !== 'huecos' && Array.isArray(state[k]) && state[k].length > 0; }) || !!state.bg;
+    return COLECCIONES.some(function (k) { return k !== 'panels' && k !== 'huecos' && k !== 'countCats' && Array.isArray(state[k]) && state[k].length > 0; }) || !!state.bg;
   }
   function restoreProject(o) {
     var errV = validaProyecto(o);
@@ -13257,7 +13611,7 @@
     undoStack.length = 0; redoStack.length = 0;
     pdfLive = {};
     sel = null; selGroup = null; drawing = null; G.prev.innerHTML = '';
-    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks'].forEach(function (k) {
+    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks', 'counts', 'countCats'].forEach(function (k) {
       state[k] = Array.isArray(o.state[k]) ? o.state[k] : [];
     });
     state.bg = o.state.bg || null;
@@ -13398,6 +13752,7 @@
       xs.push(d.x1, d.x2, d.x1 + nxD, d.x2 + nxD); ys.push(d.y1, d.y2, d.y1 + nyD, d.y2 + nyD);   // tambien la linea de cota desplazada
     });
     state.inks.forEach(function (k) { k.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); });
+    state.counts.forEach(function (c) { var rC = countR() + 2; xs.push(c.x - rC, c.x + rC); ys.push(c.y - rC, c.y + rC); });
     state.areas.forEach(function (a) {
       a.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
       // el ápice de cada lado curvo sobresale de los vértices (se recortaba en el PDF)
@@ -14296,6 +14651,7 @@
       case 'm': case 'M': setTool('measure'); break;
       case 'c': case 'C': setTool('dim'); break;
       case 't': case 'T': setTool('text'); break;
+      case 'o': case 'O': setTool('count'); break;
       case 'p': case 'P': setTool('pen'); break;   // (H es la mano/pan: el resaltador va por el botón)
       case 'k': case 'K': setTool('calibrate'); break;
       case 'Enter':
@@ -14342,6 +14698,7 @@
     { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
     { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
     { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
+    { id: 'count', grp: 'note', ico: 'count', nom: 'Count', key: 'O', tip: 'Count (O): cuenta lo que YA trae el plano del ingeniero — cada toque marca uno y el total va corriendo por hoja y por set', menu: 'count', menuTip: 'Elegir qué se está contando' },
     { id: 'text', grp: 'note', ico: 'text', nom: 'Text', key: 'T', tip: 'Texto (T)' },
     { id: 'leader', grp: 'note', ico: 'callout', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
     { id: 'calibrate', grp: 'note', ico: 'calibrate', nom: 'Calibrate', key: 'K', tip: 'Calibrar plano de fondo (K)', menuTip: 'Medir una distancia conocida o aplicar la escala escrita en el plano' },
@@ -14962,6 +15319,39 @@
       html += '<div class="tmItem" data-k="length"><span>📏 Length — distancia entre 2 puntos</span></div>';
       html += '<div class="tmItem" data-k="marea"><span>▦ Area — polígono con sq ft en el plano</span></div>';
       html += '<div class="tmItem" data-k="mperim"><span>⌐ Perimeter — longitud total de una línea</span></div>';
+    } else if (kind === 'count') {
+      html += '<div class="tmHead">¿Qué estás contando?</div>';
+      var catsM = catsCount();
+      if (!catsM.length) html += '<div class="tmItem" data-k="__nueva"><span>Empezar a contar (crea la primera categoría)</span></div>';
+      catsM.forEach(function (c) {
+        var nH = 0;
+        state.counts.forEach(function (q) { if (q.cat === c.id) nH++; });
+        html += '<div class="tmItem' + (catActiva === c.id ? ' cur' : '') + '" data-k="' + esc(c.id) + '">' +
+          '<span class="cntChip" style="background:' + esc(c.color) + '"></span><span>' + esc(c.nom) +
+          ' <span class="muted">· ' + nH + ' en esta hoja</span></span></div>';
+      });
+      if (catsM.length) {
+        html += '<div class="tmHead">Categorías</div>';
+        html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
+        html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
+        html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
+        html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
+        html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
+      }
+    } else if (kind === 'countestilo') {
+      html += '<div class="tmHead">Color</div>';
+      var cAct = catCount(catActiva);
+      COUNT_COLORES.forEach(function (cc) {
+        html += '<div class="tmItem' + (cAct && cAct.color === cc[0] ? ' cur' : '') + '" data-k="col:' + cc[0] + '">' +
+          '<span class="cntChip" style="background:' + cc[0] + '"></span><span>' + cc[1] + '</span></div>';
+      });
+      html += '<div class="tmHead">Forma</div>';
+      COUNT_FORMA_ORDEN.forEach(function (f) {
+        html += '<div class="tmItem' + (cAct && cAct.forma === f ? ' cur' : '') + '" data-k="frm:' + f + '"><span>' + COUNT_FORMAS[f] + '</span></div>';
+      });
+      html += '<div class="tmHead">Número dentro de la marca</div>';
+      html += '<div class="tmItem' + (cAct && cAct.num !== false ? ' cur' : '') + '" data-k="num:1"><span>Sí — se ve 1, 2, 3… (deja verificar que no falta ninguno)</span></div>';
+      html += '<div class="tmItem' + (cAct && cAct.num === false ? ' cur' : '') + '" data-k="num:0"><span>No — solo la marca</span></div>';
     } else if (kind === 'bgscale' || kind === 'calibrate') {
       if (kind === 'calibrate') {
         html += '<div class="tmHead">Poner el plano a escala</div>';
@@ -15044,6 +15434,27 @@
           } else {
             setTool('pline'); pendingAreaLabel = true;
             setHint('MEDIR PERÍMETRO: marca los puntos de la línea (doble clic o Enter termina) — la longitud total queda escrita en el plano');
+          }
+        } else if (kind === 'count') {
+          if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
+          if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
+          if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
+          if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
+          if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
+          catActiva = k;
+          setTool('count');
+          var cSel = catCount(k);
+          refreshCounts();
+          setHint('Contando ' + (cSel ? cSel.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+        } else if (kind === 'countestilo') {
+          var cE = catCount(catActiva);
+          if (cE) {
+            pushUndo();
+            if (k.indexOf('col:') === 0) cE.color = k.slice(4);
+            else if (k.indexOf('frm:') === 0) cE.forma = k.slice(4);
+            else if (k.indexOf('num:') === 0) cE.num = k === 'num:1';
+            refresh(); refreshCounts();
+            setHint('Marca de ' + cE.nom + ' actualizada');
           }
         } else if (kind === 'bgscale' || kind === 'calibrate') {
           if (k === '__measure') {
