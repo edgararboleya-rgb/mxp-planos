@@ -186,17 +186,23 @@ body.touch #grpAjustes select { max-width: 108px; }
 #toolbar select option { color: #0B2036; background: #fff; }
 #zoomLabel { font-size: 11px; min-width: 40px; text-align: center; opacity: .85; }
 
-/* flyout de tipos en los botones Wall / Area */
-.barra button.tool { position: relative; }
-.barra button.tool:has(.dd) { padding-right: 24px; padding-left: 8px; min-width: 66px; }
-/* en vertical el ▾ va en una franja a la DERECHA, no debajo: así el botón
-   mide lo mismo que los que no tienen tipos y la columna queda pareja */
+/* ── LA FLECHITA ▾, IGUAL EN TODOS LOS BOTONES QUE LA LLEVAN ──
+   Edgar, 05/09: "todos los botones hazlos iguales los que tienen flechitas,
+   porque unos los hiciste de una manera y otros de otra". Antes había dos:
+   el grupo la llevaba pegada al icono y la herramienta en una franja con
+   divisor. Ahora las dos van igual: abajo a la derecha, mismo tamaño y
+   misma opacidad, sin divisor.
+   La diferencia que SÍ queda es de función, no de aspecto: en la herramienta
+   esa esquina es la zona que abre los tipos (por eso ocupa todo el alto del
+   botón, para que el dedo la encuentre); en el grupo, todo el botón abre el
+   menú y la flechita solo avisa. */
+.barra button.tool, .barra button.grpBtn { position: relative; }
+.barra button.tool:has(.dd), .barra button.grpBtn { padding-right: 20px; }
+.barra button.tool:has(.dd) { padding-left: 8px; min-width: 66px; }
 .dock.vert .barra button.tool:has(.dd) { padding: 3px 16px 3px 4px; min-width: 52px; height: 54px; }
-.dock.vert .barra .tool .dd { right: 0; left: auto; top: 0; bottom: 0; width: 14px; height: auto; border-left: 1px solid rgba(255,255,255,.14); border-top: none; border-radius: 0 8px 8px 0; }
-/* botón de GRUPO: icono de la última herramienta usada + nombre del grupo + ▾ */
-.barra button.grpBtn { min-width: 64px; height: 46px; padding: 3px 8px; overflow: hidden; }
-.barra button.grpBtn .gIco { display: flex; align-items: center; justify-content: center; gap: 2px; line-height: 1; }
-.barra button.grpBtn .gIco::after { content: '▾'; font-size: 9px; line-height: 1; opacity: .7; }
+/* botón de GRUPO: icono de la última herramienta usada + nombre del grupo */
+.barra button.grpBtn { min-width: 64px; height: 46px; padding: 3px 20px 3px 8px; overflow: hidden; }
+.barra button.grpBtn .gIco { display: flex; align-items: center; justify-content: center; line-height: 1; }
 .barra button.grpBtn label { font-size: 9px; opacity: .85; letter-spacing: .02em; text-transform: none; }
 .barra button.grpBtn.abierto { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.35); }
 .dock.vert .barra button.grpBtn { min-width: 52px; width: 52px; height: 54px; padding: 3px 2px; }
@@ -208,14 +214,13 @@ body.touch #grpAjustes select { max-width: 108px; }
 .barra button.act.zo { min-width: 36px; width: 36px; font-size: 16px; padding: 4px; }
 .barra #zoomLabel { min-width: 42px; }
 .dock.vert .barra #zoomLabel { min-width: 0; font-size: 10px; }
-.barra .tool .dd {
-  position: absolute; right: 0; top: 0; bottom: 0; width: 16px;
-  display: flex; align-items: center; justify-content: center; padding: 0;
-  font-size: 9px; opacity: .75; border-radius: 0 8px 8px 0;
-  border-left: 1px solid rgba(255, 255, 255, .14);
+.barra .tool .dd, .barra button.grpBtn::after {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 17px;
+  display: flex; align-items: flex-end; justify-content: center; padding: 0 0 3px;
+  font-size: 9px; line-height: 1; opacity: .7; border: 0; border-radius: 0 8px 8px 0;
 }
-.barra .tool .dd:hover { background: rgba(255, 255, 255, .22); opacity: 1; }
-.barra .tool.active .dd { border-left-color: rgba(0, 0, 0, .2); }
+.barra button.grpBtn::after { content: '▾'; pointer-events: none; }
+.barra .tool .dd:hover { background: rgba(255, 255, 255, .18); opacity: 1; }
 #toolMenu {
   position: fixed; z-index: 300; background: #fff; color: var(--mp-ink);
   border: 1px solid var(--mp-line); border-radius: 13px;
@@ -620,16 +625,17 @@ body.touch .barra .bLbl { font-size: 9.5px; }
 body.touch .barra .grip { width: 32px; }
 body.touch .barra button.tool { min-width: 58px; height: 54px; font-size: 18px; }
 body.touch .barra button.grpBtn { min-width: 70px; height: 54px; }
-body.touch .barra button.grpBtn .gIco { font-size: 18px; }
+body.touch .dock.vert .barra button.grpBtn { padding-right: 20px; }
 body.touch .barra button.grpBtn label { font-size: 10px; }
-body.touch .barra button.tool:has(.dd) { padding-right: 30px; padding-left: 8px; min-width: 74px; }
-body.touch .barra .tool .dd { width: 22px; font-size: 12px; }
+body.touch .barra button.tool:has(.dd) { padding-right: 24px; padding-left: 8px; min-width: 74px; }
+body.touch .barra button.grpBtn { padding-right: 24px; }
+body.touch .barra .tool .dd, body.touch .barra button.grpBtn::after { width: 22px; font-size: 11px; padding-bottom: 4px; }
 body.touch .dock.vert { width: 74px; }
 body.touch .dock.vert .barra .grip { width: 58px; height: 28px; }
 body.touch .dock.vert .barra button.tool, body.touch .dock.vert .barra button.grpBtn, body.touch .dock.vert .barra button.act { width: 58px; min-width: 58px; height: 58px; }
 body.touch .dock.vert .barra button.tool label, body.touch .dock.vert .barra button.grpBtn label, body.touch .dock.vert .barra button.act label { font-size: 9px; max-width: 54px; }
 body.touch .dock.vert .barra button.tool:has(.dd) { padding: 3px 20px 3px 4px; min-width: 58px; height: 58px; }
-body.touch .dock.vert .barra .tool .dd { width: 18px; height: auto; font-size: 12px; }
+body.touch .dock.vert .barra .tool .dd, body.touch .dock.vert .barra button.grpBtn::after { width: 20px; font-size: 11px; }
 body.touch .barra button.act { min-width: 56px; height: 54px; }
 body.touch .barra button.act.zo { min-width: 44px; width: 44px; }
 body.touch #toolMenu .tmTool { padding: 8px 10px; min-height: 48px; }
