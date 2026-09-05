@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.S';
+  var APP_VERSION = 'v30.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -14417,7 +14417,7 @@
     if (!layout.favs.length) html += '<p class="bpNota">Ninguna todavía. Añade abajo, o toca la ☆ de una herramienta dentro de cualquier grupo.</p>';
     layout.favs.forEach(function (id, i) {
       var d = defDe(id);
-      html += '<div class="bpRow" data-fav="' + id + '"><span class="ico">' + d.ico + '</span><span class="nm">' + esc(d.nom) + '</span>' +
+      html += '<div class="bpRow" data-fav="' + id + '"><span class="ico">' + ICO.svg(d.ico) + '</span><span class="nm">' + esc(d.nom) + '</span>' +
         '<button data-bp="fmv" data-n="-1" title="Subir"' + (i === 0 ? ' disabled' : '') + '>' + ICO.svg('flechaArriba') + '</button>' +
         '<button data-bp="fmv" data-n="1" title="Bajar"' + (i === layout.favs.length - 1 ? ' disabled' : '') + '>' + ICO.svg('flechaAbajo') + '</button>' +
         '<button class="quitar" data-bp="fdel" title="Quitar de Mis herramientas">' + ICO.svg('close') + '</button></div>';
@@ -14425,7 +14425,7 @@
     var libres = TOOL_DEFS.filter(function (d) { return layout.favs.indexOf(d.id) < 0; });
     if (libres.length) {
       html += '<div class="bpRow"><select data-bp="fadd" style="flex:1"><option value="">＋ Añadir herramienta…</option>' +
-        libres.map(function (d) { return '<option value="' + d.id + '">' + d.ico + '  ' + esc(d.nom) + ' — ' + esc(grupoDef(d.grp).nom) + '</option>'; }).join('') + '</select></div>';
+        libres.map(function (d) { return '<option value="' + d.id + '">' + esc(d.nom) + ' — ' + esc(grupoDef(d.grp).nom) + '</option>'; }).join('') + '</select></div>';
     }
     var top = masUsadas(8);
     if (top.length >= 5) {

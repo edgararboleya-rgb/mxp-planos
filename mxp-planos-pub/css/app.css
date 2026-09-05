@@ -152,8 +152,17 @@ body.touch #grpAjustes select { max-width: 108px; }
   background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12);
   flex-direction: row; gap: 6px; font-size: 13px; height: 38px; padding: 4px 12px;
 }
-#btnBarras { flex-direction: column !important; gap: 0 !important; padding: 3px 9px !important; letter-spacing: -2px; }
-#btnBarras label { letter-spacing: .3px; }
+/* Barras, Símbolos y Panel son cajitas de icono + nombre como las de
+   archivo. Ojo con la especificidad: la regla de .tgroup button gana a un
+   id suelto, así que van con el mismo peso o el contenido se sale (medido
+   05/09: el botón media 38 px y su contenido 45 — el nombre "Barras"
+   quedaba por debajo de la caja). */
+#toolbar .tgroup #btnBarras, #toolbar .tgroup #btnPal, #toolbar .tgroup #btnProps {
+  flex-direction: column; gap: 0; padding: 2px 9px; height: 44px; min-width: 46px;
+  line-height: 1; font-size: 15px;
+}
+#toolbar .tgroup #btnBarras label, #toolbar .tgroup #btnPal label, #toolbar .tgroup #btnProps label { font-size: 9px; letter-spacing: .3px; line-height: 1.1; margin-top: 2px; }
+#toolbar .tgroup #btnBarras svg.ico, #toolbar .tgroup #btnPal svg.ico, #toolbar .tgroup #btnProps svg.ico { width: 16px; height: 16px; }
 #toolbar .tgroup button:not(.tool):hover {
   background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); transform: translateY(-1px);
 }
@@ -180,17 +189,19 @@ body.touch #grpAjustes select { max-width: 108px; }
 /* flyout de tipos en los botones Wall / Area */
 .barra button.tool { position: relative; }
 .barra button.tool:has(.dd) { padding-right: 24px; padding-left: 8px; min-width: 66px; }
-.dock.vert .barra button.tool:has(.dd) { padding: 3px 4px 13px; min-width: 52px; height: 58px; }
-.dock.vert .barra .tool .dd { right: 0; left: 0; top: auto; bottom: 0; width: auto; height: 11px; border-left: none; border-top: 1px solid rgba(255,255,255,.14); border-radius: 0 0 8px 8px; }
+/* en vertical el ▾ va en una franja a la DERECHA, no debajo: así el botón
+   mide lo mismo que los que no tienen tipos y la columna queda pareja */
+.dock.vert .barra button.tool:has(.dd) { padding: 3px 16px 3px 4px; min-width: 52px; height: 54px; }
+.dock.vert .barra .tool .dd { right: 0; left: auto; top: 0; bottom: 0; width: 14px; height: auto; border-left: 1px solid rgba(255,255,255,.14); border-top: none; border-radius: 0 8px 8px 0; }
 /* botón de GRUPO: icono de la última herramienta usada + nombre del grupo + ▾ */
-.barra button.grpBtn { min-width: 64px; height: 46px; padding: 4px 8px; }
-.barra button.grpBtn .gIco { font-size: 15px; line-height: 1.1; }
-.barra button.grpBtn .gIco::after { content: ' ▾'; font-size: 9px; opacity: .7; }
+.barra button.grpBtn { min-width: 64px; height: 46px; padding: 3px 8px; overflow: hidden; }
+.barra button.grpBtn .gIco { display: flex; align-items: center; justify-content: center; gap: 2px; line-height: 1; }
+.barra button.grpBtn .gIco::after { content: '▾'; font-size: 9px; line-height: 1; opacity: .7; }
 .barra button.grpBtn label { font-size: 9px; opacity: .85; letter-spacing: .02em; text-transform: none; }
 .barra button.grpBtn.abierto { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.35); }
-.dock.vert .barra button.grpBtn { min-width: 52px; width: 52px; height: 50px; padding: 2px; }
-.dock.vert .barra button.grpBtn label, .dock.vert .barra button.tool label, .dock.vert .barra button.act label { font-size: 8px; margin-top: 2px; max-width: 48px; overflow: hidden; text-overflow: ellipsis; }
-.dock.vert .barra button.tool, .dock.vert .barra button.act { min-width: 52px; width: 52px; height: 50px; padding: 3px 4px; }
+.dock.vert .barra button.grpBtn { min-width: 52px; width: 52px; height: 54px; padding: 3px 2px; }
+.dock.vert .barra button.grpBtn label, .dock.vert .barra button.tool label, .dock.vert .barra button.act label { font-size: 8.5px; margin-top: 1px; max-width: 50px; overflow: hidden; text-overflow: ellipsis; line-height: 1.1; }
+.dock.vert .barra button.tool, .dock.vert .barra button.act { min-width: 52px; width: 52px; height: 54px; padding: 3px 4px; overflow: hidden; }
 .dock.vert .barra button.act.zo { height: 40px; }
 /* botones de acción dentro de una barra (zoom) */
 .barra button.act { min-width: 50px; height: 46px; font-size: 15px; padding: 4px 8px; }
@@ -242,7 +253,7 @@ body.touch #grpAjustes select { max-width: 108px; }
 #barrasPanel .bpRow { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 9px; font-size: 12.5px; }
 #barrasPanel .bpRow:hover { background: var(--mp-sky-1); }
 #barrasPanel .bpRow .nm { flex: 1; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; }
-#barrasPanel .bpRow .ico { width: 24px; text-align: center; font-size: 14px; }
+#barrasPanel .bpRow .ico { width: 24px; flex: none; display: flex; align-items: center; justify-content: center; }
 #barrasPanel .bpRow select { font-size: 12px; padding: 4px 6px; border: 1px solid var(--mp-line); border-radius: 8px; background: #fff; color: var(--mp-ink); }
 #barrasPanel .bpRow input[type=checkbox] { width: 17px; height: 17px; flex: none; accent-color: var(--mp-navy); }
 #barrasPanel .bpRow button, #barrasPanel .bpBtns button {
@@ -566,7 +577,10 @@ body.touch #navFijo svg.ico { width: 21px; height: 21px; }
 @media (max-width: 900px) {
   #palette { width: 168px; }
   #rightPanel { width: 200px; }
-  #toolbar button:not(.grpBtn) label, .dock button:not(.grpBtn) label { display: none; }
+  #toolbar button:not(.grpBtn) label, .dock.horiz button:not(.grpBtn) label { display: none; }
+  /* en un muelle vertical SÍ hay ancho para el nombre: o lo llevan todos
+     (herramientas y grupos) o no lo lleva ninguno — nunca la mitad */
+  .dock.vert .barra button label { display: block; }
 }
 
 /* scrollbars finos y modernos */
@@ -597,7 +611,7 @@ body.touch #grpHist button { min-width: 34px; padding: 3px 4px !important; }
 body.touch #grpArchivo button label, body.touch #grpAjustes button label { font-size: 8.5px; }
 /* en el iPad la fila 1 cabe en una línea: solo el logo, sin el nombre escrito */
 body.touch .brand b, body.touch .brand span { display: none; }
-body.touch #btnPal, body.touch #btnProps, body.touch #btnBarras { min-width: 44px; padding: 3px 3px !important; }
+body.touch #toolbar .tgroup #btnPal, body.touch #toolbar .tgroup #btnProps, body.touch #toolbar .tgroup #btnBarras { min-width: 46px; height: 50px; padding: 3px; }
 body.touch #btnPal label, body.touch #btnProps label, body.touch #btnBarras label { font-size: 9px; }
 body.touch .tbRow1 { gap: 3px; padding-left: 8px; padding-right: 8px; }
 body.touch .tgroup { padding-left: 4px; gap: 3px; }
@@ -612,10 +626,10 @@ body.touch .barra button.tool:has(.dd) { padding-right: 30px; padding-left: 8px;
 body.touch .barra .tool .dd { width: 22px; font-size: 12px; }
 body.touch .dock.vert { width: 74px; }
 body.touch .dock.vert .barra .grip { width: 58px; height: 28px; }
-body.touch .dock.vert .barra button.tool, body.touch .dock.vert .barra button.grpBtn, body.touch .dock.vert .barra button.act { width: 58px; min-width: 58px; height: 54px; }
+body.touch .dock.vert .barra button.tool, body.touch .dock.vert .barra button.grpBtn, body.touch .dock.vert .barra button.act { width: 58px; min-width: 58px; height: 58px; }
 body.touch .dock.vert .barra button.tool label, body.touch .dock.vert .barra button.grpBtn label, body.touch .dock.vert .barra button.act label { font-size: 9px; max-width: 54px; }
-body.touch .dock.vert .barra button.tool:has(.dd) { padding: 3px 4px 26px; min-width: 58px; height: 76px; }
-body.touch .dock.vert .barra .tool .dd { height: 24px; font-size: 13px; }
+body.touch .dock.vert .barra button.tool:has(.dd) { padding: 3px 20px 3px 4px; min-width: 58px; height: 58px; }
+body.touch .dock.vert .barra .tool .dd { width: 18px; height: auto; font-size: 12px; }
 body.touch .barra button.act { min-width: 56px; height: 54px; }
 body.touch .barra button.act.zo { min-width: 44px; width: 44px; }
 body.touch #toolMenu .tmTool { padding: 8px 10px; min-height: 48px; }
