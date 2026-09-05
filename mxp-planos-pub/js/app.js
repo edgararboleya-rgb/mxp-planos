@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.B';
+  var APP_VERSION = 'v31.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5392,6 +5392,7 @@
       if (!r || !r.kind || !r.id) return;
       // una puerta/ventana cuelga de su pared: no se mueve ni se borra en grupo
       if (r.kind === 'opening' && (refs.length > 1)) return;
+      if (!entityOf(r)) return;   // ya no existe (se borró por otro camino)
       for (var i = 0; i < lista.length; i++) if (mismaRef(lista[i], r)) return;   // sin repetidos
       lista.push({ kind: r.kind, id: r.id });
     });
@@ -6410,6 +6411,9 @@
     refs.forEach(function (r) {
       var e = entityOf(r);
       if (!e) return;
+      // las aberturas se añaden abajo, con su pared: si además se copiaran aquí
+      // se pegarían DOS puertas en el mismo hueco
+      if (r.kind === 'opening') return;
       items.push({ kind: r.kind, data: JSON.parse(JSON.stringify(e)) });
       if (r.kind === 'wall') {
         wallIds[e.id] = true;
@@ -6460,6 +6464,10 @@
         d.x1 += dx; d.y1 += dy; d.x2 += dx; d.y2 += dy;
         state[it.kind === 'dim' ? 'dims' : 'wires'].push(d);
         newRefs.push({ kind: it.kind, id: d.id });
+      } else if (it.kind === 'ink') {
+        // faltaba: se copiaba el trazo del lápiz y al pegar no salía nada
+        d.pts = d.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
+        state.inks.push(d); newRefs.push({ kind: 'ink', id: d.id });
       } else if (it.kind === 'area') {
         d.pts = d.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
         // un homerun pegado es OTRO circuito: número nuevo, mismo cable/breaker
