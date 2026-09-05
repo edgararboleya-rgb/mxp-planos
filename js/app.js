@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.W';
+  var APP_VERSION = 'v31.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -277,6 +277,7 @@
   var measure = null;                 // medición transitoria
   var sel = null;                     // {kind,id}
   var selGroup = null;                // [{kind,id},…] selección múltiple (marquee)
+  var sumandoSel = false;             // iPad: modo "＋ Añadir" (no hay tecla Shift)
   // cuadrícula de importación: dónde cae la próxima pieza de escaneo
   var gridX = 24, gridY = 24, gridRowH = 0;
   var clipboard = null;               // portapapeles interno (Ctrl+C/V)
@@ -4813,6 +4814,7 @@
   }
 
   function setTool(t) {
+    if (typeof sumandoSel !== 'undefined' && sumandoSel && t !== 'select') ponSumando(false);
     tool = t;
     if (t !== 'place') placingKey = null;
     pendingAreaLabel = false;
@@ -5201,8 +5203,10 @@
     if (selGroup && tryRotateGrab(p, selGroup)) return;
     if (sel && sel.kind !== 'opening' && findSel() && tryRotateGrab(p, [sel])) return;
     var h = hitTest(p);
-    // arrastrar cualquier pieza del grupo mueve el grupo completo
-    if (inGroup(h)) {
+    // arrastrar cualquier pieza del grupo mueve el grupo completo…
+    // …salvo que se esté SUMANDO: ahí tocar una pieza del grupo la quita, que
+    // es lo que espera cualquiera que venga de AutoCAD o de Bluebeam.
+    if (inGroup(h) && !esSumar(ev)) {
       drag = {
         mode: 'groupmove', start: p, snap: snapshot(), moved: false,
         refs: selGroup.slice(), calce: null,
@@ -5311,9 +5315,34 @@
         }
       }
     }
+    /* SUMAR A LA SELECCIÓN: con Shift (o Ctrl/⌘) en la PC, o con el modo "＋"
+       encendido en el iPad, donde no hay teclado.
+       VA AQUÍ A PROPÓSITO, no antes: las asas de girar, estirar y curvar se
+       comprueban primero, porque Shift ya servía para estirar un símbolo
+       conservando su forma y para llevar la punta al 90° exacto. Si esto se
+       pusiera arriba, ese Shift de siempre se perdería. */
+    if (esSumar(ev)) {
+      if (!h) {   // en vacío: el marco también suma
+        drag = { mode: 'marquee', start: p, cur: p, suma: true };
+        return;
+      }
+      if (h.kind === 'opening') {   // puerta/ventana: vive pegada a su pared, no entra en grupo
+        setHint('Las puertas y ventanas se tocan de una en una: viven pegadas a su pared');
+        drag = null;
+        return;
+      }
+      var refs = selRefs(), fuera = refs.filter(function (r) { return !mismaRef(r, h); });
+      var quita = fuera.length < refs.length;
+      var n = quita ? ponSel(fuera) : ponSel(refs.concat([h]));
+      setHint(quita
+        ? 'Quitado de la selección — ' + (n ? 'quedan ' + n : 'no queda ninguno')
+        : n + ' elemento(s) seleccionados' + (document.body.classList.contains('touch') ? ' — vuelve a tocar ＋ cuando termines' : ' — sigue con Shift+clic'));
+      drag = null;
+      return;
+    }
     if (!h) {
       // sin nada debajo: inicia el rectángulo de selección múltiple
-      sel = null; selGroup = null; renderSel(); showProps();
+      ponSel([]);
       drag = { mode: 'marquee', start: p, cur: p };
       return;
     }
@@ -5340,29 +5369,209 @@
     });
   }
 
-  function marqueeCollect(a, b) {
-    var x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
-    var y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  /* ── GEOMETRÍA DEL MARCO QUE "TOCA" (ventana crossing) ──
+     Contiene = el elemento cabe ENTERO dentro del marco (lo de siempre).
+     Toca     = basta con que el marco lo roce, como en AutoCAD y Bluebeam.
+     Todo en coordenadas de mundo; el marco siempre viene normalizado. */
+  /* ── LA SELECCIÓN, EN UN SOLO SITIO ──
+     La app guarda la selección en dos variables por razones históricas: 'sel'
+     cuando es UNA sola cosa y 'selGroup' cuando son varias, y nunca las dos a
+     la vez. Todo lo que toque la selección pasa por aquí para no romper esa
+     regla (que respetan renderSel, showProps, borrar, mover, copiar…). */
+  /* ¿Se está sumando a la selección? Un solo sitio lo decide: Shift o Ctrl/⌘
+     en la PC, y el modo "＋" del iPad, donde no hay teclado. */
+  function esSumar(ev) { return !!(ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)) || sumandoSel; }
+  function selRefs() {
+    if (selGroup && selGroup.length) return selGroup.slice();
+    return sel ? [sel] : [];
+  }
+  function mismaRef(a, b) { return a && b && a.kind === b.kind && a.id === b.id; }
+  function ponSel(refs, avisa) {
+    var lista = [];
+    (refs || []).forEach(function (r) {
+      if (!r || !r.kind || !r.id) return;
+      // una puerta/ventana cuelga de su pared: no se mueve ni se borra en grupo
+      if (r.kind === 'opening' && (refs.length > 1)) return;
+      for (var i = 0; i < lista.length; i++) if (mismaRef(lista[i], r)) return;   // sin repetidos
+      lista.push({ kind: r.kind, id: r.id });
+    });
+    if (!lista.length) { sel = null; selGroup = null; }
+    else if (lista.length === 1) { sel = lista[0]; selGroup = null; }
+    else { sel = null; selGroup = lista; }
+    renderSel(); showProps();
+    if (avisa) setHint(lista.length === 0 ? 'Nada seleccionado'
+      : lista.length === 1 ? '1 elemento seleccionado'
+      : lista.length + ' elementos seleccionados — arrastra cualquiera para mover el grupo · Supr los borra');
+    return lista.length;
+  }
+  function rectDe(a, b) {
+    return { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+  }
+  function ptEnRect(r, x, y) { return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1; }
+  /* Segmento contra rectángulo: o tiene una punta dentro, o cruza uno de los
+     cuatro lados. Se resuelve con el signo del producto cruzado (sin dividir,
+     así no hay división por cero en los segmentos verticales). */
+  function segCortaSeg(ax, ay, bx, by, cx, cy, dx, dy) {
+    function cruz(ox, oy, px, py, qx, qy) { return (px - ox) * (qy - oy) - (py - oy) * (qx - ox); }
+    var d1 = cruz(cx, cy, dx, dy, ax, ay), d2 = cruz(cx, cy, dx, dy, bx, by);
+    var d3 = cruz(ax, ay, bx, by, cx, cy), d4 = cruz(ax, ay, bx, by, dx, dy);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+    // colineales que se tocan
+    function enSeg(ox, oy, px, py, qx, qy) {
+      return Math.min(ox, px) <= qx && qx <= Math.max(ox, px) && Math.min(oy, py) <= qy && qy <= Math.max(oy, py);
+    }
+    if (d1 === 0 && enSeg(cx, cy, dx, dy, ax, ay)) return true;
+    if (d2 === 0 && enSeg(cx, cy, dx, dy, bx, by)) return true;
+    if (d3 === 0 && enSeg(ax, ay, bx, by, cx, cy)) return true;
+    if (d4 === 0 && enSeg(ax, ay, bx, by, dx, dy)) return true;
+    return false;
+  }
+  function segCortaRect(r, x1, y1, x2, y2) {
+    if (ptEnRect(r, x1, y1) || ptEnRect(r, x2, y2)) return true;
+    // fuera de la banda: descarte rápido antes de las cuatro pruebas
+    if (Math.max(x1, x2) < r.x0 || Math.min(x1, x2) > r.x1) return false;
+    if (Math.max(y1, y2) < r.y0 || Math.min(y1, y2) > r.y1) return false;
+    return segCortaSeg(x1, y1, x2, y2, r.x0, r.y0, r.x1, r.y0) ||
+           segCortaSeg(x1, y1, x2, y2, r.x1, r.y0, r.x1, r.y1) ||
+           segCortaSeg(x1, y1, x2, y2, r.x1, r.y1, r.x0, r.y1) ||
+           segCortaSeg(x1, y1, x2, y2, r.x0, r.y1, r.x0, r.y0);
+  }
+  function ptEnPoli(pts, x, y) {
+    var dentro = false;
+    for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dentro = !dentro;
+    }
+    return dentro;
+  }
+  /* Polilínea (abierta) contra rectángulo */
+  function poliCortaRect(r, pts, cerrada) {
+    if (!pts || !pts.length) return false;
+    for (var i = 0; i < pts.length; i++) if (ptEnRect(r, pts[i][0], pts[i][1])) return true;
+    var n = pts.length - (cerrada ? 0 : 1);
+    for (var k = 0; k < n; k++) {
+      var a = pts[k], b = pts[(k + 1) % pts.length];
+      if (segCortaRect(r, a[0], a[1], b[0], b[1])) return true;
+    }
+    // el marco entero dentro del polígono cerrado (p. ej. una superficie grande)
+    if (cerrada && ptEnPoli(pts, r.x0, r.y0)) return true;
+    return false;
+  }
+  /* Caja girada (un símbolo) contra rectángulo: sus cuatro lados, o el marco
+     entero dentro de la caja. */
+  function cajaCortaRect(r, esquinas) {
+    if (!esquinas) return false;
+    return poliCortaRect(r, esquinas, true);
+  }
+  /* [fin-geometria-marco] — no quitar: tools/prueba-geometria-marco.js recorta
+     desde 'function rectDe' hasta aquí para probar la geometría sola. */
+  /* Recoge lo que cae en el marco.
+     modo 'contiene' (arrastrando hacia la DERECHA): solo lo que entra entero.
+     modo 'toca'     (arrastrando hacia la IZQUIERDA): todo lo que el marco roce,
+     como en AutoCAD y en Bluebeam. */
+  /* ── SELECCIONAR LOS PARECIDOS ──
+     Con algo marcado, coge de golpe todos los de su misma clase EN ESTA HOJA.
+     Qué es "parecido" según lo que sea (lo que un electricista esperaría):
+       símbolo → todos los del mismo símbolo (todos los Duplex, todos los GFCI)
+       pared   → todas las del mismo tipo (todas las de drywall 4½")
+       texto   → todos los textos
+       cable   → todos los del mismo material (todo el EMT ½")
+       cota, callout, tinta, superficie → todos los de su clase
+     Devuelve { refs, comoSeLlama } para poder avisar en cristiano. */
+  function parecidosA(ref) {
+    var e = entityOf(ref);
+    if (!e) return { refs: [], comoSeLlama: '' };
+    var LV = layerVisible, out = [], nom = '';
+    if (ref.kind === 'symbol') {
+      var d = SYMBOLS[e.key], capa = d && d.layer === 'furniture' ? 'furniture' : 'electrical';
+      nom = d ? d.name : 'símbolo';
+      if (LV[capa]) state.symbols.forEach(function (s) { if (s.key === e.key) out.push({ kind: 'symbol', id: s.id }); });
+    } else if (ref.kind === 'wall') {
+      nom = (WALL_TYPES[e.type] && WALL_TYPES[e.type].name) || 'pared';
+      if (LV.architecture) state.walls.forEach(function (w) { if (w.type === e.type) out.push({ kind: 'wall', id: w.id }); });
+    } else if (ref.kind === 'wire') {
+      nom = 'cable ' + (e.style || '');
+      if (LV.electrical) state.wires.forEach(function (w) { if ((w.style || '') === (e.style || '')) out.push({ kind: 'wire', id: w.id }); });
+    } else if (ref.kind === 'text') {
+      nom = 'texto';
+      if (LV.annotation) state.texts.forEach(function (t) { out.push({ kind: 'text', id: t.id }); });
+    } else if (ref.kind === 'dim') {
+      nom = 'cota';
+      if (LV.annotation) state.dims.forEach(function (t) { out.push({ kind: 'dim', id: t.id }); });
+    } else if (ref.kind === 'leader') {
+      nom = 'nota con flecha';
+      if (LV.annotation) state.leaders.forEach(function (t) { out.push({ kind: 'leader', id: t.id }); });
+    } else if (ref.kind === 'ink') {
+      nom = 'trazo a mano';
+      if (LV.annotation) state.inks.forEach(function (t) { out.push({ kind: 'ink', id: t.id }); });
+    } else if (ref.kind === 'area') {
+      // una superficie se parece a otra si lleva el mismo patrón
+      nom = (AREA_PATTERNS[e.pattern] && AREA_PATTERNS[e.pattern].name) || 'superficie';
+      if (LV.areas) state.areas.forEach(function (ar) { if ((ar.pattern || '') === (e.pattern || '')) out.push({ kind: 'area', id: ar.id }); });
+    }
+    return { refs: out, comoSeLlama: nom };
+  }
+  function seleccionaParecidos() {
+    var base = selRefs();
+    if (!base.length) { setHint('Primero toca uno, y después "Los parecidos" coge todos los de su clase en esta hoja'); return; }
+    var todos = [], nombres = {};
+    base.forEach(function (r) {
+      var p = parecidosA(r);
+      p.refs.forEach(function (x) { todos.push(x); });
+      if (p.comoSeLlama) nombres[p.comoSeLlama] = 1;
+    });
+    var antes = base.length, n = ponSel(todos.length ? todos : base);
+    var lista = Object.keys(nombres).join(', ');
+    setHint(n <= antes
+      ? 'No hay más ' + (lista || 'elementos') + ' en esta hoja — sigue' + (n === 1 ? ' el que tenías' : 'n los ' + n + ' que tenías')
+      : n + ' ' + (lista || 'elemento(s)') + ' en esta hoja · Supr los borra · Propiedades los cambia todos a la vez');
+  }
+  /* La dirección de la mano decide el modo, igual que en AutoCAD: si el marco
+     se abre hacia la derecha, se lleva lo que entre entero; si se abre hacia la
+     izquierda, todo lo que roce. En el iPad funciona igual con el dedo. */
+  function modoMarco(a, b) { return b[0] < a[0] ? 'toca' : 'contiene'; }
+  function marqueeCollect(a, b, modo) {
+    var toca = modo === 'toca';
+    var r = rectDe(a, b);
+    var x0 = r.x0, x1 = r.x1, y0 = r.y0, y1 = r.y1;
     function inside(x, y) { return x >= x0 && x <= x1 && y >= y0 && y <= y1; }
     var g = [];
     // lo que esta en una capa APAGADA no se selecciona: si no se ve, no se
     // puede borrar con Supr sin querer (auditoria 31/08, reproducido)
     var LV = layerVisible;
-    if (LV.architecture) state.walls.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wall', id: w.id }); });
+    if (LV.architecture) state.walls.forEach(function (w) {
+      var dentro = toca ? segCortaRect(r, w.x1, w.y1, w.x2, w.y2) : (inside(w.x1, w.y1) && inside(w.x2, w.y2));
+      if (dentro) g.push({ kind: 'wall', id: w.id });
+    });
     state.symbols.forEach(function (s) {
       var d = SYMBOLS[s.key], capa = d && d.layer === 'furniture' ? 'furniture' : 'electrical';
-      if (LV[capa] && inside(s.x, s.y)) g.push({ kind: 'symbol', id: s.id });
+      if (!LV[capa]) return;
+      var dentro = toca ? cajaCortaRect(r, symCorners(s)) : inside(s.x, s.y);
+      if (dentro) g.push({ kind: 'symbol', id: s.id });
     });
     if (LV.annotation) {
       state.texts.forEach(function (t) { if (inside(t.x, t.y)) g.push({ kind: 'text', id: t.id }); });
-      state.dims.forEach(function (d) { if (inside(d.x1, d.y1) && inside(d.x2, d.y2)) g.push({ kind: 'dim', id: d.id }); });
+      state.dims.forEach(function (d) {
+        var dentro = toca ? segCortaRect(r, d.x1, d.y1, d.x2, d.y2) : (inside(d.x1, d.y1) && inside(d.x2, d.y2));
+        if (dentro) g.push({ kind: 'dim', id: d.id });
+      });
       state.leaders.forEach(function (l) { if (inside(l.x, l.y)) g.push({ kind: 'leader', id: l.id }); });
       // la tinta entra al grupo si TODO el trazo cae dentro del marco
-      state.inks.forEach(function (k) { if (k.pts.every(function (q) { return inside(q[0], q[1]); })) g.push({ kind: 'ink', id: k.id }); });
+      state.inks.forEach(function (k) {
+        var dentro = toca ? poliCortaRect(r, k.pts, false) : k.pts.every(function (q) { return inside(q[0], q[1]); });
+        if (dentro) g.push({ kind: 'ink', id: k.id });
+      });
     }
-    if (LV.electrical) state.wires.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wire', id: w.id }); });
+    if (LV.electrical) state.wires.forEach(function (w) {
+      // el cable se curva: para 'toca' se prueba también su punto medio real
+      var dentro = toca
+        ? (segCortaRect(r, w.x1, w.y1, w.x2, w.y2) || ptEnRect(r, (w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2))
+        : (inside(w.x1, w.y1) && inside(w.x2, w.y2));
+      if (dentro) g.push({ kind: 'wire', id: w.id });
+    });
     if (LV.areas) state.areas.forEach(function (ar) {
-      if (ar.pts.every(function (q) { return inside(q[0], q[1]); })) g.push({ kind: 'area', id: ar.id });
+      var dentro = toca ? poliCortaRect(r, ar.pts, !ar.open) : ar.pts.every(function (q) { return inside(q[0], q[1]); });
+      if (dentro) g.push({ kind: 'area', id: ar.id });
     });
     return g;
   }
@@ -5374,8 +5583,21 @@
       // en pantalla es exactamente lo que va a seleccionar
       if (Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) <= marcoMin()) { G.prev.innerHTML = ''; return; }
       var x0 = Math.min(drag.start[0], p[0]), y0 = Math.min(drag.start[1], p[1]);
-      G.prev.innerHTML = '<rect x="' + x0 + '" y="' + y0 + '" width="' + Math.abs(p[0] - drag.start[0]) +
-        '" height="' + Math.abs(p[1] - drag.start[1]) + '" fill="rgba(11,132,255,0.08)" stroke="#0b84ff" stroke-width="0.8" stroke-dasharray="4 3"/>';
+      var an = Math.abs(p[0] - drag.start[0]), al = Math.abs(p[1] - drag.start[1]);
+      /* DOS MARCOS, como en AutoCAD y Bluebeam. Se elige solo, por la mano:
+         hacia la DERECHA = azul entero, se lleva lo que entra COMPLETO;
+         hacia la IZQUIERDA = verde a rayas, se lleva todo lo que TOQUE. */
+      var modo = modoMarco(drag.start, p);
+      var esToca = modo === 'toca';
+      var col = esToca ? '#2E7D1E' : '#2A5BD7';
+      var rel = esToca ? 'rgba(140,240,106,0.16)' : 'rgba(42,91,215,0.09)';
+      var lw = 0.9 / view.z, tam = 9 / view.z;
+      G.prev.innerHTML = '<rect x="' + x0 + '" y="' + y0 + '" width="' + an + '" height="' + al +
+        '" fill="' + rel + '" stroke="' + col + '" stroke-width="' + lw + '"' +
+        (esToca ? ' stroke-dasharray="' + (5 / view.z) + ' ' + (3.5 / view.z) + '"' : '') + '/>' +
+        '<text x="' + (x0 + an / 2) + '" y="' + (y0 - 4 / view.z) + '" text-anchor="middle" fill="' + col +
+        '" font-size="' + tam + '" font-family="system-ui, sans-serif" style="paint-order:stroke;stroke:#f5f4ef;stroke-width:' + (2.4 / view.z) + '">' +
+        (esToca ? 'lo que toque' : 'lo que entre entero') + '</text>';
       return;
     }
     if (drag.mode === 'groupmove') {
@@ -5696,11 +5918,14 @@
     if (drag.mode === 'marquee') {
       G.prev.innerHTML = '';
       if (drag.cur && Math.hypot(drag.cur[0] - drag.start[0], drag.cur[1] - drag.start[1]) > marcoMin()) {
-        var g = marqueeCollect(drag.start, drag.cur);
-        selGroup = g.length ? g : null;
-        sel = null;
-        renderSel(); showProps();
-        if (selGroup) setHint(selGroup.length + ' elemento(s) seleccionados — arrastra cualquiera para mover el grupo · Supr para borrar');
+        var modoM = modoMarco(drag.start, drag.cur);
+        var g = marqueeCollect(drag.start, drag.cur, modoM);
+        // con Shift el marco SUMA a lo que ya estaba seleccionado
+        if (drag.suma) g = selRefs().concat(g);
+        var n = ponSel(g);
+        setHint(n ? n + ' elemento(s) seleccionados (' + (modoM === 'toca' ? 'lo que tocó el marco' : 'lo que entró entero') +
+          ') — arrastra cualquiera para mover el grupo · Supr los borra'
+          : 'El marco no cogió nada' + (modoM === 'contiene' ? ' — prueba arrastrando hacia la izquierda: así se lleva todo lo que toque' : ''));
       }
       drag = null;
       return;
@@ -7064,7 +7289,9 @@
         state.openings = state.openings.filter(function (o) { return o.wallId !== r.id; });
         state.walls = state.walls.filter(function (w) { return w.id !== r.id; });
       } else {
-        var pool = { symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders' }[r.kind];
+        // 'ink' faltaba: el marco lo seleccionaba y Supr no lo borraba (con el
+        // marco que TOCA pasa a cada rato, antes casi nunca)
+        var pool = { symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks' }[r.kind];
         if (pool) state[pool] = state[pool].filter(function (x) { return x.id !== r.id; });
       }
     });
@@ -7072,12 +7299,24 @@
     refresh();
   }
 
+  /* "Los parecidos": el botón que coge de golpe todos los de la misma clase.
+     Aparece siempre que hay algo marcado, con uno o con varios. */
+  function botonParecidos() {
+    return '<button id="prParecidos" style="width:100%;margin:6px 0" ' +
+      'title="Coge de una vez todos los de la misma clase que hay en esta hoja (todos los Duplex, todas las paredes de drywall 4½\", todo el EMT…)">' +
+      ICO.svg('encaja') + ' Los parecidos de esta hoja</button>';
+  }
+  function enganchaParecidos() {
+    var b = $('#prParecidos');
+    if (b) b.addEventListener('click', seleccionaParecidos);
+  }
   function showProps() {
     var body = $('#propsBody');
     if (selGroup) {
       body.className = 'pbody';
       body.innerHTML = '<div><b>' + selGroup.length + ' elementos seleccionados</b></div>' +
         '<div class="muted small">Arrastra cualquiera para mover el grupo completo</div>' +
+        botonParecidos() +
         '<div style="display:flex;gap:6px;margin:6px 0">' +
         '<button id="prRotL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
@@ -7090,6 +7329,7 @@
         botonesCad(false) +
         '<button class="danger" id="prDelGroup" style="margin-top:6px">' + ICO.svg('papelera') + ' Borrar todo el grupo</button>';
       engancharCad();
+      enganchaParecidos();
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
       var bl = $('#prRotL'), br = $('#prRotR'), b8 = $('#prRot180');
@@ -7467,9 +7707,10 @@
         '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>' +
         '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>';
     }
-    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area');
+    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area') + botonParecidos();
     body.innerHTML = html;
     engancharCad();
+    enganchaParecidos();
 
     // cada control captura su propio nodo (n) para no leer el valor de otro
     function on(id, evt, fn) {
@@ -14286,6 +14527,18 @@
       accionBarra(b.dataset.act, b);
     }
   });
+  /* El modo "ir sumando" del iPad: mientras está encendido, cada toque marca o
+     desmarca y NO mueve nada. Se apaga solo al cambiar de herramienta, para que
+     nadie se quede atascado sin saber por qué no puede arrastrar. */
+  function ponSumando(v) {
+    sumandoSel = !!v;
+    var b = $('#btnSumar');
+    if (b) b.classList.toggle('active', sumandoSel);
+    document.body.classList.toggle('sumandoSel', sumandoSel);
+    if (sumandoSel) setHint('Sumando a la selección: toca los que quieras (otra vez para quitarlos) · vuelve a tocar ＋ cuando termines');
+    else if (v === false) setHint(selRefs().length ? selRefs().length + ' elemento(s) seleccionados' : '');
+  }
+  (function () { var b = document.getElementById('btnSumar'); if (b) b.addEventListener('click', function () { ponSumando(!sumandoSel); }); })();
   function accionBarra(act, b) {
     if (act === 'zoomIn') zoomBy(1.25);
     else if (act === 'zoomOut') zoomBy(0.8);

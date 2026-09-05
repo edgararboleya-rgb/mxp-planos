@@ -311,6 +311,9 @@
     <div id="navFijo">
       <button class="tool active" data-tool="select" data-ico="select" title="Seleccionar (V)"></button>
       <button class="tool" data-tool="pan" data-ico="pan" title="Mover vista (H)"></button>
+      <!-- En el iPad no hay tecla Shift: este botón enciende el modo "ir sumando",
+           y mientras está encendido cada toque marca o desmarca sin mover nada. -->
+      <button id="btnSumar" class="act" data-ico="mas" title="Ir sumando a la selección: mientras esté encendido, cada toque marca o desmarca (en la PC es lo mismo que Shift+clic)"></button>
       <span class="sep"></span>
       <button class="act zo" data-act="zoomOut" title="Alejar">−</button>
       <span id="zoomLabel" title="Zoom">100%</span>

@@ -492,6 +492,9 @@ body.touch #navFijo svg.ico { width: 21px; height: 21px; }
 }
 #navFijo button:hover { background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06)); border-color: rgba(255,255,255,.25); }
 #navFijo button.active { background: rgba(34,232,224,.14); color: var(--mp-cyan); border-color: rgba(34,232,224,.5); box-shadow: 0 0 0 1px rgba(34,232,224,.25), 0 0 10px rgba(34,232,224,.22); }
+/* mientras se va sumando a la selección, el puntero lo dice */
+body.sumandoSel #canvas { cursor: copy; }
+body.sumandoSel #btnSumar { background: rgba(140,240,106,.18); color: var(--mp-lime); border-color: rgba(140,240,106,.55); box-shadow: 0 0 0 1px rgba(140,240,106,.25), 0 0 10px rgba(140,240,106,.25); }
 #navFijo .sep { width: 1px; height: 18px; background: rgba(255,255,255,.14); margin: 0 5px; }
 #navFijo #zoomLabel { min-width: 40px; text-align: center; font-size: 11px; color: #E8F3FA; opacity: .85; font-variant-numeric: tabular-nums; }
 
