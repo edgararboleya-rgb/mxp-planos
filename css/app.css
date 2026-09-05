@@ -214,10 +214,15 @@ body.touch #grpAjustes select { max-width: 108px; }
 .barra button.act.zo { min-width: 36px; width: 36px; font-size: 16px; padding: 4px; }
 .barra #zoomLabel { min-width: 42px; }
 .dock.vert .barra #zoomLabel { min-width: 0; font-size: 10px; }
+/* la flechita va ARRIBA a la derecha, a la altura del icono (que es estrecho)
+   y no al lado del nombre: pegada al texto hacía que el nombre pareciera
+   corrido a la izquierda (Edgar, 05/09: "measure rect y cloud no están
+   centrados"). El icono y el nombre siguen centrados en todo el botón; la
+   zona tocable sigue siendo la franja entera, solo cambia dónde se pinta. */
 .barra .tool .dd, .barra button.grpBtn::after {
   position: absolute; right: 0; top: 0; bottom: 0; width: 17px;
-  display: flex; align-items: flex-end; justify-content: center; padding: 0 0 3px;
-  font-size: 9px; line-height: 1; opacity: .7; border: 0; border-radius: 0 8px 8px 0;
+  display: flex; align-items: flex-start; justify-content: center; padding: 3px 2px 0 0;
+  font-size: 9px; line-height: 1; opacity: .6; border: 0; border-radius: 0 8px 8px 0;
 }
 .barra button.grpBtn::after { content: '▾'; pointer-events: none; }
 .barra .tool .dd:hover { background: rgba(255, 255, 255, .18); opacity: 1; }
@@ -629,7 +634,7 @@ body.touch .dock.vert .barra button.grpBtn { padding-right: 20px; }
 body.touch .barra button.grpBtn label { font-size: 10px; }
 body.touch .barra button.tool:has(.dd) { padding-right: 24px; padding-left: 8px; min-width: 74px; }
 body.touch .barra button.grpBtn { padding-right: 24px; }
-body.touch .barra .tool .dd, body.touch .barra button.grpBtn::after { width: 22px; font-size: 11px; padding-bottom: 4px; }
+body.touch .barra .tool .dd, body.touch .barra button.grpBtn::after { width: 22px; font-size: 11px; padding-top: 4px; }
 body.touch .dock.vert { width: 74px; }
 body.touch .dock.vert .barra .grip { width: 58px; height: 28px; }
 body.touch .dock.vert .barra button.tool, body.touch .dock.vert .barra button.grpBtn, body.touch .dock.vert .barra button.act { width: 58px; min-width: 58px; height: 58px; }
