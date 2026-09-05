@@ -819,6 +819,16 @@ body.touch #chatTxt { font-size: 15px; }   /* 16px o menos hace zoom en iOS */
 #marcasTit { font-weight: 600; font-size: 12.5px; flex: 1; letter-spacing: .11em; color: var(--mp-ink); }
 #marcasCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
 #marcasCab button:hover { background: var(--mp-sky-2); border-color: var(--mp-blue); }
+/* "Marcar la lista": el botón que convierte el filtro en una selección. Es el
+   único de la cabecera con texto, así que no cabe en los 26×26 de los demás. */
+#marcasCab #marcasMarcar {
+  width: auto; min-height: 28px; padding: 3px 10px; gap: 6px; font-size: 11.5px; white-space: nowrap;
+  display: inline-flex; align-items: center; font-weight: 600; color: var(--mp-navy);
+  background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); border-color: rgba(27,60,140,.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 5px rgba(7,26,46,.08);
+}
+#marcasCab #marcasMarcar[disabled] { opacity: .45; cursor: default; box-shadow: none; }
+body.touch #marcasCab #marcasMarcar { min-height: 44px; font-size: 13px; padding: 6px 12px; }
 #marcasFiltro { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
 #marcasFiltro input { flex: 1; min-width: 0; }
 #marcasCuerpo { flex: 1; overflow: auto; }

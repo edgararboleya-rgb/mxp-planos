@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.A';
+  var APP_VERSION = 'v31.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5493,8 +5493,14 @@
       nom = 'cable ' + (e.style || '');
       if (LV.electrical) state.wires.forEach(function (w) { if ((w.style || '') === (e.style || '')) out.push({ kind: 'wire', id: w.id }); });
     } else if (ref.kind === 'text') {
-      nom = 'texto';
-      if (LV.annotation) state.texts.forEach(function (t) { out.push({ kind: 'text', id: t.id }); });
+      // un callout (el texto en burbuja) no es un rótulo cualquiera: se buscan
+      // los de su misma forma, que es lo que un electricista llamaría "igual"
+      var esBurbuja = e.style === 'circle' || e.style === 'hex';
+      nom = esBurbuja ? 'callout' : 'texto';
+      if (LV.annotation) state.texts.forEach(function (t) {
+        var tb = t.style === 'circle' || t.style === 'hex';
+        if (tb === esBurbuja && (!esBurbuja || t.style === e.style)) out.push({ kind: 'text', id: t.id });
+      });
     } else if (ref.kind === 'dim') {
       nom = 'cota';
       if (LV.annotation) state.dims.forEach(function (t) { out.push({ kind: 'dim', id: t.id }); });
@@ -5514,12 +5520,18 @@
   function seleccionaParecidos() {
     var base = selRefs();
     if (!base.length) { setHint('Primero toca uno, y después "Los parecidos" coge todos los de su clase en esta hoja'); return; }
-    var todos = [], nombres = {};
+    var todos = [], nombres = {}, apagada = false;
     base.forEach(function (r) {
       var p = parecidosA(r);
+      // si no sale ni él mismo, es que su capa está apagada: no es que no haya
+      if (!p.refs.length && entityOf(r)) apagada = true;
       p.refs.forEach(function (x) { todos.push(x); });
       if (p.comoSeLlama) nombres[p.comoSeLlama] = 1;
     });
+    if (apagada && !todos.length) {
+      setHint('⚠ La capa de eso está apagada — enciéndela en Capas y vuelve a intentarlo');
+      return;
+    }
     var antes = base.length, n = ponSel(todos.length ? todos : base);
     var lista = Object.keys(nombres).join(', ');
     setHint(n <= antes
@@ -7304,7 +7316,7 @@
   function botonParecidos() {
     return '<button id="prParecidos" style="width:100%;margin:6px 0" ' +
       'title="Coge de una vez todos los de la misma clase que hay en esta hoja (todos los Duplex, todas las paredes de drywall 4½\", todo el EMT…)">' +
-      ICO.svg('encaja') + ' Los parecidos de esta hoja</button>';
+      ICO.svg('varita') + ' Los parecidos de esta hoja</button>';
   }
   function enganchaParecidos() {
     var b = $('#prParecidos');
@@ -8325,6 +8337,55 @@
     view.ty = r.height / 2 - (b.y + b.h / 2) * view.z;
     applyView();
   }
+  /* ── MARCAR LO QUE QUEDÓ EN LA LISTA ──
+     Esto es la "selección por filtro": en vez de otra pantalla que aprender,
+     se usa la Lista de marcas que ya existe. Filtras (por tipo, por texto) y
+     marcas de una vez todo lo que quedó a la vista. No cambia el plano. */
+  function marcarLista() {
+    if (!marcasCache.length) { setHint('No hay nada en la lista para marcar'); return; }
+    var LV = layerVisible, refs = [], apagadas = 0, puertas = 0;
+    marcasCache.forEach(function (f) {
+      if (f.kind === 'opening') { puertas++; return; }   // van pegadas a su pared
+      if (!capaVisibleDe(f.kind, f.id)) { apagadas++; return; }
+      refs.push({ kind: f.kind, id: f.id });
+    });
+    void LV;
+    if (!refs.length) {
+      setHint(apagadas ? '⚠ Nada que marcar: las ' + apagadas + ' de la lista están en una capa apagada'
+        : puertas ? 'Las puertas y ventanas se tocan de una en una: viven pegadas a su pared'
+        : 'No hay nada que marcar con ese filtro');
+      return;
+    }
+    var n = ponSel(refs);
+    var extra = apagadas ? ' · ' + apagadas + ' no: su capa está apagada' : '';
+    if (puertas) extra += ' · las puertas y ventanas se cambian una por una';
+    setHint((n > 200 ? '⚠ ' : '✔ ') + n + ' marcados desde la lista' + extra +
+      (n > 200 ? ' — ojo al arrastrar el plano: se mueven los ' + n : ' — Propiedades los cambia todos a la vez'));
+    renderMarcas();
+  }
+  /* ¿Se ve la capa de este elemento? Mismo criterio que el marco de selección. */
+  function capaVisibleDe(kind, id) {
+    var LV = layerVisible;
+    if (kind === 'wall') return !!LV.architecture;
+    if (kind === 'symbol') {
+      var sy = null;
+      state.symbols.forEach(function (x) { if (x.id === id) sy = x; });
+      var d = sy && SYMBOLS[sy.key];
+      return !!LV[(d && d.layer === 'furniture') ? 'furniture' : 'electrical'];
+    }
+    if (kind === 'wire') return !!LV.electrical;
+    if (kind === 'area') return !!LV.areas;
+    if (kind === 'text' || kind === 'dim' || kind === 'leader' || kind === 'ink') return !!LV.annotation;
+    return true;
+  }
+  function pintaBotonMarcar() {
+    var b = $('#marcasMarcar'); if (!b) return;
+    var n = marcasCache.length;
+    var lbl = b.querySelector('.lbl');
+    if (!lbl) { lbl = document.createElement('span'); lbl.className = 'lbl'; b.appendChild(lbl); }
+    lbl.textContent = n === 0 ? 'Nada que marcar' : n === 1 ? 'Marcar el único' : 'Marcar los ' + n;
+    b.disabled = !n;
+  }
   var marcasCache = [];
   var marcasOrden = { col: 'tipo', asc: true };
   function marcasAbierto() { var b = $('#marcasBox'); return b && !b.classList.contains('oculto'); }
@@ -8345,21 +8406,26 @@
       return (va < vb ? -1 : va > vb ? 1 : 0) * asc;
     });
     marcasCache = filas;
+    // se resaltan TODAS las seleccionadas, no solo la única: con "Marcar la
+    // lista" y con Shift+clic lo normal es llevar veinte a la vez
+    var marcadas = {};
+    selRefs().forEach(function (r) { marcadas[r.kind + '/' + r.id] = 1; });
     var flecha = function (c) { return marcasOrden.col === c ? (marcasOrden.asc ? ' ▲' : ' ▼') : ''; };
     var h = '<thead><tr><th data-c="tipo">Tipo' + flecha('tipo') + '</th><th data-c="nombre">Nombre' + flecha('nombre') + '</th><th data-c="det">Detalle' + flecha('det') + '</th><th data-c="medida" style="text-align:right">Medida' + flecha('medida') + '</th></tr></thead><tbody>';
     filas.forEach(function (f, i) {
-      var cur = sel && sel.kind === f.kind && sel.id === f.id;
+      var cur = !!marcadas[f.kind + '/' + f.id];
       h += '<tr class="fila' + (cur ? ' cur' : '') + '" data-i="' + i + '"><td class="k">' + esc(MARCAS_TIPO[f.tipo] || f.tipo) + '</td><td title="' + esc(f.nombre) + '">' + esc(f.nombre) + '</td><td class="k">' + esc(f.det) + '</td><td class="n">' + esc(f.medida) + '</td></tr>';
     });
     if (!filas.length) h += '<tr><td colspan="4" class="k" style="padding:14px;text-align:center">Nada que listar' + (q || tipo ? ' con ese filtro' : ' — el plano está vacío') + '</td></tr>';
     $('#marcasTabla').innerHTML = h + '</tbody>';
     $('#marcasN').textContent = filas.length === todas.length ? todas.length + ' marcas' : filas.length + ' de ' + todas.length;
+    pintaBotonMarcar();
     // clic en fila = seleccionar y encuadrar; el panel se queda abierto
     $$('#marcasTabla tr.fila').forEach(function (tr) {
       tr.addEventListener('click', function () {
         var f = marcasCache[+tr.dataset.i]; if (!f) return;
-        selGroup = null; sel = { kind: f.kind, id: f.id };
-        var e = findSel(); if (!e) { sel = null; renderMarcas(); return; }
+        ponSel([{ kind: f.kind, id: f.id }]);
+        var e = findSel(); if (!e) { ponSel([]); renderMarcas(); return; }
         if (tool !== 'select') setTool('select');
         zoomToBox(bboxDe(f.kind, e));
         renderSel(); showProps();
@@ -8391,12 +8457,17 @@
     });
     $('#marcasCerrar').addEventListener('click', function () { box.classList.add('oculto'); });
     $('#marcasCsv').addEventListener('click', marcasCsv);
+    $('#marcasMarcar').addEventListener('click', marcarLista);
     $('#marcasBusca').addEventListener('input', renderMarcas);
     $('#marcasTipo').addEventListener('change', renderMarcas);
     // arrastrar por la barra, igual que el chat
     var cab = $('#marcasCab'), ar = null;
     cab.addEventListener('pointerdown', function (ev) {
-      if (/BUTTON/.test(ev.target.tagName)) return;
+      /* closest('button') y no ev.target.tagName: los botones de estas cabeceras
+         llevan dentro su icono SVG (y alguno su rótulo), así que el toque cae
+         sobre el hijo y no sobre el <button>. Con la comprobación vieja, tocar
+         el icono arrastraba el panel y se comía el clic. */
+      if (ev.target.closest && ev.target.closest('button')) return;
       var r = box.getBoundingClientRect();
       ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
       cab.setPointerCapture(ev.pointerId); ev.preventDefault();
@@ -9604,7 +9675,11 @@
     // arrastrar por la barra de arriba
     var cab = document.getElementById('chatCab'), ar = null;
     cab.addEventListener('pointerdown', function (ev) {
-      if (/BUTTON/.test(ev.target.tagName)) return;
+      /* closest('button') y no ev.target.tagName: los botones de estas cabeceras
+         llevan dentro su icono SVG (y alguno su rótulo), así que el toque cae
+         sobre el hijo y no sobre el <button>. Con la comprobación vieja, tocar
+         el icono arrastraba el panel y se comía el clic. */
+      if (ev.target.closest && ev.target.closest('button')) return;
       var r = d.getBoundingClientRect();
       ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
       d.style.right = 'auto'; d.style.bottom = 'auto';
