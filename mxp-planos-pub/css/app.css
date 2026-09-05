@@ -451,6 +451,7 @@ body.touch .cntChip { width: 15px; height: 15px; }
 #canvas g.cnt { pointer-events: none; }
 #canvas g.cnt text { user-select: none; }
 svg.tool-count { cursor: crosshair; }
+svg.tool-match { cursor: copy; }
 
 /* ===== iconos de línea (js/icons.js) ===== */
 svg.ico { width: 18px; height: 18px; flex: none; display: block; pointer-events: none; }

@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.D';
+  var APP_VERSION = 'v31.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -282,6 +282,13 @@
     cats: function () { return catsCount().slice(); }
   };
   window.__hojaDbg = { nueva: function (no) { addSheet(no); }, cambia: function (i) { switchSheet(i); } };
+  window.__ptDbg = function (wx, wy) { var r = svg.getBoundingClientRect(); return { x: Math.round(r.left + view.tx + wx * view.z), y: Math.round(r.top + view.ty + wy * view.z) }; };
+  window.__fmtDbg = {
+    copia: function (ref) { return copiarFormato(ref); },
+    pega: function (refs) { return pegarFormatoEn(refs); },
+    clip: function () { return formatoClip ? { kind: formatoClip.kind, nom: formatoClip.nom, props: formatoClip.props } : null; }
+  };
+  window.__undoDbg = function () { return { n: undoStack.length, undo: function () { undo(); } }; };
   window.__encajaDbg = function () { try { encajarSel(); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
@@ -4408,7 +4415,10 @@
         ' L' + (e.x1 - g.nx * t) + ',' + (e.y1 - g.ny * t) + ' Z"/>';
     }
     if (kind === 'symbol') {
+      // una clave de símbolo que ya no existe (proyecto viejo, símbolo
+      // retirado) reventaba renderSel y con él TODA la selección
       var def = SYMBOLS[e.key];
+      if (!def) return '<circle class="sel" cx="' + e.x + '" cy="' + e.y + '" r="10"/>';
       return '<g transform="' + symTransform(e) + '"><rect class="sel" x="' + (-def.w / 2 - 3) + '" y="' + (-def.h / 2 - 3) +
         '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
     }
@@ -4465,6 +4475,8 @@
           s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + hr + '"/>';
         } else if (sel.kind === 'symbol') {
           var def = SYMBOLS[e.key];
+          if (!def) { s += selShapeMarkup('symbol', e); }
+          else {
           s += '<g transform="' + symTransform(e) + '"><rect class="sel" x="' + (-def.w / 2 - 3) + '" y="' + (-def.h / 2 - 3) +
             '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
           if (estirable(def)) {
@@ -4473,6 +4485,7 @@
             scs.forEach(function (c5) {
               s += '<circle class="handle" cx="' + c5[0] + '" cy="' + c5[1] + '" r="' + shr + '"/>';
             });
+          }
           }
         } else if (sel.kind === 'count') {
           s += selShapeMarkup('count', e);
@@ -4815,6 +4828,7 @@
     window: 'Toca una pared para colocar la ventana',
     measure: 'Clic en dos puntos para medir (azul, no se imprime) · mantén SHIFT para línea recta',
     dim: 'Clic en dos puntos para colocar una cota · SHIFT = línea recta · doble clic en la cota edita la medida · arrástrala para separarla',
+    match: 'COPIAR FORMATO: toca la marca cuyo aspecto quieres copiar y después las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir',
     count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
@@ -4856,6 +4870,17 @@
     if (!sel && !selGroup) showProps();   // Cable muestra su lista de materiales
     setHint(HINTS[t] || '');
     if (t === 'calibrate' && !state.bg) setHint('CALIBRAR: primero importa un plano de fondo con el botón "Fondo"');
+    /* MATCHPROP como en AutoCAD: si ya tienes una marca escogida, entrar al
+       pincel COGE SU FORMATO — no te hace tocarla otra vez. */
+    if (t !== 'match') pincelCogeOrigen = false;
+    if (t === 'match') {
+      pincelPuestos = 0;
+      if (sel && sel.kind !== 'opening' && entityOf(sel) && copiarFormato(sel)) {
+        setHint('Formato copiado de ' + formatoClip.nom + ' — toca las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir');
+      } else if (formatoClip) {
+        setHint('Pincel cargado con el formato de ' + formatoClip.nom + ' — toca las que quieras dejar iguales · SHIFT+toque cambia el origen');
+      }
+    }
   }
 
   /* ---------------- interacción de puntero ---------------- */
@@ -5094,6 +5119,7 @@
       case 'leader': return twoPointDown(p, 'leader');
       case 'text': return textDown(p);
       case 'count': return countDown(rawP);
+      case 'match': return matchDown(rawP, ev);
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -7386,6 +7412,8 @@
       body.innerHTML = '<div><b>' + selGroup.length + ' elementos seleccionados</b></div>' +
         '<div class="muted small">Arrastra cualquiera para mover el grupo completo</div>' +
         botonParecidos() +
+        botonesFormato(true, selGroup.length) +
+        bloqueMasivo(selGroup) +
         '<div style="display:flex;gap:6px;margin:6px 0">' +
         '<button id="prRotL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
@@ -7399,6 +7427,8 @@
         '<button class="danger" id="prDelGroup" style="margin-top:6px">' + ICO.svg('papelera') + ' Borrar todo el grupo</button>';
       engancharCad();
       enganchaParecidos();
+      enganchaFormato(selGroup);
+      enganchaMasivo(selGroup);
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
       var bl = $('#prRotL'), br = $('#prRotR'), b8 = $('#prRot180');
@@ -7794,10 +7824,11 @@
         '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>' +
         '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>';
     }
-    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area') + botonParecidos();
+    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area') + botonParecidos() + botonesFormato(false, 1);
     body.innerHTML = html;
     engancharCad();
     enganchaParecidos();
+    if (sel.kind !== 'opening') enganchaFormato([sel]);
 
     // cada control captura su propio nodo (n) para no leer el valor de otro
     function on(id, evt, fn) {
@@ -8407,6 +8438,330 @@
         refreshCounts();
         setHint('Contando ' + (c ? c.nom : '') + ' — toca cada uno en el plano · Esc para salir');
       });
+    });
+  }
+
+
+  /* ==================================================================
+     MATCH PROPERTIES / COPIAR FORMATO y EDICIÓN MASIVA (fase 5.7)
+
+     Dos cosas que en Bluebeam y en AutoCAD se usan a diario:
+     · COPIAR FORMATO (Format Painter / MATCHPROP): coges el aspecto de una
+       marca y se lo pasas a las demás con un toque cada una.
+     · EDICIÓN MASIVA: con veinte cosas seleccionadas, cambiar de una vez lo
+       que TODAS tienen en común — color, tamaño, grosor, tipo de pared,
+       material del cable, el circuito de doce receptáculos…
+
+     Qué es "formato" y qué no: el formato es el ASPECTO (color, grosor,
+     tamaño, tipo). NO viaja la posición, ni el giro, ni el texto escrito, ni
+     el largo: eso es la pieza, no su aspecto. Copiar un rótulo no debe
+     copiar lo que dice.
+     ================================================================== */
+  var FORMATO_CAMPOS = {
+    wall:    ['type', 'op'],
+    opening: ['type', 'w', 'op'],
+    symbol:  ['scale', 'sx', 'sy', 'raya', 'bg', 'op'],
+    text:    ['size', 'font', 'color', 'align', 'bold', 'italic', 'style', 'op'],
+    leader:  ['size', 'font', 'color', 'align', 'bold', 'italic', 'op'],
+    dim:     ['op'],
+    wire:    ['style', 'lw', 'capS', 'capE', 'op'],
+    area:    ['pattern', 'lineStyle', 'lw', 'color', 'relleno', 'rellenoOp', 'arco', 'op'],
+    ink:     ['modo', 'color', 'lw', 'op'],
+    count:   ['cat', 'op']
+  };
+  /* Estos campos SOLO viajan entre piezas del mismo tipo: 'style' quiere decir
+     una cosa en un texto (burbuja/hexágono), otra en un cable (EMT, PVC) y
+     otra en una superficie. Pasarlos de una clase a otra sería un disparate
+     silencioso. */
+  var FORMATO_SOLO_IGUAL = { style: 1, type: 1, pattern: 1, cat: 1, w: 1, modo: 1, arco: 1, relleno: 1, rellenoOp: 1 };
+  /* Lo que hay que hacer DESPUÉS de escribir un campo (el grosor de la pared
+     sale de su tipo, y tocarlo a mano la marca como manual para que Soldar no
+     se la vuelva a cambiar). */
+  var FORMATO_TRAS = {
+    wall: function (e, k) { if (k === 'type' && WALL_TYPES[e.type]) { e.t = WALL_TYPES[e.type].t; e.manual = 1; } },
+    opening: function (e, k) { if (k === 'type' && OPEN_DEFAULT[e.type] && e.w == null) e.w = OPEN_DEFAULT[e.type]; }
+  };
+  var formatoClip = null;     // { kind, nom, props }
+  var pincelPuestos = 0;      // cuántas van en esta pasada del pincel
+  /* En la PC el origen se cambia con SHIFT+toque. En el iPad no hay Shift:
+     por eso el ▾ del botón trae "Coger otro origen", que arma el próximo
+     toque para eso. Sin esto, en el iPad había que salir y volver a entrar. */
+  var pincelCogeOrigen = false;
+
+  function formatoDe(kind, e) {
+    var campos = FORMATO_CAMPOS[kind];
+    if (!campos || !e) return null;
+    var out = {};
+    campos.forEach(function (k) { out[k] = (e[k] === undefined) ? null : e[k]; });
+    return out;
+  }
+  /* Aplica lo que SEA APLICABLE y devuelve cuántos campos cambiaron. Si la
+     pieza de destino no comparte nada con la de origen, devuelve 0 y quien
+     llama lo dice en cristiano: nunca se hace el que trabajó sin trabajar. */
+  function aplicaFormato(ref, fmt, kindOrigen) {
+    var e = entityOf(ref); if (!e || !fmt) return 0;
+    var campos = FORMATO_CAMPOS[ref.kind]; if (!campos) return 0;
+    var mismo = (ref.kind === kindOrigen), n = 0;
+    campos.forEach(function (k) {
+      if (!(k in fmt)) return;
+      if (!mismo && FORMATO_SOLO_IGUAL[k]) return;
+      var v = fmt[k];
+      var antes = (e[k] === undefined) ? null : e[k];
+      if (antes === v) return;
+      if (v === null || v === undefined) delete e[k]; else e[k] = v;
+      n++;
+    });
+    if (n && FORMATO_TRAS[ref.kind]) campos.forEach(function (k) { if (k in fmt) FORMATO_TRAS[ref.kind](e, k); });
+    return n;
+  }
+  function nombreDe(ref) {
+    var e = entityOf(ref); if (!e) return 'eso';
+    if (ref.kind === 'wall') return (WALL_TYPES[e.type] || {}).name || 'pared';
+    if (ref.kind === 'symbol') return (SYMBOLS[e.key] || {}).name || 'símbolo';
+    if (ref.kind === 'text') return 'texto';
+    if (ref.kind === 'leader') return 'nota';
+    if (ref.kind === 'dim') return 'cota';
+    if (ref.kind === 'wire') return WIRE_STYLE_NAMES[e.style || 'dashed'] || 'cable';
+    if (ref.kind === 'area') return e.open ? 'línea' : ((AREA_PATTERNS[e.pattern] || {}).name || 'superficie');
+    if (ref.kind === 'ink') return e.modo === 'hi' ? 'resaltado' : 'trazo a mano';
+    if (ref.kind === 'count') { var c = catCount(e.cat); return c ? c.nom : 'conteo'; }
+    if (ref.kind === 'opening') return OPEN_NAMES[e.type] || 'abertura';
+    return ref.kind;
+  }
+  /* Coge el formato de LO QUE ESTÉ SELECCIONADO (si es una sola pieza) y
+     enciende el pincel. Es el paso 1 del Format Painter. */
+  function copiarFormato(ref) {
+    var r = ref || (sel && sel.kind !== 'opening' ? sel : null);
+    if (!r) { setHint('⚠ Primero toca la marca cuyo formato quieres copiar'); return false; }
+    var f = formatoDe(r.kind, entityOf(r));
+    if (!f) { setHint('⚠ De eso no se puede copiar formato'); return false; }
+    formatoClip = { kind: r.kind, nom: nombreDe(r), props: f };
+    pincelPuestos = 0;
+    return true;
+  }
+  function pegarFormatoEn(refs) {
+    if (!formatoClip) { setHint('⚠ Todavía no has copiado ningún formato'); return 0; }
+    var cambiadas = 0, tocadas = 0;
+    // el paso de deshacer se mete ANTES de tocar nada, pero si al final no
+    // cambió nada se retira: un Ctrl+Z que no deshace nada es un Ctrl+Z roto
+    var antes = snapshot();
+    pushUndo(antes);
+    refs.forEach(function (r) {
+      tocadas++;
+      if (aplicaFormato(r, formatoClip.props, formatoClip.kind)) cambiadas++;
+    });
+    if (!cambiadas) {
+      if (undoStack[undoStack.length - 1] === antes) undoStack.pop();
+      setHint(tocadas === 1
+        ? 'Nada que pasarle: el formato de ' + formatoClip.nom + ' no le aplica a eso'
+        : '⚠ De las ' + tocadas + ', ninguna comparte formato con ' + formatoClip.nom);
+      return 0;
+    }
+    refresh(); renderSel(); refreshCounts(); scheduleAutosave();
+    return cambiadas;
+  }
+  /* Paso 2 del pincel: cada toque en el plano deja igual a la de origen. */
+  function matchDown(p, ev) {
+    var h = hitTest(p);
+    if (!h) {
+      setHint(formatoClip
+        ? 'Ahí no hay nada — toca la marca que quieres dejar igual que ' + formatoClip.nom + ' · Esc para salir'
+        : 'Toca la marca cuyo formato quieres copiar');
+      return;
+    }
+    if (!formatoClip) {
+      if (!copiarFormato(h)) return;
+      ponSel([h]);
+      setHint('Formato copiado de ' + formatoClip.nom + ' — ahora toca las que quieras dejar iguales · Esc para salir');
+      return;
+    }
+    // ojo: con SHIFT (o con "Coger otro origen" del ▾) se cambia el origen
+    // sin salir de la herramienta
+    if (esSumar(ev) || pincelCogeOrigen) {
+      pincelCogeOrigen = false;
+      if (copiarFormato(h)) { ponSel([h]); setHint('Nuevo origen: ' + formatoClip.nom + ' — toca las que quieras dejar iguales'); }
+      return;
+    }
+    var n = pegarFormatoEn([h]);
+    if (n) {
+      pincelPuestos++;
+      setHint('✔ ' + pincelPuestos + ' marca(s) igualadas a ' + formatoClip.nom + ' · sigue tocando · Esc para salir');
+    }
+  }
+
+  /* ---------------- EDICIÓN MASIVA ----------------
+     Una tabla y ya: cada fila dice qué campo es, en qué clases existe y cómo
+     se pinta. Un campo solo sale si TODAS las piezas seleccionadas lo tienen
+     — así nunca se le cambia algo a la mitad del grupo sin querer. */
+  function opsColor() { return COLOR_PRESETS.map(function (c) { return [c[0], c[1]]; }); }
+  var CAMPOS_MASIVOS = [
+    { k: 'op', nom: 'Opacidad', tipo: 'rango', min: 10, max: 100, step: 5, def: 100,
+      kinds: ['wall', 'opening', 'symbol', 'text', 'leader', 'dim', 'wire', 'area', 'ink', 'count'] },
+    { k: 'type', nom: 'Tipo de pared', tipo: 'ops', kinds: ['wall'],
+      ops: function () { return Object.keys(WALL_TYPES).map(function (k) { return [k, WALL_TYPES[k].name]; }); } },
+    { k: 'style', nom: 'Material', tipo: 'ops', def: 'dashed', kinds: ['wire'], ops: function () { return WIRE_OPTS.slice(); } },
+    { k: 'lw', nom: 'Grosor', tipo: 'num', min: 0.1, step: 0.1, kinds: ['wire', 'area', 'ink'] },
+    { k: 'pattern', nom: 'Patrón', tipo: 'ops', kinds: ['area'],
+      ops: function () { return Object.keys(AREA_PATTERNS).map(function (k) { return [k, AREA_PATTERNS[k].name]; }); } },
+    { k: 'lineStyle', nom: 'Tipo de línea', tipo: 'ops', def: 'solid', kinds: ['area'],
+      ops: function () { return Object.keys(LINE_STYLES).map(function (k) { return [k, LINE_STYLES[k].name.replace(/^[^A-Za-zÁ-ú]+/, '')]; }); } },
+    { k: 'size', nom: 'Tamaño', tipo: 'num', min: 3, step: 0.5, def: 9, kinds: ['text', 'leader'] },
+    { k: 'font', nom: 'Fuente', tipo: 'ops', def: 'arch', kinds: ['text', 'leader'],
+      ops: function () { return Object.keys(TEXT_FONTS).map(function (k) { return [k, TEXT_FONTS[k].corto]; }); } },
+    { k: 'align', nom: 'Alineación', tipo: 'ops', def: 'left', kinds: ['text', 'leader'],
+      ops: function () { return [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']]; } },
+    { k: 'color', nom: 'Color', tipo: 'swatch', kinds: ['text', 'leader', 'area', 'ink'], ops: opsColor },
+    { k: 'scale', nom: 'Escala', tipo: 'num', min: 0.1, step: 0.1, def: 1, kinds: ['symbol'] },
+    { k: 'raya', nom: 'Contorno', tipo: 'ops', def: '', kinds: ['symbol'],
+      ops: function () { return [['', 'Continuo'], ['fut', 'Discontinuo (futuro / N.I.C.)'], ['ex', 'Punteado (existente)']]; } },
+    { k: 'cat', nom: 'Cuenta como', tipo: 'ops', kinds: ['count'],
+      ops: function () { return catsCount().map(function (c) { return [c.id, c.nom]; }); } },
+    { k: 'attrs.ckt', nom: 'Circuito', tipo: 'texto', mayus: true, ph: 'ej: A-12', kinds: ['symbol'] },
+    { k: 'attrs.h', nom: 'Altura', tipo: 'texto', ph: 'ej: 48" AFF', kinds: ['symbol'] },
+    { k: 'attrs.note', nom: 'Nota', tipo: 'texto', mayus: true, ph: 'ej: GFCI · WP', kinds: ['symbol'] }
+  ];
+  function leeCampo(e, k) {
+    if (k.indexOf('attrs.') === 0) { var a = e.attrs || {}; var v = a[k.slice(6)]; return (v === undefined || v === '') ? null : v; }
+    return (e[k] === undefined) ? null : e[k];
+  }
+  function escribeCampo(e, k, v) {
+    if (k.indexOf('attrs.') === 0) {
+      var sub = k.slice(6);
+      e.attrs = e.attrs || {};
+      if (v === null || v === '') delete e.attrs[sub]; else e.attrs[sub] = v;
+      if (!Object.keys(e.attrs).length) delete e.attrs;
+      return;
+    }
+    if (v === null) delete e[k]; else e[k] = v;
+  }
+  /* El valor que enseña el cuadro: el común si todas lo tienen igual, o null
+     (= "(varios)") si difieren. El campo por defecto cuenta como valor: doce
+     textos sin 'font' escrito son doce textos en Arial, no doce sin fuente. */
+  function valorComun(refs, campo) {
+    var v, primero = true;
+    for (var i = 0; i < refs.length; i++) {
+      var e = entityOf(refs[i]); if (!e) continue;
+      var q = leeCampo(e, campo.k);
+      if (q === null && campo.def !== undefined) q = campo.def;
+      if (primero) { v = q; primero = false; }
+      else if (q !== v) return { varios: true, v: null };
+    }
+    return { varios: false, v: primero ? null : v };
+  }
+  function camposDe(refs) {
+    if (!refs.length) return [];
+    return CAMPOS_MASIVOS.filter(function (c) {
+      return refs.every(function (r) { return c.kinds.indexOf(r.kind) >= 0; });
+    });
+  }
+  function bloqueMasivo(refs) {
+    var campos = camposDe(refs);
+    if (!campos.length) {
+      return '<div class="muted small" style="margin-top:8px">Este grupo mezcla clases que no comparten nada que cambiar de una vez. ' +
+        'Con "Los parecidos" coges solo los de una clase y ahí sí se editan todos juntos.</div>';
+    }
+    var h = '<div class="muted small" style="margin-top:10px"><b>Cambiar en las ' + refs.length + ' a la vez</b></div>';
+    campos.forEach(function (c) {
+      var vc = valorComun(refs, c);
+      var id = 'prMas_' + c.k.replace('.', '_');
+      if (c.tipo === 'rango') {
+        var vr = vc.varios ? 100 : (vc.v == null ? (c.def || 100) : vc.v);
+        h += '<div class="row"><label>' + c.nom + '</label>' +
+          '<input id="' + id + '" type="range" min="' + c.min + '" max="' + c.max + '" step="' + c.step + '" value="' + vr + '" style="flex:1">' +
+          '<span id="' + id + 'N" class="muted small" style="width:52px;text-align:right">' + (vc.varios ? 'varios' : vr + '%') + '</span></div>';
+      } else if (c.tipo === 'ops') {
+        h += '<div class="row"><label>' + c.nom + '</label><select id="' + id + '">' +
+          (vc.varios ? '<option value="__varios" selected>(varios)</option>' : '') +
+          c.ops().map(function (o) {
+            return '<option value="' + esc(String(o[0])) + '"' + (!vc.varios && String(vc.v == null ? '' : vc.v) === String(o[0]) ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+          }).join('') + '</select></div>';
+      } else if (c.tipo === 'swatch') {
+        h += '<div class="row"><label>' + c.nom + '</label><div class="swRow" id="' + id + '">' +
+          c.ops().map(function (o) {
+            return '<span class="sw' + (!vc.varios && vc.v === o[0] ? ' cur' : '') + '" data-c="' + o[0] + '" title="' + esc(o[1]) + '" style="background:' + o[0] + '"></span>';
+          }).join('') + '</div></div>';
+      } else if (c.tipo === 'num') {
+        h += '<div class="row"><label>' + c.nom + '</label><input id="' + id + '" type="number" step="' + c.step + '" min="' + c.min + '"' +
+          (vc.varios ? ' placeholder="(varios)"' : ' value="' + (vc.v == null ? '' : vc.v) + '"') + '></div>';
+      } else {
+        h += '<div class="row"><label>' + c.nom + '</label><input id="' + id + '"' +
+          (vc.varios ? ' placeholder="(varios)"' : ' value="' + esc(vc.v == null ? '' : vc.v) + '"') +
+          (c.ph && !vc.varios ? ' placeholder="' + esc(c.ph) + '"' : '') + '></div>';
+      }
+    });
+    h += '<div class="muted small">Lo que escribas aquí se le pone a las ' + refs.length + '. Ctrl+Z lo devuelve todo de una vez.</div>';
+    return h;
+  }
+  function aplicaMasivo(refs, campo, v) {
+    pushUndo();
+    refs.forEach(function (r) {
+      var e = entityOf(r); if (!e) return;
+      escribeCampo(e, campo.k, v);
+      if (FORMATO_TRAS[r.kind]) FORMATO_TRAS[r.kind](e, campo.k);
+    });
+    refresh(); renderSel(); refreshCounts(); scheduleAutosave();
+    setHint('✔ ' + campo.nom + ' cambiado en las ' + refs.length + ' — Ctrl+Z lo devuelve');
+  }
+  function enganchaMasivo(refs) {
+    camposDe(refs).forEach(function (c) {
+      var id = 'prMas_' + c.k.replace('.', '_'), n = $('#' + id);
+      if (!n) return;
+      if (c.tipo === 'rango') {
+        var lbl = $('#' + id + 'N');
+        n.addEventListener('input', function () { if (lbl) lbl.textContent = n.value + '%'; });
+        n.addEventListener('change', function () {
+          var v = parseInt(n.value, 10); if (!isFinite(v)) return;
+          aplicaMasivo(refs, c, v >= 100 ? null : v);
+        });
+      } else if (c.tipo === 'ops') {
+        n.addEventListener('change', function () {
+          if (n.value === '__varios') return;
+          aplicaMasivo(refs, c, n.value === '' ? null : n.value);
+        });
+      } else if (c.tipo === 'swatch') {
+        $$('#' + id + ' .sw').forEach(function (sw) {
+          sw.addEventListener('click', function () { aplicaMasivo(refs, c, sw.dataset.c); });
+        });
+      } else if (c.tipo === 'num') {
+        n.addEventListener('change', function () {
+          var v = parseFloat(n.value);
+          if (n.value === '') return;
+          if (!isFinite(v)) { setHint('⚠ Eso no es un número'); return; }
+          if (c.min != null) v = Math.max(c.min, v);
+          aplicaMasivo(refs, c, v);
+        });
+      } else {
+        n.addEventListener('change', function () {
+          var v = String(n.value || '').trim();
+          if (c.mayus) v = v.toUpperCase();
+          aplicaMasivo(refs, c, v === '' ? null : v);
+        });
+      }
+    });
+  }
+  /* Los dos botones del Format Painter, para el panel de Propiedades. */
+  function botonesFormato(esGrupo, n) {
+    var h = '<div style="display:flex;gap:6px;margin:6px 0">';
+    if (!esGrupo) h += '<button id="prCopiaFmt" style="flex:1" title="Coge el aspecto de esta marca (color, grosor, tamaño, tipo) y luego se lo pasas a las demás con un toque cada una. No copia ni la posición, ni el giro, ni el texto.">' + ICO.svg('pincel') + ' Copiar formato</button>';
+    if (formatoClip) {
+      h += '<button id="prPegaFmt" style="flex:1" title="Deja ' + (esGrupo ? 'las ' + n + ' marcas' : 'esta marca') + ' con el formato de ' + esc(formatoClip.nom) + '">' +
+        ICO.svg('pincel') + ' Pegar formato' + (esGrupo ? ' en las ' + n : '') + '</button>';
+    }
+    return h + '</div>' +
+      (formatoClip ? '<div class="muted small" style="margin-top:-2px">Formato en memoria: <b>' + esc(formatoClip.nom) + '</b></div>' : '');
+  }
+  function enganchaFormato(refs) {
+    var bc = $('#prCopiaFmt');
+    if (bc) bc.addEventListener('click', function () {
+      if (!copiarFormato(refs.length === 1 ? refs[0] : null)) return;
+      setTool('match');
+      setHint('Formato copiado de ' + formatoClip.nom + ' — toca las marcas que quieras dejar iguales · Esc para salir');
+      showProps();
+    });
+    var bp = $('#prPegaFmt');
+    if (bp) bp.addEventListener('click', function () {
+      var n = pegarFormatoEn(refs);
+      if (n) setHint('✔ ' + n + ' marca(s) con el formato de ' + formatoClip.nom);
     });
   }
 
@@ -14652,6 +15007,7 @@
       case 'c': case 'C': setTool('dim'); break;
       case 't': case 'T': setTool('text'); break;
       case 'o': case 'O': setTool('count'); break;
+      case 'f': case 'F': setTool('match'); break;
       case 'p': case 'P': setTool('pen'); break;   // (H es la mano/pan: el resaltador va por el botón)
       case 'k': case 'K': setTool('calibrate'); break;
       case 'Enter':
@@ -14698,6 +15054,7 @@
     { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
     { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
     { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
+    { id: 'match', grp: 'note', ico: 'pincel', nom: 'Match', key: 'F', tip: 'Match Properties / Copiar formato (F): coge el aspecto de una marca — color, grosor, tamaño, tipo — y pásaselo a las demás con un toque cada una. SHIFT+toque cambia el origen.', menu: 'match', menuTip: 'Qué formato está copiado, y coger otro origen' },
     { id: 'count', grp: 'note', ico: 'count', nom: 'Count', key: 'O', tip: 'Count (O): cuenta lo que YA trae el plano del ingeniero — cada toque marca uno y el total va corriendo por hoja y por set', menu: 'count', menuTip: 'Elegir qué se está contando' },
     { id: 'text', grp: 'note', ico: 'text', nom: 'Text', key: 'T', tip: 'Texto (T)' },
     { id: 'leader', grp: 'note', ico: 'callout', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
@@ -15319,6 +15676,17 @@
       html += '<div class="tmItem" data-k="length"><span>📏 Length — distancia entre 2 puntos</span></div>';
       html += '<div class="tmItem" data-k="marea"><span>▦ Area — polígono con sq ft en el plano</span></div>';
       html += '<div class="tmItem" data-k="mperim"><span>⌐ Perimeter — longitud total de una línea</span></div>';
+    } else if (kind === 'match') {
+      html += '<div class="tmHead">Copiar formato</div>';
+      if (formatoClip) {
+        html += '<div class="tmItem" data-k="__nada"><span>En memoria: <b>' + esc(formatoClip.nom) + '</b></span></div>';
+        html += '<div class="tmItem" data-k="__origen"><span>Coger otro origen — el próximo toque</span></div>';
+        html += '<div class="tmItem" data-k="__olvida"><span>Olvidar el formato copiado</span></div>';
+      } else {
+        html += '<div class="tmItem" data-k="__nada"><span>Todavía no hay formato copiado</span></div>';
+        html += '<div class="tmItem" data-k="__origen"><span>El próximo toque coge el origen</span></div>';
+      }
+      html += '<div class="tmPie">Viaja el ASPECTO — color, grosor, tamaño, tipo. No viaja ni la posición, ni el giro, ni el texto escrito.</div>';
     } else if (kind === 'count') {
       html += '<div class="tmHead">¿Qué estás contando?</div>';
       var catsM = catsCount();
@@ -15435,6 +15803,9 @@
             setTool('pline'); pendingAreaLabel = true;
             setHint('MEDIR PERÍMETRO: marca los puntos de la línea (doble clic o Enter termina) — la longitud total queda escrita en el plano');
           }
+        } else if (kind === 'match') {
+          if (k === '__origen') { pincelCogeOrigen = true; setTool('match'); setHint('El próximo toque coge el formato de esa marca'); }
+          else if (k === '__olvida') { formatoClip = null; pincelPuestos = 0; setTool('match'); setHint('Formato olvidado — toca la marca cuyo aspecto quieres copiar'); showProps(); }
         } else if (kind === 'count') {
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
