@@ -938,6 +938,38 @@ body.touch .vX { width: 34px; height: 34px; }
 #canvas rect.visual.fuera { fill: none; stroke: #B9C4D2; stroke-dasharray: 3 3; }
 #canvas rect.visual.cur { stroke: #E06C00; stroke-width: 1.6; fill: rgba(255,140,0,.18); }
 #canvas rect.visual.molde { stroke: #0b84ff; stroke-width: 1.4; fill: rgba(11,132,255,.14); }
+/* Leer la leyenda (E4): el mismo panel flotante que la búsqueda visual, con
+   filas de revisión que llevan el dibujito del ingeniero, el nombre editable
+   y la pareja propuesta de la biblioteca. */
+#leyBox {
+  position: fixed; right: 276px; top: 78px; z-index: 61; width: 360px; max-width: calc(100vw - 16px);
+  background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 14px;
+  box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 20px 44px -14px rgba(7,26,46,.35); overflow: hidden;
+}
+#leyBox.oculto { display: none; }
+#leyCab { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line); cursor: move; touch-action: none; user-select: none; }
+#leyTit { font-weight: 600; font-size: 12px; flex: 1; letter-spacing: .1em; color: var(--mp-ink); }
+#leyCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+#leyCuerpo { padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+#leyCuerpo .bMuted { color: var(--mp-ink-2); line-height: 1.5; }
+#leyCuerpo .vN { font-size: 13px; }
+#leyCuerpo button { padding: 6px 9px; border: 1px solid rgba(27,60,140,.18); border-radius: 9px; background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); color: var(--mp-navy); font-size: 12px; font-weight: 600; cursor: pointer; }
+#leyCuerpo button[disabled] { opacity: .45; cursor: default; }
+.lyLista { max-height: 46vh; overflow: auto; margin: 4px 0; border: 1px solid var(--mp-line); border-radius: 9px; }
+.lyFila { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
+.lyFila:last-child { border-bottom: 0; }
+.lyFila.fuera { opacity: .5; }
+.lyFila input[type=checkbox] { flex: none; margin: 4px 0 0; }
+.lyGlifo { flex: none; width: 56px; height: 40px; object-fit: contain; border: 1px solid var(--mp-line); border-radius: 6px; background: #fff; }
+.lyGlifo.lyVacio { display: inline-block; }
+.lyTxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.lyNom { width: 100%; box-sizing: border-box; font-size: 12px; padding: 3px 6px; border: 1px solid var(--mp-line); border-radius: 6px; }
+.lySel { width: 100%; box-sizing: border-box; font-size: 11px; padding: 3px 4px; border: 1px solid var(--mp-line); border-radius: 6px; background: #fff; }
+.lyDet { font-size: 10.5px; color: var(--mp-ink-2); line-height: 1.35; }
+body.touch #leyBox { right: 8px; top: 76px; width: min(380px, calc(100vw - 16px)); }
+body.touch #leyCab button { width: 34px; height: 34px; }
+body.touch .lyFila { padding: 9px 8px; }
+body.touch .lyNom, body.touch .lySel { font-size: 13px; padding: 6px; }
 body.touch #visualBox { right: 8px; top: 76px; width: min(340px, calc(100vw - 16px)); }
 body.touch #visualCab button { width: 34px; height: 34px; }
 svg.tool-vsearch { cursor: crosshair; }

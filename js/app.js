@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.A';
+  var APP_VERSION = 'v32.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -4903,6 +4903,7 @@
     trim: 'RECORTAR: toca el pedazo de pared, cable o línea que SOBRA y se va (tiene que cruzarlo algo) · el ▾ cambia a Alargar o Partir · Esc para salir',
     match: 'COPIAR FORMATO: toca la marca cuyo aspecto quieres copiar y después las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir',
     vsearch: 'BUSCAR IGUALES: encierra en un marco UN símbolo del plano del ingeniero (dos toques, esquina y esquina) y te busco todos los que se ven igual',
+    leyenda: 'LEER LA LEYENDA: encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero (solo la tabla) y el cerebro te saca las categorías del Count ya nombradas',
     count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
@@ -4948,6 +4949,8 @@
        pincel COGE SU FORMATO — no te hace tocarla otra vez. */
     if (t !== 'match') pincelCogeOrigen = false;
     if (t !== 'vsearch' && visual) { var vb = $('#visualBox'); if (vb) vb.classList.add('oculto'); visual = null; var gv = document.getElementById('gVisual'); if (gv) gv.innerHTML = ''; }
+    // la leyenda NO se cierra al cambiar de herramienta: la lista tarda 30-60 s en llegar y mientras se sigue trabajando
+    if (t !== 'leyenda' && drawing && drawing.mode === 'leyenda') { drawing = null; G.prev.innerHTML = ''; }
     /* Lo pendiente del cofre solo vale para la herramienta que se encendió con
        él: si cambias de herramienta por otro camino, se olvida (si no, el
        siguiente texto saldría con el tamaño de la nota guardada). */
@@ -5205,6 +5208,10 @@
         if (drawing && drawing.mode === 'vsearch') { var a0 = drawing.a; drawing = null; G.prev.innerHTML = ''; vsearchFin(a0, rawP); }
         else { drawing = { mode: 'vsearch', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente'); }
         return;
+      case 'leyenda':
+        if (drawing && drawing.mode === 'leyenda') { var aL = drawing.a; drawing = null; G.prev.innerHTML = ''; leyendaFin(aL, rawP); }
+        else { drawing = { mode: 'leyenda', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente de la tabla'); }
+        return;
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -5242,7 +5249,7 @@
         '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' + gp +
         '<text class="lbl" x="' + ((drawing.last[0] + b[0]) / 2 + 8) + '" y="' + ((drawing.last[1] + b[1]) / 2 - 8) + '" font-size="9" font-weight="bold">' + fmtFtIn(len) + '</text></g>';
       drawing.cursor = b;
-    } else if (drawing && drawing.mode === 'vsearch') {
+    } else if (drawing && (drawing.mode === 'vsearch' || drawing.mode === 'leyenda')) {
       var vx = Math.min(drawing.a[0], p[0]), vy = Math.min(drawing.a[1], p[1]);
       G.prev.innerHTML = '<g class="preview"><rect x="' + vx + '" y="' + vy + '" width="' + Math.abs(p[0] - drawing.a[0]) +
         '" height="' + Math.abs(p[1] - drawing.a[1]) + '" fill="rgba(11,132,255,.10)" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
@@ -9130,6 +9137,335 @@
     totales: rutasTotales,
     csv: rutasCsvTexto,
     largo: largoRuta
+  };
+
+  /* ==================================================================
+     LECTOR DE LEYENDA (punto E4) — la tabla de símbolos del ingeniero,
+     leída con visión, se vuelve categorías del Count ya nombradas.
+
+     Cómo se usa: Count ▾ → «Leer la leyenda del plano…», dos toques que
+     encierren la TABLA de símbolos (solo la tabla, no la hoja entera), y en
+     30-60 s sale la lista: una fila por símbolo con su dibujito recortado,
+     el texto tal cual lo imprimió el ingeniero, y la pareja que le propone
+     la biblioteca de takeoff (tus tools de Bluebeam). Edgar revisa, quita
+     las que no son, corrige el nombre si quiere, y «Crear categorías».
+
+     Lo que ESTO no hace: no cuenta nada. Da los nombres. Contar sigue
+     siendo Count (a mano) o Buscar iguales (visual). Y la pareja de la
+     biblioteca es una PROPUESTA con su porcentaje: si no llega al 55 % se
+     deja «sin pareja» y la categoría nace con el texto del ingeniero, que
+     al estimador llega por alias si algún día se le pone.
+
+     La imagen sale del PDF vivo si lo hay (nítida, como el modo hires) y
+     del raster de fondo si no. Va al cerebro con `leyenda: true` y vuelve
+     `{leyenda: {simbolos, lineas, notas}}` (worker: tool leyenda_leida).
+     ================================================================== */
+  var ley = null;   // { cv, w, h, rect, filas: [{desc, tag, fam, mont, caja, nota, glifo, parejas, sel, nom, fuera}], lineas, notas, err }
+  var LEY_FAM_NOM = { receptacle: 'receptáculo', switch: 'switch', lighting: 'luminaria', exit_emergency: 'exit / emergencia', fire_alarm: 'fire alarm', data_comm: 'data / voz', panel_equipment: 'panel / equipo', junction_box: 'caja', motor_mech: 'motor / mecánico', security_cctv: 'seguridad / CCTV', av_sound: 'sonido / AV', grounding: 'tierra', other: 'otro' };
+  /* Sin pareja en la biblioteca, la categoría nace con el código de partida
+     de su familia: es lo que el estimador necesita para agrupar. */
+  var LEY_FAM_CODIGO = { receptacle: '10-DEV', switch: '10-DEV', lighting: '11-LIGHT', exit_emergency: '11-LIGHT', fire_alarm: '13-LV', data_comm: '13-LV', security_cctv: '13-LV', av_sound: '13-LV', panel_equipment: '05-PANEL', motor_mech: '05-PANEL', junction_box: '08-ROUGH', grounding: '07-GND' };
+
+  /* --- el recorte del fondo, a la mejor resolución que haya --- */
+  /* r = {x0,y0,x1,y1} en mundo. cb(rec) con rec = {cv, w, h, b64, rect} o
+     cb(null, mensaje). 1568 px de lado largo: es lo que la API de imágenes
+     acepta sin re-encoger, y a una tabla de 12" le da 130 px por pulgada —
+     letra de 1/8" = 16 px, se lee. */
+  function recorteFondo(r, cb) {
+    var bg = state.bg;
+    if (!bg || !bg.url) { cb(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
+    var x0 = Math.max(bg.x, Math.min(r.x0, r.x1)), y0 = Math.max(bg.y, Math.min(r.y0, r.y1));
+    var x1 = Math.min(bg.x + bg.w, Math.max(r.x0, r.x1)), y1 = Math.min(bg.y + bg.h, Math.max(r.y0, r.y1));
+    var W = x1 - x0, H = y1 - y0;
+    if (W < 2 || H < 2) { cb(null, 'El marco salió vacío o fuera del plano. Encierra la tabla de la leyenda.'); return; }
+    // una hoja ARCH D entera son 36": a 1568 px la letra de la leyenda sale de
+    // 5 px y no se lee. Se pide la TABLA, no la hoja.
+    var pulgPapel = bg.paperW && bg.w ? Math.max(W, H) * (bg.paperW / bg.w) : null;
+    if (pulgPapel !== null && pulgPapel > 26) {
+      cb(null, 'Ese marco abarca ' + Math.round(pulgPapel) + '" de papel: es la hoja casi entera y la letra saldría ilegible. Encierra SOLO la tabla de la leyenda (suele medir 6" a 12").');
+      return;
+    }
+    var MAX = 1568, k = MAX / Math.max(W, H);
+    var cw = Math.max(1, Math.round(W * k)), ch = Math.max(1, Math.round(H * k));
+    var rec = pdfLive[state.curSheet];
+    function listo(cv) {
+      var b64 = cv.toDataURL('image/jpeg', 0.88).split(',')[1];
+      cb({ cv: cv, w: cw, h: ch, b64: b64, rect: { x0: x0, y0: y0, x1: x1, y1: y1 } });
+    }
+    function delRaster() {
+      var im = new Image();
+      im.onload = function () {
+        var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+        var ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+        var sx = (x0 - bg.x) / bg.w * im.naturalWidth, sy = (y0 - bg.y) / bg.h * im.naturalHeight;
+        var sw = W / bg.w * im.naturalWidth, sh = H / bg.h * im.naturalHeight;
+        ctx.drawImage(im, sx, sy, sw, sh, 0, 0, cw, ch);
+        listo(cv);
+      };
+      im.onerror = function () { cb(null, 'No pude leer la imagen del plano de fondo.'); };
+      im.src = bg.url;
+    }
+    if (!rec || bg.origUrl) { delRaster(); return; }
+    // PDF vivo: se renderiza SOLO la región, a la escala que la deja en 1568 px
+    rec.doc.getPage(rec.page).then(function (page) {
+      var vp1 = page.getViewport({ scale: 1 });
+      var S = cw / (vp1.width * (W / bg.w));
+      var vp = page.getViewport({ scale: S });
+      var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+      var ox = (x0 - bg.x) / bg.w * vp.width, oy = (y0 - bg.y) / bg.h * vp.height;
+      return page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -ox, -oy] }).promise.then(function () { listo(cv); });
+    }).catch(function () { delRaster(); });
+  }
+
+  /* --- casar el texto del ingeniero con la biblioteca de takeoff --- */
+  var LEY_PARA = { THE: 1, AND: 1, WITH: 1, AT: 1, TO: 1, OF: 1, IN: 1, ON: 1, OR: 1, PER: 1, AS: 1, NOTED: 1, TYP: 1, TYPICAL: 1, MTD: 1, MOUNTED: 1, MOUNT: 1, AFF: 1, AFG: 1, ABOVE: 1, FINISHED: 1, FLOOR: 0, HIGH: 1, UNLESS: 1, OTHERWISE: 1, UON: 1, SEE: 1, SCHEDULE: 1, DRAWINGS: 1, PLANS: 1, NEW: 1, EXISTING: 0, PROVIDE: 1, INSTALL: 1, FURNISHED: 1, BY: 1, OWNER: 0, VERIFY: 1, LOCATION: 1, FIELD: 1, W: 1, V: 1 };
+  var LEY_SIN = { RECEPT: 'RECEPTACLE', RECEPTACLES: 'RECEPTACLE', OUTLET: 'RECEPTACLE', OUTLETS: 'RECEPTACLE', GFI: 'GFCI', GROUND: 'GFCI', FAULT: 'GFCI', INTERRUPTER: 'GFCI', WEATHERPROOF: 'WP', WEATHER: 'WP', PROOF: 'WP', RESISTANT: 'WP', SW: 'SWITCH', SWITCHES: 'SWITCH', LIGHT: 'LIGHT', LIGHTING: 'LIGHT', FIXTURE: 'LIGHT', LUMINAIRE: 'LIGHT', LUMINAIRES: 'LIGHT', FIXTURES: 'LIGHT', SIGN: 'SIGN', EMERG: 'EMERGENCY', EMER: 'EMERGENCY', DET: 'DETECTOR', DETECTORS: 'DETECTOR', JB: 'JUNCTION', 'J-BOX': 'JUNCTION', BOX: 'BOX', BOXES: 'BOX', TELE: 'PHONE', TELEPHONE: 'PHONE', TEL: 'PHONE', COMPUTER: 'DATA', COMM: 'DATA', COMMUNICATION: 'DATA', VOICE: 'PHONE', QUAD: 'QUADPLEX', FOURPLEX: 'QUADPLEX', DBL: 'DOUBLE', '1P': 'SINGLE', SP: 'SINGLE', '3W': 'THREE', '3-WAY': 'THREE WAY', '4-WAY': 'FOUR WAY', DIM: 'DIMMER', OCC: 'OCCUPANCY', SENSOR: 'SENSOR', THERMOSTAT: 'THERMOSTAT', 'T-STAT': 'THERMOSTAT', DISC: 'DISCONNECT', DISCONNECT: 'DISCONNECT', XFMR: 'TRANSFORMER', PNL: 'PANEL', PANELBOARD: 'PANEL', CKT: 'CIRCUIT', BKR: 'CB', BREAKER: 'CB', AMP: 'A', AMPS: 'A', VOLT: 'V', VOLTS: 'V' };
+  function leyTokens(s) {
+    var t = String(s || '').toUpperCase().replace(/[“”]/g, '"').replace(/(\d)\s*(AMPS?|A)\b/g, '$1A').replace(/(\d)\s*V\b/g, '$1V')
+      .replace(/[,;:()\[\]\/+\-]/g, ' ').replace(/["'.]/g, ' ').replace(/\s+/g, ' ').trim();
+    var out = {}, seen = {};
+    t.split(' ').forEach(function (w) {
+      if (!w) return;
+      w = LEY_SIN[w] || w;
+      w.split(' ').forEach(function (u) {
+        if (LEY_PARA[u] === 1) return;
+        if (/^\d+V$/.test(u)) return;                 // 120V / 277V no distinguen items en el catálogo
+        if (/^\+?\d+$/.test(u) && !/A$/.test(u)) return;   // la altura (+18) no es el item
+        if (!seen[u]) { seen[u] = 1; out[u] = 1; }
+      });
+    });
+    return Object.keys(out);
+  }
+  var _leyIdx = null;
+  function leyIndice() {
+    if (_leyIdx) return _leyIdx;
+    var idx = [];
+    tlibSets().forEach(function (st) {
+      st.items.forEach(function (it) {
+        if (it.tipo !== 'conteo' || it.descartado) return;
+        idx.push({ set: st, it: it, tok: leyTokens(it.subj + (it.item && it.item !== it.subj ? ' ' + it.item : '')), fabrica: st.nom === 'Electrical Tool Set' });
+      });
+    });
+    _leyIdx = idx;
+    return idx;
+  }
+  /* Devuelve hasta 3 parejas [{k, nom, sc, set, it}] de mayor a menor. El
+     parecido es intersección / unión de palabras normalizadas, con un plus
+     por tener item en el catálogo (llega al estimador con precio) y un
+     castigo al Electrical Tool Set de fábrica (109 de sus 119 no tienen
+     pareja y varios de sus alias son dudosos). El amperaje cuenta doble: un
+     20A y un 15A del mismo receptáculo son dos items distintos. */
+  function leyendaCasa(desc, tag) {
+    var q = leyTokens(desc + ' ' + (tag || ''));
+    if (!q.length) return [];
+    var res = [];
+    leyIndice().forEach(function (e) {
+      var inter = 0, peso = 0;
+      q.forEach(function (w) { var p = /^\d+A$/.test(w) ? 2 : 1; peso += p; if (e.tok.indexOf(w) >= 0) inter += p; });
+      if (!inter) return;
+      var pesoE = 0; e.tok.forEach(function (w) { pesoE += /^\d+A$/.test(w) ? 2 : 1; });
+      var sc = inter / (peso + pesoE - inter);
+      if (e.it.item) sc += 0.06;
+      if (e.fabrica) sc -= 0.10;
+      // amperaje distinto = no es el mismo item, aunque el resto coincida
+      var qa = q.filter(function (w) { return /^\d+A$/.test(w); }), ea = e.tok.filter(function (w) { return /^\d+A$/.test(w); });
+      if (qa.length && ea.length && qa[0] !== ea[0]) sc -= 0.25;
+      if (sc <= 0.15) return;
+      res.push({ k: tlibKey(e.set.nom, e.it.subj), nom: e.it.subj, sc: Math.max(0, Math.min(1, sc)), set: e.set.nom, it: e.it });
+    });
+    res.sort(function (a, b) { return b.sc - a.sc; });
+    return res.slice(0, 3);
+  }
+  var LEY_UMBRAL = 0.55;
+
+  /* --- el flujo --- */
+  function abreLey() { var b = $('#leyBox'); if (b) b.classList.remove('oculto'); }
+  function cierraLey() {
+    var b = $('#leyBox'); if (b) b.classList.add('oculto');
+    if (ley && ley.cv) { ley.cv.width = 1; ley.cv.height = 1; }
+    ley = null;
+    if (tool === 'leyenda') setTool('select');
+  }
+  var leyEnVuelo = false;
+  function leyendaFin(a, b) {
+    var r = { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+    if (leyEnVuelo) { setHint('Ya hay una leyenda leyéndose — espera a que termine'); return; }
+    var c = cerebroCfg();
+    if (!c.url) { uiAlert('El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    abreLey();
+    pintaLey('Recortando la tabla…');
+    recorteFondo(r, function (rec, err) {
+      if (!rec) { pintaLey(null, err); return; }
+      ley = { cv: rec.cv, w: rec.w, h: rec.h, rect: rec.rect, filas: null };
+      leyEnVuelo = true;
+      var hoja = state.curSheet;
+      pintaLey('Leyendo la leyenda con el cerebro… (30-60 s). Puedes seguir trabajando.');
+      setHint('Leyendo la leyenda del plano…');
+      pideCerebro({ imagen: { b64: rec.b64, tipo: 'image/jpeg' }, leyenda: true }).then(function (d) {
+        leyEnVuelo = false;
+        if (hoja !== state.curSheet || !ley) return;          // cambió de hoja o cerró: no se pinta encima de otra cosa
+        leyendaRecibe(d);
+      }).catch(function (e) {
+        leyEnVuelo = false;
+        if (!ley) return;
+        pintaLey(null, 'No hubo respuesta del cerebro (' + (e && e.message ? e.message : 'red') + '). Revisa la conexión en Ajustes del asistente.');
+      });
+    });
+  }
+  /* Lo que devuelve el worker → las filas de revisión. Cada fila trae su
+     dibujito (recortado de la caja que dijo el modelo) y hasta 3 parejas. */
+  function leyendaRecibe(d) {
+    if (!ley) return;
+    if (!d || d.error) { pintaLey(null, (d && d.error) || 'El cerebro no contestó.' + (d && d.detalle ? '\n' + d.detalle : '')); return; }
+    var L = d.leyenda;
+    if (!L || !Array.isArray(L.simbolos)) {
+      pintaLey(null, 'El cerebro contestó pero no en el formato de leyenda. Si el worker está viejo: en la laptop, cd max-power-app\\mxp-brain · git pull · wrangler deploy');
+      return;
+    }
+    var enP = tlibEnProyecto();
+    ley.lineas = Array.isArray(L.lineas) ? L.lineas.map(String).slice(0, 30) : [];
+    ley.notas = String(L.notas || '');
+    ley.filas = L.simbolos.slice(0, 80).map(function (s, i) {
+      var desc = String((s && s.descripcion) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      var f = {
+        i: i, desc: desc, tag: String((s && s.tag) || '').trim().slice(0, 8),
+        fam: LEY_FAM_NOM[s && s.familia] ? s.familia : 'other',
+        mont: String((s && s.montaje) || 'unknown'), nota: String((s && s.nota) || '').slice(0, 120),
+        caja: s && s.caja, glifo: leyGlifo(s && s.caja),
+        parejas: desc ? leyendaCasa(desc, s && s.tag) : [],
+        nom: desc, fuera: !desc
+      };
+      // la pareja propuesta: la mejor si pasa el umbral; si no, sin pareja
+      f.sel = (f.parejas[0] && f.parejas[0].sc >= LEY_UMBRAL) ? f.parejas[0].k : '';
+      // ya está en el proyecto (por alias o por nombre): se muestra, no se repite
+      var kSel = f.sel ? f.sel.slice(f.sel.indexOf('|') + 1).toUpperCase() : '';
+      f.ya = !!(enP[desc.toUpperCase()] || (kSel && enP[kSel]));
+      if (f.ya) f.fuera = true;
+      return f;
+    });
+    pintaLey();
+    setHint('Leyenda leída: ' + ley.filas.length + ' símbolo(s). Revisa la lista, quita los que no son, y crea las categorías.');
+  }
+  /* El recorte del símbolo, para verlo en la fila. 56 px de alto, JPEG chico. */
+  function leyGlifo(caja) {
+    if (!ley || !ley.cv || !caja) return '';
+    var W = ley.w, H = ley.h;
+    var x0 = Math.max(0, Math.min(100, +caja.x0 || 0)) / 100 * W, x1 = Math.max(0, Math.min(100, +caja.x1 || 0)) / 100 * W;
+    var y0 = Math.max(0, Math.min(100, +caja.y0 || 0)) / 100 * H, y1 = Math.max(0, Math.min(100, +caja.y1 || 0)) / 100 * H;
+    var m = Math.max(3, (x1 - x0) * 0.12, (y1 - y0) * 0.12);
+    x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(W, x1 + m); y1 = Math.min(H, y1 + m);
+    if (x1 - x0 < 4 || y1 - y0 < 4) return '';
+    var k = Math.min(1, 56 / (y1 - y0), 120 / (x1 - x0));
+    var cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round((x1 - x0) * k)); cv.height = Math.max(1, Math.round((y1 - y0) * k));
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(ley.cv, x0, y0, x1 - x0, y1 - y0, 0, 0, cv.width, cv.height);
+    var u = cv.toDataURL('image/jpeg', 0.8);
+    cv.width = 1; cv.height = 1;
+    return u;
+  }
+  function pintaLey(estado, err) {
+    var c = $('#leyCuerpo'); if (!c) return;
+    if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>'; enganchaLeyOtra(); return; }
+    if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
+    if (!ley || !ley.filas) {
+      c.innerHTML = '<div class="bMuted">Encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero (solo la tabla, no la hoja entera) y el cerebro te saca las categorías del Count ya nombradas.</div>';
+      return;
+    }
+    var vivas = ley.filas.filter(function (f) { return !f.fuera; });
+    var h = '<div class="vN"><b>' + ley.filas.length + '</b> símbolo(s) leídos · <b>' + vivas.length + '</b> para crear' +
+      (ley.filas.some(function (f) { return f.ya; }) ? ' <span class="muted">· ' + ley.filas.filter(function (f) { return f.ya; }).length + ' ya en el proyecto</span>' : '') + '</div>';
+    if (!ley.filas.length) {
+      h += '<div class="bMuted">No se leyó ningún símbolo.' + (ley.notas ? ' El cerebro dice: ' + esc(ley.notas) : '') + '</div>';
+      h += '<button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>';
+      c.innerHTML = h; enganchaLeyOtra(); return;
+    }
+    h += '<div class="muted small">El nombre se puede corregir. La pareja es lo que te propone la biblioteca, con su parecido: revísala. Sin pareja, la categoría nace con el texto del ingeniero y llega al estimador por alias cuando se le ponga.</div>';
+    h += '<div class="lyLista" id="lyLista">';
+    ley.filas.forEach(function (f) {
+      h += '<div class="lyFila' + (f.fuera ? ' fuera' : '') + '" data-i="' + f.i + '">' +
+        '<input type="checkbox" class="lyOn" data-i="' + f.i + '"' + (f.fuera ? '' : ' checked') + (f.ya ? ' title="Ya está en el proyecto"' : '') + '>' +
+        (f.glifo ? '<img class="lyGlifo" src="' + f.glifo + '" alt="">' : '<span class="lyGlifo lyVacio"></span>') +
+        '<div class="lyTxt">' +
+        '<input class="lyNom" data-i="' + f.i + '" value="' + esc(f.nom) + '" placeholder="nombre de la categoría"' + (f.fuera ? ' disabled' : '') + '>' +
+        '<select class="lySel" data-i="' + f.i + '"' + (f.fuera ? ' disabled' : '') + '>' +
+        '<option value=""' + (f.sel ? '' : ' selected') + '>— sin pareja en la biblioteca —</option>' +
+        f.parejas.map(function (p) {
+          return '<option value="' + esc(p.k) + '"' + (f.sel === p.k ? ' selected' : '') + '>' + Math.round(p.sc * 100) + '% · ' + esc(p.nom) + (p.it.item ? '' : ' (sin item)') + ' · ' + esc(p.set) + '</option>';
+        }).join('') + '</select>' +
+        '<div class="lyDet">' + esc(LEY_FAM_NOM[f.fam] || f.fam) + (f.tag ? ' · tag <b>' + esc(f.tag) + '</b>' : '') + (f.mont && f.mont !== 'unknown' ? ' · ' + esc(f.mont) : '') +
+        (f.ya ? ' · <b>ya en el proyecto</b>' : '') + (f.nota ? ' · ' + esc(f.nota) : '') + '</div>' +
+        '</div></div>';
+    });
+    h += '</div>';
+    if (ley.lineas.length) h += '<div class="muted small">Tipos de línea que trae la leyenda (no se cuentan; van por Rutas o por Homerun): ' + esc(ley.lineas.join(' · ')) + '</div>';
+    if (ley.notas) h += '<div class="muted small">Notas del cerebro: ' + esc(ley.notas) + '</div>';
+    h += '<button id="leyCrear" style="width:100%;margin-top:6px"' + (vivas.length ? '' : ' disabled') + '>Crear ' + (vivas.length === 1 ? 'la categoría' : 'las ' + vivas.length + ' categorías') + '</button>';
+    h += '<button id="leyOtra" style="width:100%;margin-top:4px">Encerrar otra tabla</button>';
+    h += '<div class="muted small" style="margin-top:6px">Esto pone los NOMBRES. Contar sigue siendo tuyo: Count a mano, o Buscar iguales con el dibujito de cada fila.</div>';
+    c.innerHTML = h;
+    var lista = $('#lyLista');
+    if (lista) {
+      lista.addEventListener('change', function (ev) {
+        var t = ev.target, i = +t.dataset.i, f = ley && ley.filas && ley.filas[i]; if (!f) return;
+        if (t.classList.contains('lyOn')) { f.fuera = !t.checked; pintaLey(); return; }
+        if (t.classList.contains('lyNom')) { f.nom = String(t.value || '').trim().slice(0, 60); return; }
+        if (t.classList.contains('lySel')) { f.sel = t.value; return; }
+      });
+    }
+    var bC = $('#leyCrear'); if (bC) bC.addEventListener('click', leyendaCrea);
+    enganchaLeyOtra();
+  }
+  function enganchaLeyOtra() { var b = $('#leyOtra'); if (b) b.addEventListener('click', function () { if (ley && ley.cv) { ley.cv.width = 1; } ley = null; pintaLey(); setTool('leyenda'); }); }
+  /* Crear las categorías: con pareja → nace como la de la biblioteca (alias,
+     item, código, color de Bluebeam, el set). Sin pareja → con el texto del
+     ingeniero y el código de su familia. Un paso de deshacer para todas. */
+  function leyendaCrea() {
+    if (!ley || !ley.filas) return;
+    var vivas = ley.filas.filter(function (f) { return !f.fuera && (f.nom || f.desc); });
+    if (!vivas.length) return;
+    var enP = tlibEnProyecto(), nuevas = [], saltadas = 0;
+    pushUndo();
+    vivas.forEach(function (f) {
+      var nom = (f.nom || f.desc).trim().slice(0, 60);
+      var par = f.sel ? tlibItemDe(f.sel) : null;
+      var kAlias = par ? par.it.subj.toUpperCase() : nom.toUpperCase();
+      if (enP[kAlias]) { saltadas++; return; }
+      var c;
+      if (par) c = nuevaCatCount(nom, { alias: par.it.subj, set: par.set.nom, item: par.it.item, unidad: par.it.unidad, color: par.it.color, codigo: par.it.codigo });
+      else c = nuevaCatCount(nom, { codigo: LEY_FAM_CODIGO[f.fam] || CODIGO_DEFECTO });
+      // el dibujito del ingeniero viaja con la categoría: es la referencia
+      // para reconocerla en el plano y para Buscar iguales después
+      if (f.glifo && f.glifo.length < 6000) c.glifo = f.glifo;
+      if (f.tag) c.tag = f.tag;
+      enP[kAlias] = c; nuevas.push(c);
+    });
+    if (!nuevas.length) { popUndoVacio(); setHint('Esas categorías ya estaban en el proyecto'); return; }
+    catActiva = nuevas[0].id;
+    cierraLey();
+    refresh(); refreshCounts();
+    setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : '') + ' — están en Count ▾ y en el panel Conteo. Ahora sí: a contar.');
+  }
+  function enganchaLey() {
+    var b = $('#leyBox'); if (!b) return;
+    arrastraPanel($('#leyCab'), b);
+    var bc = $('#leyCerrar'); if (bc) bc.addEventListener('click', cierraLey);
+  }
+  enganchaLey();
+  window.__leyendaDbg = {
+    lee: function (rect) { leyendaFin([rect.x0, rect.y0], [rect.x1, rect.y1]); },
+    recibe: function (d) { if (!ley) ley = { cv: null, w: 1, h: 1, filas: null }; leyendaRecibe(d); },
+    recorta: function (rect, cb) { recorteFondo(rect, cb); },
+    casa: leyendaCasa,
+    tokens: leyTokens,
+    filas: function () { return ley && ley.filas ? ley.filas.map(function (f) { return { desc: f.desc, nom: f.nom, sel: f.sel, fuera: !!f.fuera, ya: !!f.ya, glifo: !!f.glifo, parejas: f.parejas.map(function (p) { return [p.nom, Math.round(p.sc * 100)]; }) }; }) : null; },
+    marca: function (i, v) { if (ley && ley.filas && ley.filas[i]) { ley.filas[i].fuera = !v; pintaLey(); } },
+    crea: leyendaCrea,
+    estado: function () { return ley ? { filas: ley.filas ? ley.filas.length : null, w: ley.w, h: ley.h, rect: ley.rect } : null; }
   };
 
 
@@ -18309,6 +18645,7 @@
       });
       html += '<div class="tmHead">Contar lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
+      html += '<div class="tmItem" data-k="__leyenda"><span>Leer la leyenda del plano (categorías con nombre)…</span></div>';
       html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
       if (catsM.length) {
         html += '<div class="tmHead">Categorías</div>';
@@ -18455,6 +18792,7 @@
           else if (k === '__olvida') { formatoClip = null; pincelPuestos = 0; setTool('match'); setHint('Formato olvidado — toca la marca cuyo aspecto quieres copiar'); showProps(); }
         } else if (kind === 'count') {
           if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
+          if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
