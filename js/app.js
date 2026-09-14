@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.M';
+  var APP_VERSION = 'v31.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -275,6 +275,8 @@
   window.__selGrupoDbg = function (g) { selGroup = g; sel = null; renderSel(); showProps(); };
   window.__mxpSelDbg = function () { return sel ? { kind: sel.kind, id: sel.id } : (selGroup ? { grupo: selGroup.length } : null); };
   window.__conteoDbg = {
+    csv: function () { return conteoCsvTexto(); },
+    takeoff: function (soloHoja) { return buildTakeoffEntries(soloHoja); },
     hoja: function () { return conteoDeHoja(); },
     set: function () { return conteoDelProyecto(); },
     nueva: function (nom) { var c = nuevaCatCount(nom); catActiva = c.id; setTool('count'); refreshCounts(); return c.id; },
@@ -8303,11 +8305,21 @@
      porque "están muy grandes", las marcas del conteo bajan con ellos. */
   function countR() { return 9 * ((state.symEsc || 0.5) / 0.5); }
 
-  function nuevaCatCount(nom) {
+  /* extra (opcional) viene de la Biblioteca de takeoff: alias = el Subject de
+     Bluebeam que el estimador ya entiende, set = de qué tool set salió, item =
+     el item del catálogo si casó exacto, color = el original de Bluebeam. */
+  function nuevaCatCount(nom, extra) {
     var a = catsCount();
     var col = COUNT_COLORES[a.length % COUNT_COLORES.length][0];
     var frm = COUNT_FORMA_ORDEN[Math.floor(a.length / COUNT_COLORES.length) % COUNT_FORMA_ORDEN.length];
     var c = { id: uid(), nom: String(nom || '').trim().slice(0, 60) || ('Conteo ' + (a.length + 1)), color: col, forma: frm, num: true };
+    if (extra && typeof extra === 'object') {
+      if (extra.alias) c.alias = String(extra.alias).slice(0, 80);
+      if (extra.set) c.set = String(extra.set).slice(0, 40);
+      if (extra.item) c.item = String(extra.item).slice(0, 80);
+      if (extra.unidad) c.unidad = String(extra.unidad).slice(0, 8);
+      if (extra.color && /^#[0-9a-f]{6}$/i.test(extra.color)) c.color = extra.color;
+    }
     a.push(c);
     return c;
   }
@@ -8463,6 +8475,13 @@
     var cats = catsCount();
     if (!cats.length) { uiAlert('Todavía no hay ninguna categoría de conteo.'); return; }
     var hojas = state.sheets || [];
+    var csv = conteoCsvTexto();
+    saveFile((state.project.name || 'proyecto') + '_conteo.csv', csv);
+    setHint('Conteo exportado a CSV (' + cats.length + ' categoría(s) × ' + hojas.length + ' hoja(s))');
+  }
+  function conteoCsvTexto() {
+    var cats = catsCount();
+    var hojas = state.sheets || [];
     var porHoja = hojas.map(function (sh, i) {
       if (i === state.curSheet) return conteoDeHoja();
       var m = {};
@@ -8474,16 +8493,14 @@
       }
       return m;
     });
-    var rows = [['Categoría'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
+    var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
     cats.forEach(function (c) {
       var tot = 0;
-      var fila = [c.nom].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
+      var fila = [c.nom, c.alias || c.nom, c.item || '', c.set || ''].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
       fila.push(tot);
       rows.push(fila);
     });
-    var csv = '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
-    saveFile((state.project.name || 'proyecto') + '_conteo.csv', csv);
-    setHint('Conteo exportado a CSV (' + cats.length + ' categoría(s) × ' + hojas.length + ' hoja(s))');
+    return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
   }
 
   /* --- el bloque del conteo dentro del panel Materiales --- */
@@ -8502,6 +8519,7 @@
       totH += nh; totS += ns;
       h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
         '<td><span class="cntChip" style="background:' + esc(c.color) + '"></span>' + esc(c.nom) +
+        (c.item ? ' <span class="muted small" title="Item del catálogo del estimador">· catálogo</span>' : (c.alias ? ' <span class="muted small" title="Tool de Bluebeam sin item en el catálogo: al estimador llega por alias">· sin item</span>' : '')) +
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
         '<td class="n">' + nh + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     });
@@ -8509,11 +8527,13 @@
     if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
     h += '<tr><td colspan="2" style="padding-top:6px">' +
       '<button id="cntNueva" style="width:100%;margin-bottom:4px" title="Crear otra categoría de conteo">Nueva categoría de conteo</button>' +
+      '<button id="cntTlib" style="width:100%;margin-bottom:4px" title="Tus 17 tool sets de Bluebeam (Boxes, Receptacles, Lights, Fire Alarm…): eliges qué contar y cada categoría llega al estimador con el nombre que ya entiende">Biblioteca de takeoff</button>' +
       '<button id="cntCsv" style="width:100%" title="Exportar el conteo a CSV: una columna por hoja y el total del set">Conteo a CSV</button></td></tr>';
     return h;
   }
   function enganchaConteoPanel() {
     var bN = $('#cntNueva'); if (bN) bN.addEventListener('click', pideNuevaCat);
+    var bT = $('#cntTlib'); if (bT) bT.addEventListener('click', abreTlib);
     var bC = $('#cntCsv'); if (bC) bC.addEventListener('click', conteoCsv);
     $$('#countsBody tr.cntFila').forEach(function (tr) {
       tr.addEventListener('click', function () {
@@ -8525,6 +8545,163 @@
       });
     });
   }
+
+  /* ==================================================================
+     BIBLIOTECA DE TAKEOFF (punto E1)
+     Los 17 tool sets de Bluebeam de Edgar, ya cruzados con el catálogo del
+     estimador (js/takeoff-lib.js, generado por tools/genera-takeoff-lib.js).
+     Aquí NO se cuenta nada: se eligen categorías. Cada una nace con el
+     Subject de Bluebeam como alias — el nombre que el estimador entiende —
+     y, si casó exacto, con el item del catálogo. Los tools de LARGO
+     (Feeders, Branch Circuits) se ven pero no se añaden: eso va por Medir /
+     Cable y es el punto E5.
+     ================================================================== */
+  var tlibAbiertos = {};          // tool sets desplegados en el panel
+  var tlibMarcados = {};          // subj marcados con el checkbox (por set|subj)
+  function tlibSets() { var L = window.TAKEOFF_LIB; return (L && Array.isArray(L.sets)) ? L.sets : []; }
+  function tlibKey(setNom, subj) { return setNom + '|' + subj; }
+  /* Qué categorías del proyecto vienen ya de la biblioteca: por alias, o por
+     nombre si la creó a mano con el mismo texto. */
+  function tlibEnProyecto() {
+    var m = {};
+    catsCount().forEach(function (c) { var k = String(c.alias || c.nom || '').trim().toUpperCase(); if (k) m[k] = c; });
+    return m;
+  }
+  function tlibFiltroTxt() { var i = $('#tlibTxt'); return i ? String(i.value || '').trim().toUpperCase() : ''; }
+  function tlibPasaFiltro(it, q, soloCat) {
+    if (soloCat && !it.item) return false;
+    if (!q) return true;
+    var pal = q.split(/\s+/);
+    var txt = (it.subj + ' ' + (it.item || '') + ' ' + (it.material || '')).toUpperCase();
+    return pal.every(function (w) { return txt.indexOf(w) >= 0; });
+  }
+  function pintaTlib() {
+    var L = $('#tlibLista'); if (!L) return;
+    var sets = tlibSets();
+    if (!sets.length) { L.innerHTML = '<div class="bMuted">La biblioteca no cargó (js/takeoff-lib.js). Recarga la app.</div>'; return; }
+    var q = tlibFiltroTxt(), soloCat = !!($('#tlibSoloCat') && $('#tlibSoloCat').checked);
+    var enP = tlibEnProyecto();
+    var h = '', nVis = 0, nMarc = 0;
+    sets.forEach(function (st) {
+      var vis = st.items.filter(function (it) { return tlibPasaFiltro(it, q, soloCat); });
+      if (!vis.length) return;
+      var abierto = q ? true : !!tlibAbiertos[st.nom];
+      var nYa = 0, nLargo = 0, nCat = 0;
+      st.items.forEach(function (it) { if (it.tipo === 'largo') nLargo++; else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
+      var nCont = st.items.length - nLargo;
+      h += '<div class="tlSet' + (abierto ? ' on' : '') + '" data-set="' + esc(st.nom) + '">' +
+        '<span class="tlFlecha"></span><span class="tlNom">' + esc(st.nom) + '</span>' +
+        '<span class="tlN">' + (nCont ? nCont + ' ' + (nCont === 1 ? 'tool' : 'tools') : '') + (nLargo ? (nCont ? ' · ' : '') + nLargo + ' de largo' : '') +
+        (nYa ? ' · <b>' + nYa + ' en el proyecto</b>' : '') + '</span>' +
+        (nCont && nYa < nCont ? '<button class="tlTodo" data-set="' + esc(st.nom) + '" title="Añadir al proyecto todos los tools de conteo de este set que aún no estén">Todo el set</button>' : '') +
+        '</div>';
+      if (!abierto) return;
+      vis.forEach(function (it) {
+        nVis++;
+        var ya = it.tipo !== 'largo' && enP[it.subj.toUpperCase()];
+        var k = tlibKey(st.nom, it.subj);
+        var marc = !ya && it.tipo !== 'largo' && tlibMarcados[k]; if (marc) nMarc++;
+        var det;
+        if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
+        else if (ya) det = 'ya en el proyecto';
+        else if (it.item) det = (it.item === it.subj ? 'en el catálogo' : 'catálogo: ' + esc(it.item)) + (it.unidad ? ' · ' + esc(it.unidad) : '');
+        else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '');
+        h += '<label class="tlFila' + (ya ? ' ya' : '') + (it.tipo === 'largo' ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
+          '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo') ? ' disabled' : '') + '>' +
+          '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
+          '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + '</span></span></label>';
+      });
+    });
+    if (!h) h = '<div class="bMuted">Nada casa con "' + esc(q) + '"' + (soloCat ? ' entre los que tienen item en el catálogo' : '') + '.</div>';
+    L.innerHTML = h;
+    var nSel = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).length;
+    var sp = $('#tlibSel'); if (sp) sp.textContent = nSel ? nSel + ' marcado(s)' : '';
+    var bA = $('#tlibAnadir'); if (bA) bA.disabled = !nSel;
+    var nT = $('#tlibN'); if (nT) { var tot = 0, ya = 0; sets.forEach(function (st) { st.items.forEach(function (it) { if (it.tipo !== 'largo') { tot++; if (enP[it.subj.toUpperCase()]) ya++; } }); }); nT.textContent = ya + ' de ' + tot + ' en el proyecto'; }
+  }
+  function tlibItemDe(k) {
+    var i = k.indexOf('|'); if (i < 0) return null;
+    var sn = k.slice(0, i), sj = k.slice(i + 1), out = null;
+    tlibSets().forEach(function (st) { if (st.nom !== sn) return; st.items.forEach(function (it) { if (it.subj === sj) out = { set: st, it: it }; }); });
+    return out;
+  }
+  /* Añadir categorías: una sola → queda activa y se enciende Count; varias →
+     quedan en el panel Conteo y en Count ▾, sin cambiar la herramienta. */
+  function tlibAnade(pares) {
+    var enP = tlibEnProyecto(), nuevas = [];
+    pares.forEach(function (pr) {
+      if (!pr || !pr.it || pr.it.tipo === 'largo') return;
+      var k = pr.it.subj.toUpperCase();
+      if (enP[k]) return;
+      var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color });
+      enP[k] = c; nuevas.push(c);
+    });
+    return nuevas;
+  }
+  function tlibAnadirMarcados() {
+    var pares = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).map(tlibItemDe).filter(Boolean);
+    if (!pares.length) return;
+    pushUndo();
+    var nuevas = tlibAnade(pares);
+    if (!nuevas.length) { popUndoVacio(); setHint('Esas ya estaban en el proyecto'); return; }
+    tlibMarcados = {};
+    tlibTrasAnadir(nuevas);
+  }
+  function tlibAnadirSet(setNom) {
+    var st = null; tlibSets().forEach(function (x) { if (x.nom === setNom) st = x; });
+    if (!st) return;
+    pushUndo();
+    var nuevas = tlibAnade(st.items.map(function (it) { return { set: st, it: it }; }));
+    if (!nuevas.length) { popUndoVacio(); setHint('Todo "' + st.nom + '" ya estaba en el proyecto'); return; }
+    tlibTrasAnadir(nuevas);
+  }
+  function popUndoVacio() { try { if (undoStack && undoStack.length) undoStack.pop(); } catch (e) {} }
+  function tlibTrasAnadir(nuevas) {
+    if (nuevas.length === 1) {
+      // una sola: la quiere contar YA — el panel se quita de encima del plano
+      catActiva = nuevas[0].id;
+      setTool('count');
+      cierraTlib();
+      setHint('Contando ' + nuevas[0].nom + ' — toca cada uno en el plano');
+    } else {
+      setHint('✔ ' + nuevas.length + ' categorías añadidas — están en el panel Conteo y en Count ▾');
+    }
+    refresh(); refreshCounts(); pintaTlib();
+  }
+  function abreTlib() {
+    var b = $('#tlibBox'); if (!b) return;
+    b.classList.remove('oculto');
+    pintaTlib();
+    var i = $('#tlibTxt'); if (i && !document.body.classList.contains('touch')) { try { i.focus(); } catch (e) {} }
+  }
+  function cierraTlib() { var b = $('#tlibBox'); if (b) b.classList.add('oculto'); }
+  function enganchaTlib() {
+    var b = $('#tlibBox'); if (!b) return;
+    arrastraPanel($('#tlibCab'), b);
+    var bc = $('#tlibCerrar'); if (bc) bc.addEventListener('click', cierraTlib);
+    var i = $('#tlibTxt'); if (i) i.addEventListener('input', pintaTlib);
+    var sc = $('#tlibSoloCat'); if (sc) sc.addEventListener('change', pintaTlib);
+    var bA = $('#tlibAnadir'); if (bA) bA.addEventListener('click', tlibAnadirMarcados);
+    var L = $('#tlibLista');
+    if (L) {
+      L.addEventListener('click', function (ev) {
+        var bt = ev.target.closest && ev.target.closest('.tlTodo');
+        if (bt) { ev.preventDefault(); ev.stopPropagation(); tlibAnadirSet(bt.dataset.set); return; }
+        var cab = ev.target.closest && ev.target.closest('.tlSet');
+        if (cab) { tlibAbiertos[cab.dataset.set] = !tlibAbiertos[cab.dataset.set]; pintaTlib(); return; }
+      });
+      L.addEventListener('change', function (ev) {
+        var fila = ev.target.closest && ev.target.closest('.tlFila');
+        if (!fila || ev.target.type !== 'checkbox') return;
+        tlibMarcados[fila.dataset.k] = !!ev.target.checked;
+        var nSel = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).length;
+        var sp = $('#tlibSel'); if (sp) sp.textContent = nSel ? nSel + ' marcado(s)' : '';
+        var bA2 = $('#tlibAnadir'); if (bA2) bA2.disabled = !nSel;
+      });
+    }
+  }
+  enganchaTlib();
+  window.__tlibDbg = { abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
 
   /* ==================================================================
@@ -9784,7 +9961,7 @@
     syncSheet();
     var out = [];
     function add(name, qty, unit) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {};   // lf: líneas que se cotizan por pie (LED strip)
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {};   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -9806,6 +9983,9 @@
         byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // 3 pisos = 3 breakers
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
+      // el Count: cada marca suma 1 a su categoría; al estimador va con el
+      // alias (el Subject de Bluebeam que ya entiende) o con el nombre
+      (d.counts || []).forEach(function (q) { if (q && q.cat) cnt[q.cat] = (cnt[q.cat] || 0) + 1; });
       (d.areas || []).forEach(function (a) {
         var estA = LINE_STYLES[a.lineStyle];
         if (estA && estA.ft && Array.isArray(a.pts) && a.pts.length >= 2) {
@@ -9823,6 +10003,9 @@
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
     Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF'); });
     Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT'); });
+    var cntNom = {};
+    Object.keys(cnt).forEach(function (id) { var c = catCount(id); var nm = c ? (c.alias || c.nom) : null; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
+    Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA'); });
     return out;
   }
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
@@ -12107,6 +12290,7 @@
       o.color = colorSeguro(o.color, '#d62828');
       if (!COUNT_FORMAS[o.forma]) o.forma = 'circ';
       o.num = o.num === false ? false : true;
+      ['alias', 'set', 'item', 'unidad'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
     });
     ['bg', 'bg2'].forEach(function (k) {
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
@@ -15815,7 +15999,7 @@
     if (!bg || !bg.url) { cb(null); return; }
     var im = new Image();
     im.onload = function () {
-      var MAXW = 2600;
+      var MAXW = window.__visualMaxW || 2600;   // (gancho de prueba: medir con el plano real a otra resolución)
       var esc = Math.min(1, MAXW / im.naturalWidth);
       var cw = Math.max(1, Math.round(im.naturalWidth * esc)), ch = Math.max(1, Math.round(im.naturalHeight * esc));
       var cv = document.createElement('canvas');
@@ -17533,6 +17717,7 @@
       });
       html += '<div class="tmHead">Contar lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
+      html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
       if (catsM.length) {
         html += '<div class="tmHead">Categorías</div>';
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
@@ -17647,6 +17832,7 @@
           else if (k === '__olvida') { formatoClip = null; pincelPuestos = 0; setTool('match'); setHint('Formato olvidado — toca la marca cuyo aspecto quieres copiar'); showProps(); }
         } else if (kind === 'count') {
           if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
+          if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
           if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }

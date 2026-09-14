@@ -325,6 +325,24 @@
     <div id="buscaLista"></div>
   </div>
 
+  <div id="tlibBox" class="oculto">
+    <div id="tlibCab">
+      <span id="tlibTit">BIBLIOTECA DE TAKEOFF</span>
+      <span id="tlibN" class="muted small"></span>
+      <button id="tlibCerrar" title="Cerrar" data-ico="close"></button>
+    </div>
+    <div id="tlibFiltro">
+      <input type="search" id="tlibTxt" placeholder="Busca un tool: receptacle, 4x4, smoke, panel, EMT…">
+      <label class="lay" title="Ver solo los tools que casan con un item del catálogo del estimador"><input type="checkbox" id="tlibSoloCat"> Solo con item</label>
+    </div>
+    <div id="tlibLista"></div>
+    <div id="tlibPie">
+      <span class="muted small" style="flex:1">Marca lo que vas a contar en este proyecto. Cada categoría llega al estimador con el nombre de Bluebeam que ya entiende.</span>
+      <span id="tlibSel" class="muted small"></span>
+      <button id="tlibAnadir" disabled>Añadir al proyecto</button>
+    </div>
+  </div>
+
   <!-- ======= LISTA DE MARCAS (Markups List) — panel flotante, no modal: se queda abierto mientras recorres el plano ======= -->
   <div id="marcasBox" class="oculto">
     <div id="marcasCab">
@@ -488,6 +506,7 @@
 <script src="js/logo.js"></script>
 <script src="js/config.js"></script>
 <script src="js/symbols.js"></script>
+<script src="js/takeoff-lib.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

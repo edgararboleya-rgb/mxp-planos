@@ -945,6 +945,50 @@ svg.tool-vsearch { cursor: crosshair; }
 #buscaLista .bTxt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #canvas rect.busca { fill: rgba(242,194,48,.32); stroke: #E0A800; stroke-width: 0.6; pointer-events: none; }
 #canvas rect.busca.cur { fill: rgba(255,140,0,.42); stroke: #E06C00; stroke-width: 1.2; }
+/* ======= BIBLIOTECA DE TAKEOFF (tool sets de Bluebeam) ======= */
+#tlibBox {
+  position: fixed; left: 250px; top: 78px; z-index: 61;
+  width: 440px; max-width: calc(100vw - 16px);
+  height: 460px; max-height: calc(100vh - 90px);
+  display: flex; flex-direction: column;
+  background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 14px;
+  box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 20px 44px -14px rgba(7,26,46,.35); overflow: hidden; resize: both;
+}
+#tlibBox.oculto { display: none; }
+#tlibCab { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line); cursor: move; touch-action: none; user-select: none; }
+#tlibTit { font-weight: 600; font-size: 12.5px; flex: 1; letter-spacing: .11em; color: var(--mp-ink); }
+#tlibCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+#tlibCab button:hover { background: var(--mp-sky-2); border-color: var(--mp-blue); }
+#tlibFiltro { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
+#tlibFiltro input[type=search] { flex: 1; min-width: 0; padding: 6px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 12px; background: #fff; }
+#tlibFiltro input[type=search]:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
+#tlibFiltro .lay { flex: none; font-size: 11px; color: var(--mp-ink-2); white-space: nowrap; }
+#tlibLista { flex: 1; overflow: auto; padding: 2px 0; }
+#tlibLista .bMuted { color: var(--mp-ink-2); font-size: 12px; padding: 12px 12px; line-height: 1.5; }
+#tlibLista .tlSet { display: flex; align-items: center; gap: 7px; padding: 6px 10px; cursor: pointer; font-size: 12.5px; background: var(--mp-sky-3, #f2f6fb); border-bottom: 1px solid var(--mp-line); user-select: none; position: sticky; top: 0; z-index: 1; }
+#tlibLista .tlSet:hover { background: var(--mp-sky-2); }
+#tlibLista .tlFlecha { width: 0; height: 0; border-left: 5px solid var(--mp-ink-2); border-top: 4px solid transparent; border-bottom: 4px solid transparent; flex: none; transition: transform .12s; }
+#tlibLista .tlSet.on .tlFlecha { transform: rotate(90deg); }
+#tlibLista .tlNom { font-weight: 600; color: var(--mp-ink); }
+#tlibLista .tlN { flex: 1; font-size: 11px; color: var(--mp-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tlibLista .tlTodo { flex: none; border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+#tlibLista .tlTodo:hover { border-color: var(--mp-blue); background: var(--mp-sky-2); }
+#tlibLista .tlFila { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 14px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--mp-line); }
+#tlibLista .tlFila:hover { background: var(--mp-sky-2); }
+#tlibLista .tlFila input { flex: none; margin: 0; }
+#tlibLista .tlFila.ya, #tlibLista .tlFila.largo { color: var(--mp-ink-2); cursor: default; }
+#tlibLista .tlFila.ya .cntChip, #tlibLista .tlFila.largo .cntChip { opacity: .45; }
+#tlibLista .tlTxt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+#tlibLista .tlSubj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tlibLista .tlDet { font-size: 10.5px; color: var(--mp-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tlibPie { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-top: 1px solid var(--mp-line); background: var(--mp-sky-2); }
+#tlibPie button { border: 1px solid var(--mp-blue); background: var(--mp-blue); color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer; flex: none; }
+#tlibPie button:disabled { opacity: .45; cursor: default; }
+body.touch #tlibBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 62vh; }
+body.touch #tlibCab button { width: 34px; height: 34px; }
+body.touch #tlibLista .tlFila { padding: 8px 10px 8px 14px; font-size: 13px; }
+body.touch #tlibLista .tlFila input { width: 20px; height: 20px; }
+body.touch #tlibPie button { padding: 9px 14px; font-size: 13px; }
 body.touch #buscaBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 48vh; }
 body.touch #buscaCab button { width: 34px; height: 34px; }
 body.touch #marcasBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 55vh; }
