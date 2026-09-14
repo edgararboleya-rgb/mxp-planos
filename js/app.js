@@ -8589,7 +8589,7 @@
       if (!vis.length) return;
       var abierto = q ? true : !!tlibAbiertos[st.nom];
       var nYa = 0, nLargo = 0, nCat = 0;
-      st.items.forEach(function (it) { if (it.tipo === 'largo') nLargo++; else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
+      st.items.forEach(function (it) { if (it.tipo === 'largo' || it.descartado) nLargo++; else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
       var nCont = st.items.length - nLargo;
       h += '<div class="tlSet' + (abierto ? ' on' : '') + '" data-set="' + esc(st.nom) + '">' +
         '<span class="tlFlecha"></span><span class="tlNom">' + esc(st.nom) + '</span>' +
@@ -8600,16 +8600,17 @@
       if (!abierto) return;
       vis.forEach(function (it) {
         nVis++;
-        var ya = it.tipo !== 'largo' && enP[it.subj.toUpperCase()];
+        var ya = it.tipo !== 'largo' && !it.descartado && enP[it.subj.toUpperCase()];
         var k = tlibKey(st.nom, it.subj);
-        var marc = !ya && it.tipo !== 'largo' && tlibMarcados[k]; if (marc) nMarc++;
+        var marc = !ya && it.tipo !== 'largo' && !it.descartado && tlibMarcados[k]; if (marc) nMarc++;
         var det;
-        if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
+        if (it.descartado) det = 'descartado — equipo que ya no se usa (Edgar, 14/09)';
+        else if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
         else if (ya) det = 'ya en el proyecto';
         else if (it.item) det = (it.item.replace(/\s+/g, ' ').toUpperCase() === it.subj.replace(/\s+/g, ' ').toUpperCase() ? 'en el catálogo' : 'catálogo: ' + esc(it.item.replace(/\s+/g, ' '))) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.via === 'propuesto' ? ' · propuesto' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
-        h += '<label class="tlFila' + (ya ? ' ya' : '') + (it.tipo === 'largo' ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
-          '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo') ? ' disabled' : '') + '>' +
+        h += '<label class="tlFila' + (ya ? ' ya' : '') + ((it.tipo === 'largo' || it.descartado) ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
+          '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo' || it.descartado) ? ' disabled' : '') + '>' +
           '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
           '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + '</span></span></label>';
       });
@@ -8632,7 +8633,7 @@
   function tlibAnade(pares) {
     var enP = tlibEnProyecto(), nuevas = [];
     pares.forEach(function (pr) {
-      if (!pr || !pr.it || pr.it.tipo === 'largo') return;
+      if (!pr || !pr.it || pr.it.tipo === 'largo' || pr.it.descartado) return;
       var k = pr.it.subj.toUpperCase();
       if (enP[k]) return;
       var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color, codigo: pr.it.codigo });
