@@ -8606,7 +8606,7 @@
         var det;
         if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
         else if (ya) det = 'ya en el proyecto';
-        else if (it.item) det = (it.item === it.subj ? 'en el catálogo' : 'catálogo: ' + esc(it.item)) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
+        else if (it.item) det = (it.item.replace(/\s+/g, ' ').toUpperCase() === it.subj.replace(/\s+/g, ' ').toUpperCase() ? 'en el catálogo' : 'catálogo: ' + esc(it.item.replace(/\s+/g, ' '))) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.via === 'propuesto' ? ' · propuesto' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         h += '<label class="tlFila' + (ya ? ' ya' : '') + (it.tipo === 'largo' ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
           '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo') ? ' disabled' : '') + '>' +
