@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.O';
+  var APP_VERSION = 'v31.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -293,13 +293,21 @@
   window.__undoDbg = function () { return { n: undoStack.length, undo: function () { undo(); } }; };
   window.__visualDbg = {
     busca: function (rect, umbral, cb) {
+      // igual que el flujo de verdad (vsearchFin): abre el panel y lo pinta,
+      // porque la lista de revisión vive en el panel y hay que poder tocarla
+      abreVisual();
       visualArranca(rect, function (res) {
         if (res.err) { cb({ err: res.err }); return; }
         visual = { ctx0: res, umbral: umbral, hits: null };
-        visualBarre(res, umbral, null, function (hits) { visual.hits = hits; pintaVisual(); cb({ hits: hits }); });
+        visualBarre(res, umbral, null, function (hits) {
+          visual.hits = hits; pintaVisual(); pintaPanelVisual(); cb({ hits: hits });
+        });
       });
     },
     mete: function (catId) { metVisualAlConteo(catId); },
+    lista: function () { return visual && visual.hits ? visual.hits.map(function (q, i) { return { i: i, sc: q.sc, fuera: !!q.fuera }; }) : null; },
+    descarta: function (i) { if (visual && visual.hits && visual.hits[i]) { visual.hits[i].fuera = !visual.hits[i].fuera; pintaVisual(); pintaPanelVisual(); } },
+    vaA: function (i) { visual.cur = i; vaAlVisual(i); pintaVisual(); pintaPanelVisual(); },
     estado: function () { return visual ? { n: visual.hits ? visual.hits.length : null, umbral: visual.umbral } : null; }
   };
   window.__pdfVecDbg = function (cb) { pdfEncimaDelOriginal(cb); };
@@ -16076,7 +16084,9 @@
     if (!bg || !bg.url) { cb(null); return; }
     var im = new Image();
     im.onload = function () {
-      var MAXW = window.__visualMaxW || 2600;   // (gancho de prueba: medir con el plano real a otra resolución)
+      // 2600 es el punto bueno, comprobado: por encima empeora el acierto y
+    // multiplica el tiempo. No subirlo "por si acaso".
+    var MAXW = window.__visualMaxW || 2600;   // (gancho de prueba: medir con el plano real a otra resolución)
       var esc = Math.min(1, MAXW / im.naturalWidth);
       var cw = Math.max(1, Math.round(im.naturalWidth * esc)), ch = Math.max(1, Math.round(im.naturalHeight * esc));
       var cv = document.createElement('canvas');
@@ -16217,7 +16227,8 @@
     if (!visual || !visual.hits) return;
     var s2 = '';
     visual.hits.forEach(function (h, i) {
-      s2 += '<rect class="visual' + (i === 0 ? ' molde' : '') + '" x="' + (h.x - h.w / 2).toFixed(1) + '" y="' + (h.y - h.h / 2).toFixed(1) +
+      s2 += '<rect class="visual' + (i === 0 ? ' molde' : '') + (h.fuera ? ' fuera' : '') +
+        (i === visual.cur ? ' cur' : '') + '" x="' + (h.x - h.w / 2).toFixed(1) + '" y="' + (h.y - h.h / 2).toFixed(1) +
         '" width="' + h.w.toFixed(1) + '" height="' + h.h.toFixed(1) + '"/>';
     });
     g.innerHTML = s2;
@@ -16241,19 +16252,52 @@
       return;
     }
     var cats = catsCount();
-    var h = '<div class="vN"><b>' + visual.hits.length + '</b> encontrado(s)' + (visual.hits.length ? ' — mira los recuadros en el plano' : '') + '</div>';
-    h += '<div class="row"><label>Se parecen</label><input id="vUmbral" type="range" min="40" max="95" step="1" value="' + Math.round(visual.umbral * 100) + '" style="flex:1"><span id="vUmbralN" class="muted small" style="width:34px;text-align:right">' + Math.round(visual.umbral * 100) + '%</span></div>';
-    h += '<div class="muted small">Bájalo si faltan; súbelo si está cogiendo cosas que no son.</div>';
+    var vivos = visual.hits.filter(function (q) { return !q.fuera; });
+    var h = '<div class="vN"><b>' + vivos.length + '</b> para contar' +
+      (visual.hits.length > vivos.length ? ' <span class="muted">· ' + (visual.hits.length - vivos.length) + ' descartado(s)</span>' : '') + '</div>';
+    h += '<div class="row"><label>Se parecen</label><input id="vUmbral" type="range" min="55" max="97" step="1" value="' + Math.round(visual.umbral * 100) + '" style="flex:1"><span id="vUmbralN" class="muted small" style="width:34px;text-align:right">' + Math.round(visual.umbral * 100) + '%</span></div>';
+    h += '<div class="muted small">Bájalo si faltan; súbelo si está cogiendo cosas que no son. Sobra mejor que falte: lo que sobra lo ves y lo quitas de la lista, lo que falta no lo sabes nunca.</div>';
+    /* La lista de revisión: uno por fila, del que más se parece al que menos.
+       Tocar la fila lleva el plano hasta él; la ✗ lo saca de la cuenta. Los
+       de abajo son casi siempre los falsos, así que se repasa de abajo arriba. */
+    if (visual.hits.length) {
+      h += '<div class="vLista" id="vLista">';
+      visual.hits.forEach(function (q, i) {
+        h += '<div class="vFila' + (q.fuera ? ' fuera' : '') + (i === visual.cur ? ' cur' : '') + '" data-i="' + i + '">' +
+          '<span class="vPc">' + Math.round(q.sc * 100) + '%</span>' +
+          '<span class="vTxt">' + (q.fuera ? 'descartado' : 'nº ' + (i + 1)) + '</span>' +
+          '<button class="vX" data-x="' + i + '" title="' + (q.fuera ? 'Volver a contarlo' : 'No es: sácalo de la cuenta') + '">' + (q.fuera ? '↺' : '✗') + '</button>' +
+          '</div>';
+      });
+      h += '</div>';
+      h += '<div class="muted small">Toca uno y el plano salta hasta él. Los de abajo, los de menos parecido, son los que suelen sobrar.</div>';
+    }
     h += '<div class="row"><label>Contar como</label><select id="vCat" style="flex:1">' +
       cats.map(function (q) { return '<option value="' + esc(q.id) + '"' + (catActiva === q.id ? ' selected' : '') + '>' + esc(q.nom) + '</option>'; }).join('') +
       '<option value="__nueva">＋ Categoría nueva…</option></select></div>';
-    h += '<button id="vAdd" style="width:100%;margin-top:6px"' + (visual.hits.length ? '' : ' disabled') + '>Añadir los ' + visual.hits.length + ' al conteo</button>';
+    h += '<button id="vAdd" style="width:100%;margin-top:6px"' + (vivos.length ? '' : ' disabled') + '>Añadir ' + (vivos.length === 1 ? 'el que queda' : 'los ' + vivos.length) + ' al conteo</button>';
     h += '<div class="muted small" style="margin-top:6px">Esto compara dibujos, no lee el plano: si hay dos símbolos casi iguales los va a confundir. Por eso los ves antes de contarlos.</div>';
     c.innerHTML = h;
     var u = $('#vUmbral'), un = $('#vUmbralN');
     if (u) {
       u.addEventListener('input', function () { if (un) un.textContent = u.value + '%'; });
       u.addEventListener('change', function () { visual.umbral = (+u.value) / 100; relanzaVisual(); });
+    }
+    var lista = $('#vLista');
+    if (lista) {
+      lista.addEventListener('click', function (ev) {
+        var bx = ev.target.closest && ev.target.closest('.vX');
+        if (bx) {
+          var k = +bx.dataset.x, q = visual.hits[k];
+          if (q) { q.fuera = !q.fuera; pintaVisual(); pintaPanelVisual(); }
+          return;
+        }
+        var fila = ev.target.closest && ev.target.closest('.vFila');
+        if (!fila) return;
+        visual.cur = +fila.dataset.i;
+        vaAlVisual(visual.cur);
+        pintaVisual(); pintaPanelVisual();
+      });
     }
     var ba = $('#vAdd');
     if (ba) ba.addEventListener('click', function () {
@@ -16272,14 +16316,31 @@
       metVisualAlConteo(id || catActivaSegura().id, true);
     });
   }
+  /* Llevar la vista hasta un resultado, sin cambiar el zoom: igual que la
+     lista de la búsqueda de texto. */
+  function vaAlVisual(i) {
+    // Centrar la marca en la pantalla. El mundo se pinta con
+    // translate(tx,ty) scale(z), así que la pantalla de un punto del mundo es
+    // tx + x*z: para dejarlo en el medio, tx = medio - x*z. (No hay view.x ni
+    // view.k: eso fue un error que dejaba el botón sin hacer nada.)
+    var q = visual && visual.hits && visual.hits[i]; if (!q) return;
+    try {
+      var w = $('#canvasWrap').getBoundingClientRect();
+      view.tx = w.width / 2 - q.x * view.z;
+      view.ty = w.height / 2 - q.y * view.z;
+      applyView();
+    } catch (e) {}
+  }
   function metVisualAlConteo(catId, yaUndo) {
     if (!visual || !visual.hits || !visual.hits.length) return;
+    var ponen = visual.hits.filter(function (q) { return !q.fuera; });
+    if (!ponen.length) return;
     if (!catCount(catId)) catId = catActivaSegura().id;
     if (!yaUndo) pushUndo();
-    visual.hits.forEach(function (h) {
+    ponen.forEach(function (h) {
       state.counts.push({ id: uid(), x: Math.round(h.x), y: Math.round(h.y), cat: catId });
     });
-    var n = visual.hits.length;
+    var n = ponen.length;
     var nom = (catCount(catId) || {}).nom || '';
     cierraVisual();
     refresh(); refreshCounts(); scheduleAutosave();
@@ -16298,7 +16359,13 @@
     pintaPanelVisual('Preparando el molde…');
     visualArranca(r, function (res) {
       if (res.err) { pintaPanelVisual(res.err); visual = null; return; }
-      visual = { ctx0: res, umbral: 0.66, hits: null };
+      // 80 %, medido contra el plano real de Epic (ED-1.3, 13 tiras LED):
+      //   66 % → las 13, pero con 219 falsos. Inservible.
+      //   80 % → las 13, con 18 falsos. En 1,9 s.
+      //   90 % → solo 8 de 13.
+      // Y ojo: MÁS resolución es PEOR, no mejor. A 4000 px encuentra 8 de 13 y
+      // tarda seis veces más, porque un desajuste de un píxel pesa el doble.
+      visual = { ctx0: res, umbral: 0.80, hits: null };
       relanzaVisual();
     });
   }

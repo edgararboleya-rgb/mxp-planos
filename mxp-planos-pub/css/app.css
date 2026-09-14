@@ -911,7 +911,25 @@ body.touch #marcasCab #marcasMarcar { min-height: 44px; font-size: 13px; padding
 #visualCuerpo .row label { flex: none; width: 76px; font-size: 11px; color: var(--mp-ink-2); }
 #visualCuerpo select, #visualCuerpo button { padding: 5px 9px; border: 1px solid rgba(27,60,140,.18); border-radius: 9px; background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); color: var(--mp-navy); font-size: 12px; font-weight: 600; cursor: pointer; }
 #visualCuerpo button[disabled] { opacity: .45; cursor: default; }
+/* La lista de revisión de la búsqueda visual: uno por fila, del que más se
+   parece al que menos. Los de abajo son casi siempre los que sobran. */
+.vLista { max-height: 210px; overflow: auto; margin: 6px 0 4px; border: 1px solid var(--mp-line); border-radius: 9px; }
+.vFila { display: flex; align-items: center; gap: 8px; padding: 4px 8px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--mp-line); }
+.vFila:last-child { border-bottom: 0; }
+.vFila:hover { background: var(--mp-sky-2); }
+.vFila.cur { background: var(--mp-sky-3); }
+.vFila.fuera { opacity: .5; }
+.vFila.fuera .vTxt { text-decoration: line-through; }
+.vPc { flex: none; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--mp-teal-text); min-width: 34px; }
+.vTxt { flex: 1; color: var(--mp-ink-2); }
+.vX { flex: none; border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink-2); border-radius: 6px; width: 24px; height: 24px; cursor: pointer; padding: 0; line-height: 1; }
+.vX:hover { border-color: var(--mp-blue); color: var(--mp-blue); }
+body.touch .vLista { max-height: 34vh; }
+body.touch .vFila { padding: 9px 8px; font-size: 13px; }
+body.touch .vX { width: 34px; height: 34px; }
 #canvas rect.visual { fill: rgba(10,143,60,.16); stroke: #0a8f3c; stroke-width: 0.8; pointer-events: none; }
+#canvas rect.visual.fuera { fill: none; stroke: #B9C4D2; stroke-dasharray: 3 3; }
+#canvas rect.visual.cur { stroke: #E06C00; stroke-width: 1.6; fill: rgba(255,140,0,.18); }
 #canvas rect.visual.molde { stroke: #0b84ff; stroke-width: 1.4; fill: rgba(11,132,255,.14); }
 body.touch #visualBox { right: 8px; top: 76px; width: min(340px, calc(100vw - 16px)); }
 body.touch #visualCab button { width: 34px; height: 34px; }

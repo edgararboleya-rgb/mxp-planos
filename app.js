@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v30.M';
+  var APP_VERSION = 'v31.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -23,6 +23,9 @@
   }
 
   /* ---------------- utilidades ---------------- */
+  /* Salvavidas: si js/icons.js no llegó a cargar (caché vieja, red a medias),
+     la app NO se queda a oscuras — sigue funcionando sin dibujo de icono. */
+  if (!window.ICO) window.ICO = { svg: function () { return ''; }, pinta: function () {}, tiene: function () { return false; }, claves: [] };
   var $ = function (s) { return document.querySelector(s); };
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
   var _seq = 1;
@@ -235,6 +238,9 @@
     wires: [],     // {id,x1,y1,x2,y2,style,side,bulge}
     leaders: [],   // {id,tx,ty,x,y,text,size}
     inks: [],      // {id,pts:[[x,y]…],modo:'pen'|'hi',color,lw,op} — tinta del Apple Pencil (fase 5.4)
+    counts: [],    // {id,x,y,cat} — marcas del Count (fase 5.5); van POR HOJA, como todo el dibujo
+    countCats: [], // {id,nom,color,forma,num} — las categorías del conteo. Son del PROYECTO, no de la hoja:
+                   // el mismo "Recept 20A" se cuenta en E-1, E-2 y E-3 y suma en el total del set.
     bg: null,      // {url,x,y,w,h,opacity}
     bg2: null,     // overlay de comparación (plano rojo encima del azul)
     panels: [],    // panel schedules E-2
@@ -267,6 +273,75 @@
   };
   window.__loadSheetDbg = function (j) { try { loadSheetData(j); } catch (e) {} };
   window.__selGrupoDbg = function (g) { selGroup = g; sel = null; renderSel(); showProps(); };
+  window.__mxpSelDbg = function () { return sel ? { kind: sel.kind, id: sel.id } : (selGroup ? { grupo: selGroup.length } : null); };
+  window.__conteoDbg = {
+    csv: function () { return conteoCsvTexto(); },
+    takeoff: function (soloHoja) { return buildTakeoffEntries(soloHoja); },
+    hoja: function () { return conteoDeHoja(); },
+    set: function () { return conteoDelProyecto(); },
+    nueva: function (nom) { var c = nuevaCatCount(nom); catActiva = c.id; setTool('count'); refreshCounts(); return c.id; },
+    activa: function (id) { catActiva = id; },
+    cats: function () { return catsCount().slice(); }
+  };
+  window.__hojaDbg = { nueva: function (no) { addSheet(no); }, cambia: function (i) { switchSheet(i); } };
+  window.__ptDbg = function (wx, wy) { var r = svg.getBoundingClientRect(); return { x: Math.round(r.left + view.tx + wx * view.z), y: Math.round(r.top + view.ty + wy * view.z) }; };
+  window.__fmtDbg = {
+    copia: function (ref) { return copiarFormato(ref); },
+    pega: function (refs) { return pegarFormatoEn(refs); },
+    clip: function () { return formatoClip ? { kind: formatoClip.kind, nom: formatoClip.nom, props: formatoClip.props } : null; }
+  };
+  window.__undoDbg = function () { return { n: undoStack.length, undo: function () { undo(); } }; };
+  window.__visualDbg = {
+    busca: function (rect, umbral, cb) {
+      // igual que el flujo de verdad (vsearchFin): abre el panel y lo pinta,
+      // porque la lista de revisión vive en el panel y hay que poder tocarla
+      abreVisual();
+      visualArranca(rect, function (res) {
+        if (res.err) { cb({ err: res.err }); return; }
+        visual = { ctx0: res, umbral: umbral, hits: null };
+        visualBarre(res, umbral, null, function (hits) {
+          visual.hits = hits; pintaVisual(); pintaPanelVisual(); cb({ hits: hits });
+        });
+      });
+    },
+    mete: function (catId) { metVisualAlConteo(catId); },
+    lista: function () { return visual && visual.hits ? visual.hits.map(function (q, i) { return { i: i, sc: q.sc, fuera: !!q.fuera }; }) : null; },
+    descarta: function (i) { if (visual && visual.hits && visual.hits[i]) { visual.hits[i].fuera = !visual.hits[i].fuera; pintaVisual(); pintaPanelVisual(); } },
+    vaA: function (i) { visual.cur = i; vaAlVisual(i); pintaVisual(); pintaPanelVisual(); },
+    estado: function () { return visual ? { n: visual.hits ? visual.hits.length : null, umbral: visual.umbral } : null; }
+  };
+  window.__pdfVecDbg = function (cb) { pdfEncimaDelOriginal(cb); };
+  window.__idbDbg = function (k, cb) { idbGet(k, cb); };
+  window.__pdfLiveDbg = function () { return pdfLive[state.curSheet]; };
+  window.__dxfDbg = {
+    exporta: function () { try { return dxfDelPlano(); } catch (e) { return { err: 'EXC ' + e.message }; } },
+    importa: function (txt) { var out = null; try { importaDxf(txt, function (r) { out = r; }); } catch (e) { return { err: 'EXC ' + e.message }; } return out; },
+    mete: function (r) { try { meteDxf(r); return true; } catch (e) { return 'EXC ' + e.message; } }
+  };
+  window.__trimDbg = {
+    modo: function (m) { trimModo = m; },
+    recorta: function (ref, p) { try { var r = recorta(ref, p); limpiaHuerfanas(); refresh(); return r; } catch (e) { return { ok: false, msg: 'EXC ' + e.message }; } },
+    alarga: function (ref, p) { try { var r = alarga(ref, p); refresh(); return r; } catch (e) { return { ok: false, msg: 'EXC ' + e.message }; } },
+    parte: function (ref, p) { try { var r = parte(ref, p); limpiaHuerfanas(); refresh(); return r; } catch (e) { return { ok: false, msg: 'EXC ' + e.message }; } },
+    cortes: function (x1, y1, x2, y2, excl) { return cortesEn(x1, y1, x2, y2, cortadores(excl)); }
+  };
+  window.__buscaDbg = function () { return { n: buscaRes.length, idx: buscaIdx, txts: buscaRes.map(function (r) { return r.txt; }), res: JSON.parse(JSON.stringify(buscaRes)) }; };
+  window.__hojaImpDbg = function (cont) { try { buildPrintFrame(cont); } catch (e) { return 'EXC ' + e.message; } };
+  window.__cofreDbg = {
+    items: function () { return JSON.parse(JSON.stringify(cofre)); },
+    guarda: function (ref, nom) {
+      var e = entityOf(ref); if (!e) return null;
+      var tl = toolDePieza(ref, e); if (!tl) return null;
+      cofre.push({ id: uid(), nom: nom, tool: tl, kind: ref.kind, cfg: cfgDePieza(ref, e) });
+      guardaCofre();
+      var k = layout.ocultas.indexOf('cofre'); if (k >= 0) { layout.ocultas.splice(k, 1); guardaLayout(); }
+      pintaBarras(); return cofre[cofre.length - 1].id;
+    },
+    usa: function (id) { usaCofre(id); },
+    quita: function (id) { cofre = cofre.filter(function (q) { return q.id !== id; }); guardaCofre(); pintaBarras(); },
+    mueve: function (id, d) { mueveEnCofre(id, d); },
+    pend: function () { return cofrePend ? { kind: cofrePend.kind, nom: cofrePend.nom } : null; }
+  };
   window.__encajaDbg = function () { try { encajarSel(); } catch (e) { return 'EXC ' + e.message; } };
   window.__resumenDbg = function () { try { return planoResumen(); } catch (e) { return 'EXC ' + e.message; } };
   window.__calceDbg = function (a, b, o) { try { return calcePropuesta(a, b, o); } catch (e) { return 'EXC ' + e.message; } };
@@ -274,6 +349,7 @@
   var measure = null;                 // medición transitoria
   var sel = null;                     // {kind,id}
   var selGroup = null;                // [{kind,id},…] selección múltiple (marquee)
+  var sumandoSel = false;             // iPad: modo "＋ Añadir" (no hay tecla Shift)
   // cuadrícula de importación: dónde cae la próxima pieza de escaneo
   var gridX = 24, gridY = 24, gridRowH = 0;
   var clipboard = null;               // portapapeles interno (Ctrl+C/V)
@@ -289,7 +365,7 @@
   var svg = $('#canvas');
   var G = {
     grid: $('#gGridBase'), bg: $('#gBackground'), areas: $('#gAreas'), walls: $('#gWalls'),
-    furn: $('#gFurniture'), elec: $('#gElectrical'), annot: $('#gAnnot'),
+    furn: $('#gFurniture'), elec: $('#gElectrical'), annot: $('#gAnnot'), count: $('#gCount'),
     meas: $('#gMeasure'), prev: $('#gPreview'), sel: $('#gSel'), world: $('#world')
   };
 
@@ -303,6 +379,7 @@
       guia: state.guia,
       huecos: state.huecos,
       inks: state.inks,
+      counts: state.counts, countCats: state.countCats,
       bgMeta: state.bg ? { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h, opacity: state.bg.opacity } : null,
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
@@ -548,8 +625,8 @@
   }
   function estadoVacio() {
     return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
-      walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [],
-      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
+      walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [], counts: [], countCats: [],
+      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', printSello: '', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
       project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '', id: nuevoIdProyecto(), rev: 0, creado: new Date().toISOString() }
     } };
   }
@@ -560,7 +637,7 @@
     if (!sucio || restaurando) { cb(); return; }
     guardaEnBiblioteca(true, function (ok) {
       if (ok) { sucio = false; cb(); }
-      else { uiAlert('No se pudo guardar lo pendiente en este aparato.\n\nUsa 💾 Guardar para bajar el archivo antes de cambiar de proyecto.'); setHint(''); pintaLista(); }
+      else { uiAlert('No se pudo guardar lo pendiente en este aparato.\n\nUsa Guardar para bajar el archivo antes de cambiar de proyecto.'); setHint(''); pintaLista(); }
     });
   }
   function nuevoProyecto() {
@@ -656,14 +733,29 @@
     var nPend = Object.keys(nube.pendientes).length;
     n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '') + (nPend > 1 ? ' (' + nPend + ')' : '');
     n.title = (nube.msg ? nube.msg + '\n\n' : '') +
-      (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón 📤 Estimador, abajo en MATERIALES) para que los planos suban solos.'
+      (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón Entrar, aquí al lado) para que los planos suban solos.'
         : 'Toca aquí para subir ahora mismo.' + (nPend ? '\nEn cola: ' + nPend + '.' : ''));
     n.className = 'nubeBadge ' + nube.estado + (nube.estado === 'off' ? '' : ' clic');
+    // el botón Entrar solo hace falta mientras no hay sesión
+    var be = $('#pjEntrar'); if (be) be.hidden = nubeActiva();
   }
+  /* Entrar sin pasar por el Estimador (pedido de Edgar 04/09): misma sesión del
+     panel de Max Power; al entrar, lo pendiente se encola y se revisa la nube. */
+  function nubeEntrar() {
+    if (!SB || !SB.url) { uiAlert('La nube no está configurada en esta copia de la app.'); return; }
+    askLogin(function () {
+      nubeSet('espera', '');
+      pintaNube();
+      try { reanudaSubidas(); revisaNube('entrar'); } catch (e) {}
+      if (!Object.keys(nube.pendientes).length) nubeSet('ok', '');
+      setHint('✔ Sesión iniciada — los planos suben solos a la nube');
+    });
+  }
+  (function () { var be = document.getElementById('pjEntrar'); if (be) be.addEventListener('click', nubeEntrar); })();
   /* Tocar el badge = subir AHORA. Sirve para no esperar, y para ver el error de
      verdad si algo no sube (Edgar, 04/09: se le quedó en "pendiente de subir"). */
   function nubeAhora() {
-    if (!nubeActiva()) { uiAlert('Todavía no has entrado con tu usuario del panel.\n\nUsa el botón 📤 Estimador (abajo, en MATERIALES) y entra; a partir de ahí los planos suben solos.'); return; }
+    if (!nubeActiva()) { nubeEntrar(); return; }
     if (navigator.onLine === false) { nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); return; }
     nube.pospuestos = {};
     if (nube.subiendo && Date.now() - nube.desde > NUBE_COLGADA) nube.subiendo = false;
@@ -925,7 +1017,7 @@
         if (!okR) {
           // la copia NO se pudo escribir: la de la nube NO se trae. Nada se pierde.
           nube.conflictoAbierto = false; nubeSet('error', 'No se pudo guardar tu versión aparte en este aparato.');
-          uiAlert('No se pudo guardar tu versión aparte en este aparato, así que la de la nube NO se trajo. Lo de aquí sigue intacto.\n\nUsa 💾 Guardar para bajar tu archivo y vuelve a intentar.');
+          uiAlert('No se pudo guardar tu versión aparte en este aparato, así que la de la nube NO se trajo. Lo de aquí sigue intacto.\n\nUsa Guardar para bajar tu archivo y vuelve a intentar.');
           return;
         }
         encolaSubida(mia.state.project.id);
@@ -1028,8 +1120,8 @@
           // (Safari privado, almacenamiento restringido) el usuario creía que
           // todo se guardaba solo y perdía el plano al recargar
           if (!ok && !lsOk && !autosaveAvisado) { autosaveAvisado = true; uiAlert(soloLectura
-            ? '⚠️ En esta sesión NO se está guardando automáticamente (el almacenamiento del aparato no respondió al arrancar).\n\nUsa 💾 Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.'
-            : '⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa 💾 Guardar para bajar el archivo antes de cerrar.'); }
+            ? '⚠️ En esta sesión NO se está guardando automáticamente (el almacenamiento del aparato no respondió al arrancar).\n\nUsa Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.'
+            : '⚠️ Este navegador NO está guardando tu trabajo automáticamente (almacenamiento bloqueado o lleno).\n\nUsa Guardar para bajar el archivo antes de cerrar.'); }
           if (ok || lsOk) autosaveAvisado = false;
         }, 0);
       });
@@ -1140,6 +1232,8 @@
     state.texts = o.texts; state.dims = o.dims; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.inks = o.inks || [];
+    state.counts = o.counts || [];
+    state.countCats = o.countCats || [];
     state.panels = o.panels || [];
     state.guia = o.guia || [];
     state.huecos = o.huecos || [];
@@ -1222,7 +1316,8 @@
   }
   function applyView() {
     G.world.setAttribute('transform', 'translate(' + view.tx + ' ' + view.ty + ') scale(' + view.z + ')');
-    $('#zoomLabel').textContent = zoomPct() + '%';
+    if (typeof pintaFlot === 'function') pintaFlot();
+    var zl = $('#zoomLabel'); if (zl) zl.textContent = zoomPct() + '%';
     if (typeof scheduleHires === 'function') scheduleHires();
   }
 
@@ -4142,6 +4237,7 @@
     var e = { id: uid(), pts: pts, modo: d.modo, color: lastInk[d.modo].color, lw: lastInk[d.modo].lw };
     // presión media del Pencil: el trazo sale más gordo si se apretó (0.5 = normal)
     if (d.pres.length) { var pm = d.pres.reduce(function (a, b) { return a + b; }, 0) / d.pres.length; if (pm > 0.05 && Math.abs(pm - 0.5) > 0.08) e.k = +(0.6 + pm * 0.8).toFixed(2); }
+    estampaCofre('ink', e);
     state.inks.push(e);
     renderAnnot(); refreshCounts();
     if (typeof renderMarcas === 'function') renderMarcas();
@@ -4374,7 +4470,10 @@
         ' L' + (e.x1 - g.nx * t) + ',' + (e.y1 - g.ny * t) + ' Z"/>';
     }
     if (kind === 'symbol') {
+      // una clave de símbolo que ya no existe (proyecto viejo, símbolo
+      // retirado) reventaba renderSel y con él TODA la selección
       var def = SYMBOLS[e.key];
+      if (!def) return '<circle class="sel" cx="' + e.x + '" cy="' + e.y + '" r="10"/>';
       return '<g transform="' + symTransform(e) + '"><rect class="sel" x="' + (-def.w / 2 - 3) + '" y="' + (-def.h / 2 - 3) +
         '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
     }
@@ -4388,6 +4487,10 @@
       }
       var twS = textAncho(e, sz), txS = textIzq(e, sz);
       return '<rect class="sel" x="' + (txS - 3) + '" y="' + (e.y - sz) + '" width="' + (twS + 6) + '" height="' + (textAlto(e, sz) + 4) + '"' + rotT + '/>';
+    }
+    if (kind === 'count') {
+      var rC = countR() + 2;
+      return '<rect class="sel" x="' + (e.x - rC) + '" y="' + (e.y - rC) + '" width="' + (rC * 2) + '" height="' + (rC * 2) + '"/>';
     }
     if (kind === 'wire') return '<path class="sel" d="' + wirePath(e).d + '"/>';
     if (kind === 'ink') return '<path class="sel" d="M' + e.pts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + '" style="stroke-width:' + (inkLw(e) + 4 / view.z) + '"/>';
@@ -4411,6 +4514,7 @@
       });
       s += rotHandleMarkup(selGroup);
       G.sel.innerHTML = s;
+      pintaFlot();
       return;
     }
     if (sel) {
@@ -4427,6 +4531,8 @@
           s += '<circle class="handle" data-h="2" cx="' + e.x2 + '" cy="' + e.y2 + '" r="' + hr + '"/>';
         } else if (sel.kind === 'symbol') {
           var def = SYMBOLS[e.key];
+          if (!def) { s += selShapeMarkup('symbol', e); }
+          else {
           s += '<g transform="' + symTransform(e) + '"><rect class="sel" x="' + (-def.w / 2 - 3) + '" y="' + (-def.h / 2 - 3) +
             '" width="' + (def.w + 6) + '" height="' + (def.h + 6) + '"/></g>';
           if (estirable(def)) {
@@ -4436,6 +4542,9 @@
               s += '<circle class="handle" cx="' + c5[0] + '" cy="' + c5[1] + '" r="' + shr + '"/>';
             });
           }
+          }
+        } else if (sel.kind === 'count') {
+          s += selShapeMarkup('count', e);
         } else if (sel.kind === 'opening') {
           var w = state.walls.find(function (x) { return x.id === e.wallId; });
           if (w) {
@@ -4508,6 +4617,7 @@
       }
     }
     G.sel.innerHTML = s;
+    pintaFlot();
   }
 
   function findSel() {
@@ -4531,13 +4641,15 @@
     '<text x="' + state.guia[0].x1 + '" y="' + (state.guia[0].y1 - 8) + '" font-size="' + (11 / (view.z || 1) * 1.2) + '" fill="#8a8fa3">CONTORNO (guía — no cuenta en materiales)</text>';
   }
   function refresh() {
-    renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderBg(); renderGuia(); renderSel();
+    renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderConteo(); renderBg(); renderGuia(); renderSel();
+    if (typeof pintaMarcasBusca === 'function') pintaMarcasBusca();
+    if (typeof pintaVisual === 'function') pintaVisual();
     refreshCounts(); showProps();
     if (typeof renderMarcas === 'function') renderMarcas();   // la Lista de marcas, si está abierta
   }
 
   /* ---------------- hit testing ---------------- */
-  var layerVisible = { background: true, architecture: true, areas: true, furniture: true, electrical: true, annotation: true, grid: true };
+  var layerVisible = { background: true, architecture: true, areas: true, furniture: true, electrical: true, annotation: true, count: true, grid: true };
 
   function hitTest(p) {
     /* QUÉ AGARRA EL CLIC (Edgar, 08/30: "paso mucho trabajo para seleccionar
@@ -4578,6 +4690,15 @@
       var fy = Math.max(0, Math.abs(ly - (def.by || 0)) - def.h / 2) * scy;
       var ds = Math.hypot(fx, fy);
       if (ds <= PX(4)) pon('symbol', e.id, ds, def.layer === 'electrical' ? 9 : 8);
+    }
+    // marcas del Count: se dibujan encima de todo, asi que tambien se tocan
+    // primero (prio 10). El radio de captura es el de la propia marca.
+    if (layerVisible.count) {
+      for (i = 0; i < state.counts.length; i++) {
+        e = state.counts[i];
+        var dC = Math.hypot(p[0] - e.x, p[1] - e.y) - countR();
+        if (dC <= PX(3)) pon('count', e.id, Math.max(0, dC), 10);
+      }
     }
     if (layerVisible.architecture) {
       // aberturas (van encima de su pared)
@@ -4766,11 +4887,29 @@
     window: 'Toca una pared para colocar la ventana',
     measure: 'Clic en dos puntos para medir (azul, no se imprime) · mantén SHIFT para línea recta',
     dim: 'Clic en dos puntos para colocar una cota · SHIFT = línea recta · doble clic en la cota edita la medida · arrástrala para separarla',
+    trim: 'RECORTAR: toca el pedazo de pared, cable o línea que SOBRA y se va (tiene que cruzarlo algo) · el ▾ cambia a Alargar o Partir · Esc para salir',
+    match: 'COPIAR FORMATO: toca la marca cuyo aspecto quieres copiar y después las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir',
+    vsearch: 'BUSCAR IGUALES: encierra en un marco UN símbolo del plano del ingeniero (dos toques, esquina y esquina) y te busco todos los que se ven igual',
+    count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
     place: 'Clic para colocar · R para rotar 45° · Esc para terminar'
   };
-  function setHint(t) { $('#hint').textContent = t; }
+  /* La barra de abajo dice cómo va la cosa. La guía de la casa pide punto de
+     color, no emoji: aquí se le quita el ✔/⚠/⏳ del principio al mensaje y se
+     pinta el punto con su color (verde bien, ámbar ojo, azul esperando). */
+  function setHint(t) {
+    var h = $('#hint'); if (!h) return;
+    var s = String(t == null ? '' : t), cls = '';
+    var m = /^\s*([\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE0F\u{1F300}-\u{1FAFF}]+)\s*/u.exec(s);
+    if (m) {
+      s = s.slice(m[0].length);
+      var g = m[1];
+      cls = /✔|✅/.test(g) ? 'ok' : /⏳|🔄/.test(g) ? 'espera' : /⚠|❌|✖|🐢/.test(g) ? 'aviso' : '';
+    }
+    h.className = cls;
+    h.textContent = s;
+  }
 
   function ponEqName(off) {
     eqNameOff = !!off;
@@ -4781,16 +4920,33 @@
   }
 
   function setTool(t) {
+    if (typeof sumandoSel !== 'undefined' && sumandoSel && t !== 'select') ponSumando(false);
     tool = t;
     if (t !== 'place') placingKey = null;
     pendingAreaLabel = false;
     drawing = null; G.prev.innerHTML = '';
-    $$('#toolButtons .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
+    marcaBarras(t);
     $$('.symBtn').forEach(function (b) { b.classList.toggle('active', t === 'place' && b.dataset.key === placingKey); });
     svg.className.baseVal = 'mxp tool-' + t + (eqNameOff ? ' sinEqName' : '');
     if (!sel && !selGroup) showProps();   // Cable muestra su lista de materiales
     setHint(HINTS[t] || '');
     if (t === 'calibrate' && !state.bg) setHint('CALIBRAR: primero importa un plano de fondo con el botón "Fondo"');
+    /* MATCHPROP como en AutoCAD: si ya tienes una marca escogida, entrar al
+       pincel COGE SU FORMATO — no te hace tocarla otra vez. */
+    if (t !== 'match') pincelCogeOrigen = false;
+    if (t !== 'vsearch' && visual) { var vb = $('#visualBox'); if (vb) vb.classList.add('oculto'); visual = null; var gv = document.getElementById('gVisual'); if (gv) gv.innerHTML = ''; }
+    /* Lo pendiente del cofre solo vale para la herramienta que se encendió con
+       él: si cambias de herramienta por otro camino, se olvida (si no, el
+       siguiente texto saldría con el tamaño de la nota guardada). */
+    if (cofrePend && !cofreEncendiendo) { cofrePend = null; $$('.dock .cofreBtn.active').forEach(function (b) { b.classList.remove('active'); }); }
+    if (t === 'match') {
+      pincelPuestos = 0;
+      if (sel && sel.kind !== 'opening' && entityOf(sel) && copiarFormato(sel)) {
+        setHint('Formato copiado de ' + formatoClip.nom + ' — toca las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir');
+      } else if (formatoClip) {
+        setHint('Pincel cargado con el formato de ' + formatoClip.nom + ' — toca las que quieras dejar iguales · SHIFT+toque cambia el origen');
+      }
+    }
   }
 
   /* ---------------- interacción de puntero ---------------- */
@@ -5028,6 +5184,13 @@
       case 'wire': return twoPointDown(p, 'wire');
       case 'leader': return twoPointDown(p, 'leader');
       case 'text': return textDown(p);
+      case 'count': return countDown(rawP);
+      case 'match': return matchDown(rawP, ev);
+      case 'trim': return trimDown(rawP);
+      case 'vsearch':
+        if (drawing && drawing.mode === 'vsearch') { var a0 = drawing.a; drawing = null; G.prev.innerHTML = ''; vsearchFin(a0, rawP); }
+        else { drawing = { mode: 'vsearch', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente'); }
+        return;
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -5065,6 +5228,10 @@
         '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' + gp +
         '<text class="lbl" x="' + ((drawing.last[0] + b[0]) / 2 + 8) + '" y="' + ((drawing.last[1] + b[1]) / 2 - 8) + '" font-size="9" font-weight="bold">' + fmtFtIn(len) + '</text></g>';
       drawing.cursor = b;
+    } else if (drawing && drawing.mode === 'vsearch') {
+      var vx = Math.min(drawing.a[0], p[0]), vy = Math.min(drawing.a[1], p[1]);
+      G.prev.innerHTML = '<g class="preview"><rect x="' + vx + '" y="' + vy + '" width="' + Math.abs(p[0] - drawing.a[0]) +
+        '" height="' + Math.abs(p[1] - drawing.a[1]) + '" fill="rgba(11,132,255,.10)" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
     } else if (drawing && drawing.mode === 'shape2') {
       var spts = shapePts(drawing.kind === 'cloud' ? 'rect' : drawing.kind, drawing.a, [Math.round(p[0]), Math.round(p[1])], ev && ev.shiftKey);
       var d2 = drawing.kind === 'cloud' ? cloudPath(spts, true, cloudR({ arco: curCloudArc }))
@@ -5150,7 +5317,7 @@
 
   /* --- selección y arrastre --- */
   function entityOf(ref) {
-    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders, ink: state.inks }[ref.kind];
+    var pool = { wall: state.walls, opening: state.openings, symbol: state.symbols, text: state.texts, dim: state.dims, area: state.areas, wire: state.wires, leader: state.leaders, ink: state.inks, count: state.counts }[ref.kind];
     return pool ? pool.find(function (e) { return e.id === ref.id; }) : null;
   }
   function inGroup(h) {
@@ -5169,8 +5336,10 @@
     if (selGroup && tryRotateGrab(p, selGroup)) return;
     if (sel && sel.kind !== 'opening' && findSel() && tryRotateGrab(p, [sel])) return;
     var h = hitTest(p);
-    // arrastrar cualquier pieza del grupo mueve el grupo completo
-    if (inGroup(h)) {
+    // arrastrar cualquier pieza del grupo mueve el grupo completo…
+    // …salvo que se esté SUMANDO: ahí tocar una pieza del grupo la quita, que
+    // es lo que espera cualquiera que venga de AutoCAD o de Bluebeam.
+    if (inGroup(h) && !esSumar(ev)) {
       drag = {
         mode: 'groupmove', start: p, snap: snapshot(), moved: false,
         refs: selGroup.slice(), calce: null,
@@ -5279,9 +5448,34 @@
         }
       }
     }
+    /* SUMAR A LA SELECCIÓN: con Shift (o Ctrl/⌘) en la PC, o con el modo "＋"
+       encendido en el iPad, donde no hay teclado.
+       VA AQUÍ A PROPÓSITO, no antes: las asas de girar, estirar y curvar se
+       comprueban primero, porque Shift ya servía para estirar un símbolo
+       conservando su forma y para llevar la punta al 90° exacto. Si esto se
+       pusiera arriba, ese Shift de siempre se perdería. */
+    if (esSumar(ev)) {
+      if (!h) {   // en vacío: el marco también suma
+        drag = { mode: 'marquee', start: p, cur: p, suma: true };
+        return;
+      }
+      if (h.kind === 'opening') {   // puerta/ventana: vive pegada a su pared, no entra en grupo
+        setHint('Las puertas y ventanas se tocan de una en una: viven pegadas a su pared');
+        drag = null;
+        return;
+      }
+      var refs = selRefs(), fuera = refs.filter(function (r) { return !mismaRef(r, h); });
+      var quita = fuera.length < refs.length;
+      var n = quita ? ponSel(fuera) : ponSel(refs.concat([h]));
+      setHint(quita
+        ? 'Quitado de la selección — ' + (n ? 'quedan ' + n : 'no queda ninguno')
+        : n + ' elemento(s) seleccionados' + (document.body.classList.contains('touch') ? ' — vuelve a tocar ＋ cuando termines' : ' — sigue con Shift+clic'));
+      drag = null;
+      return;
+    }
     if (!h) {
       // sin nada debajo: inicia el rectángulo de selección múltiple
-      sel = null; selGroup = null; renderSel(); showProps();
+      ponSel([]);
       drag = { mode: 'marquee', start: p, cur: p };
       return;
     }
@@ -5298,7 +5492,7 @@
       if (!e) return;
       if (k === 'wall' || k === 'dim' || k === 'wire') {
         e.x1 = o.x1 + dx; e.y1 = o.y1 + dy; e.x2 = o.x2 + dx; e.y2 = o.y2 + dy;
-      } else if (k === 'symbol' || k === 'text') {
+      } else if (k === 'symbol' || k === 'text' || k === 'count') {
         e.x = o.x + dx; e.y = o.y + dy;
       } else if (k === 'leader') {
         e.x = o.x + dx; e.y = o.y + dy; e.tx = o.tx + dx; e.ty = o.ty + dy;
@@ -5308,29 +5502,231 @@
     });
   }
 
-  function marqueeCollect(a, b) {
-    var x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]);
-    var y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  /* ── GEOMETRÍA DEL MARCO QUE "TOCA" (ventana crossing) ──
+     Contiene = el elemento cabe ENTERO dentro del marco (lo de siempre).
+     Toca     = basta con que el marco lo roce, como en AutoCAD y Bluebeam.
+     Todo en coordenadas de mundo; el marco siempre viene normalizado. */
+  /* ── LA SELECCIÓN, EN UN SOLO SITIO ──
+     La app guarda la selección en dos variables por razones históricas: 'sel'
+     cuando es UNA sola cosa y 'selGroup' cuando son varias, y nunca las dos a
+     la vez. Todo lo que toque la selección pasa por aquí para no romper esa
+     regla (que respetan renderSel, showProps, borrar, mover, copiar…). */
+  /* ¿Se está sumando a la selección? Un solo sitio lo decide: Shift o Ctrl/⌘
+     en la PC, y el modo "＋" del iPad, donde no hay teclado. */
+  function esSumar(ev) { return !!(ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)) || sumandoSel; }
+  function selRefs() {
+    if (selGroup && selGroup.length) return selGroup.slice();
+    return sel ? [sel] : [];
+  }
+  function mismaRef(a, b) { return a && b && a.kind === b.kind && a.id === b.id; }
+  function ponSel(refs, avisa) {
+    var lista = [];
+    (refs || []).forEach(function (r) {
+      if (!r || !r.kind || !r.id) return;
+      // una puerta/ventana cuelga de su pared: no se mueve ni se borra en grupo
+      if (r.kind === 'opening' && (refs.length > 1)) return;
+      if (!entityOf(r)) return;   // ya no existe (se borró por otro camino)
+      for (var i = 0; i < lista.length; i++) if (mismaRef(lista[i], r)) return;   // sin repetidos
+      lista.push({ kind: r.kind, id: r.id });
+    });
+    if (!lista.length) { sel = null; selGroup = null; }
+    else if (lista.length === 1) { sel = lista[0]; selGroup = null; }
+    else { sel = null; selGroup = lista; }
+    renderSel(); showProps();
+    if (avisa) setHint(lista.length === 0 ? 'Nada seleccionado'
+      : lista.length === 1 ? '1 elemento seleccionado'
+      : lista.length + ' elementos seleccionados — arrastra cualquiera para mover el grupo · Supr los borra');
+    return lista.length;
+  }
+  function rectDe(a, b) {
+    return { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+  }
+  function ptEnRect(r, x, y) { return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1; }
+  /* Segmento contra rectángulo: o tiene una punta dentro, o cruza uno de los
+     cuatro lados. Se resuelve con el signo del producto cruzado (sin dividir,
+     así no hay división por cero en los segmentos verticales). */
+  function segCortaSeg(ax, ay, bx, by, cx, cy, dx, dy) {
+    function cruz(ox, oy, px, py, qx, qy) { return (px - ox) * (qy - oy) - (py - oy) * (qx - ox); }
+    var d1 = cruz(cx, cy, dx, dy, ax, ay), d2 = cruz(cx, cy, dx, dy, bx, by);
+    var d3 = cruz(ax, ay, bx, by, cx, cy), d4 = cruz(ax, ay, bx, by, dx, dy);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+    // colineales que se tocan
+    function enSeg(ox, oy, px, py, qx, qy) {
+      return Math.min(ox, px) <= qx && qx <= Math.max(ox, px) && Math.min(oy, py) <= qy && qy <= Math.max(oy, py);
+    }
+    if (d1 === 0 && enSeg(cx, cy, dx, dy, ax, ay)) return true;
+    if (d2 === 0 && enSeg(cx, cy, dx, dy, bx, by)) return true;
+    if (d3 === 0 && enSeg(ax, ay, bx, by, cx, cy)) return true;
+    if (d4 === 0 && enSeg(ax, ay, bx, by, dx, dy)) return true;
+    return false;
+  }
+  function segCortaRect(r, x1, y1, x2, y2) {
+    if (ptEnRect(r, x1, y1) || ptEnRect(r, x2, y2)) return true;
+    // fuera de la banda: descarte rápido antes de las cuatro pruebas
+    if (Math.max(x1, x2) < r.x0 || Math.min(x1, x2) > r.x1) return false;
+    if (Math.max(y1, y2) < r.y0 || Math.min(y1, y2) > r.y1) return false;
+    return segCortaSeg(x1, y1, x2, y2, r.x0, r.y0, r.x1, r.y0) ||
+           segCortaSeg(x1, y1, x2, y2, r.x1, r.y0, r.x1, r.y1) ||
+           segCortaSeg(x1, y1, x2, y2, r.x1, r.y1, r.x0, r.y1) ||
+           segCortaSeg(x1, y1, x2, y2, r.x0, r.y1, r.x0, r.y0);
+  }
+  function ptEnPoli(pts, x, y) {
+    var dentro = false;
+    for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dentro = !dentro;
+    }
+    return dentro;
+  }
+  /* Polilínea (abierta) contra rectángulo */
+  function poliCortaRect(r, pts, cerrada) {
+    if (!pts || !pts.length) return false;
+    for (var i = 0; i < pts.length; i++) if (ptEnRect(r, pts[i][0], pts[i][1])) return true;
+    var n = pts.length - (cerrada ? 0 : 1);
+    for (var k = 0; k < n; k++) {
+      var a = pts[k], b = pts[(k + 1) % pts.length];
+      if (segCortaRect(r, a[0], a[1], b[0], b[1])) return true;
+    }
+    // el marco entero dentro del polígono cerrado (p. ej. una superficie grande)
+    if (cerrada && ptEnPoli(pts, r.x0, r.y0)) return true;
+    return false;
+  }
+  /* Caja girada (un símbolo) contra rectángulo: sus cuatro lados, o el marco
+     entero dentro de la caja. */
+  function cajaCortaRect(r, esquinas) {
+    if (!esquinas) return false;
+    return poliCortaRect(r, esquinas, true);
+  }
+  /* [fin-geometria-marco] — no quitar: tools/prueba-geometria-marco.js recorta
+     desde 'function rectDe' hasta aquí para probar la geometría sola. */
+  /* Recoge lo que cae en el marco.
+     modo 'contiene' (arrastrando hacia la DERECHA): solo lo que entra entero.
+     modo 'toca'     (arrastrando hacia la IZQUIERDA): todo lo que el marco roce,
+     como en AutoCAD y en Bluebeam. */
+  /* ── SELECCIONAR LOS PARECIDOS ──
+     Con algo marcado, coge de golpe todos los de su misma clase EN ESTA HOJA.
+     Qué es "parecido" según lo que sea (lo que un electricista esperaría):
+       símbolo → todos los del mismo símbolo (todos los Duplex, todos los GFCI)
+       pared   → todas las del mismo tipo (todas las de drywall 4½")
+       texto   → todos los textos
+       cable   → todos los del mismo material (todo el EMT ½")
+       cota, callout, tinta, superficie → todos los de su clase
+     Devuelve { refs, comoSeLlama } para poder avisar en cristiano. */
+  function parecidosA(ref) {
+    var e = entityOf(ref);
+    if (!e) return { refs: [], comoSeLlama: '' };
+    var LV = layerVisible, out = [], nom = '';
+    if (ref.kind === 'symbol') {
+      var d = SYMBOLS[e.key], capa = d && d.layer === 'furniture' ? 'furniture' : 'electrical';
+      nom = d ? d.name : 'símbolo';
+      if (LV[capa]) state.symbols.forEach(function (s) { if (s.key === e.key) out.push({ kind: 'symbol', id: s.id }); });
+    } else if (ref.kind === 'count') {
+      var ctC = catCount(e.cat);
+      nom = ctC ? ctC.nom : 'conteo';
+      if (LV.count) state.counts.forEach(function (c) { if (c.cat === e.cat) out.push({ kind: 'count', id: c.id }); });
+    } else if (ref.kind === 'wall') {
+      nom = (WALL_TYPES[e.type] && WALL_TYPES[e.type].name) || 'pared';
+      if (LV.architecture) state.walls.forEach(function (w) { if (w.type === e.type) out.push({ kind: 'wall', id: w.id }); });
+    } else if (ref.kind === 'wire') {
+      nom = 'cable ' + (e.style || '');
+      if (LV.electrical) state.wires.forEach(function (w) { if ((w.style || '') === (e.style || '')) out.push({ kind: 'wire', id: w.id }); });
+    } else if (ref.kind === 'text') {
+      // un callout (el texto en burbuja) no es un rótulo cualquiera: se buscan
+      // los de su misma forma, que es lo que un electricista llamaría "igual"
+      var esBurbuja = e.style === 'circle' || e.style === 'hex';
+      nom = esBurbuja ? 'callout' : 'texto';
+      if (LV.annotation) state.texts.forEach(function (t) {
+        var tb = t.style === 'circle' || t.style === 'hex';
+        if (tb === esBurbuja && (!esBurbuja || t.style === e.style)) out.push({ kind: 'text', id: t.id });
+      });
+    } else if (ref.kind === 'dim') {
+      nom = 'cota';
+      if (LV.annotation) state.dims.forEach(function (t) { out.push({ kind: 'dim', id: t.id }); });
+    } else if (ref.kind === 'leader') {
+      nom = 'nota con flecha';
+      if (LV.annotation) state.leaders.forEach(function (t) { out.push({ kind: 'leader', id: t.id }); });
+    } else if (ref.kind === 'ink') {
+      nom = 'trazo a mano';
+      if (LV.annotation) state.inks.forEach(function (t) { out.push({ kind: 'ink', id: t.id }); });
+    } else if (ref.kind === 'area') {
+      // una superficie se parece a otra si lleva el mismo patrón
+      nom = (AREA_PATTERNS[e.pattern] && AREA_PATTERNS[e.pattern].name) || 'superficie';
+      if (LV.areas) state.areas.forEach(function (ar) { if ((ar.pattern || '') === (e.pattern || '')) out.push({ kind: 'area', id: ar.id }); });
+    }
+    return { refs: out, comoSeLlama: nom };
+  }
+  function seleccionaParecidos() {
+    var base = selRefs();
+    if (!base.length) { setHint('Primero toca uno, y después "Los parecidos" coge todos los de su clase en esta hoja'); return; }
+    var todos = [], nombres = {}, apagada = false;
+    base.forEach(function (r) {
+      var p = parecidosA(r);
+      // si no sale ni él mismo, es que su capa está apagada: no es que no haya
+      if (!p.refs.length && entityOf(r)) apagada = true;
+      p.refs.forEach(function (x) { todos.push(x); });
+      if (p.comoSeLlama) nombres[p.comoSeLlama] = 1;
+    });
+    if (apagada && !todos.length) {
+      setHint('⚠ La capa de eso está apagada — enciéndela en Capas y vuelve a intentarlo');
+      return;
+    }
+    var antes = base.length, n = ponSel(todos.length ? todos : base);
+    var lista = Object.keys(nombres).join(', ');
+    setHint(n <= antes
+      ? 'No hay más ' + (lista || 'elementos') + ' en esta hoja — sigue' + (n === 1 ? ' el que tenías' : 'n los ' + n + ' que tenías')
+      : n + ' ' + (lista || 'elemento(s)') + ' en esta hoja · Supr los borra · Propiedades los cambia todos a la vez');
+  }
+  /* La dirección de la mano decide el modo, igual que en AutoCAD: si el marco
+     se abre hacia la derecha, se lleva lo que entre entero; si se abre hacia la
+     izquierda, todo lo que roce. En el iPad funciona igual con el dedo. */
+  function modoMarco(a, b) { return b[0] < a[0] ? 'toca' : 'contiene'; }
+  function marqueeCollect(a, b, modo) {
+    var toca = modo === 'toca';
+    var r = rectDe(a, b);
+    var x0 = r.x0, x1 = r.x1, y0 = r.y0, y1 = r.y1;
     function inside(x, y) { return x >= x0 && x <= x1 && y >= y0 && y <= y1; }
     var g = [];
     // lo que esta en una capa APAGADA no se selecciona: si no se ve, no se
     // puede borrar con Supr sin querer (auditoria 31/08, reproducido)
     var LV = layerVisible;
-    if (LV.architecture) state.walls.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wall', id: w.id }); });
+    if (LV.architecture) state.walls.forEach(function (w) {
+      var dentro = toca ? segCortaRect(r, w.x1, w.y1, w.x2, w.y2) : (inside(w.x1, w.y1) && inside(w.x2, w.y2));
+      if (dentro) g.push({ kind: 'wall', id: w.id });
+    });
     state.symbols.forEach(function (s) {
       var d = SYMBOLS[s.key], capa = d && d.layer === 'furniture' ? 'furniture' : 'electrical';
-      if (LV[capa] && inside(s.x, s.y)) g.push({ kind: 'symbol', id: s.id });
+      if (!LV[capa]) return;
+      var dentro = toca ? cajaCortaRect(r, symCorners(s)) : inside(s.x, s.y);
+      if (dentro) g.push({ kind: 'symbol', id: s.id });
     });
     if (LV.annotation) {
       state.texts.forEach(function (t) { if (inside(t.x, t.y)) g.push({ kind: 'text', id: t.id }); });
-      state.dims.forEach(function (d) { if (inside(d.x1, d.y1) && inside(d.x2, d.y2)) g.push({ kind: 'dim', id: d.id }); });
+      state.dims.forEach(function (d) {
+        var dentro = toca ? segCortaRect(r, d.x1, d.y1, d.x2, d.y2) : (inside(d.x1, d.y1) && inside(d.x2, d.y2));
+        if (dentro) g.push({ kind: 'dim', id: d.id });
+      });
       state.leaders.forEach(function (l) { if (inside(l.x, l.y)) g.push({ kind: 'leader', id: l.id }); });
       // la tinta entra al grupo si TODO el trazo cae dentro del marco
-      state.inks.forEach(function (k) { if (k.pts.every(function (q) { return inside(q[0], q[1]); })) g.push({ kind: 'ink', id: k.id }); });
+      state.inks.forEach(function (k) {
+        var dentro = toca ? poliCortaRect(r, k.pts, false) : k.pts.every(function (q) { return inside(q[0], q[1]); });
+        if (dentro) g.push({ kind: 'ink', id: k.id });
+      });
     }
-    if (LV.electrical) state.wires.forEach(function (w) { if (inside(w.x1, w.y1) && inside(w.x2, w.y2)) g.push({ kind: 'wire', id: w.id }); });
+    if (LV.count) state.counts.forEach(function (c) {
+      // la marca es un disco: para 'toca' vale que el marco roce el disco
+      var dentro = toca ? cajaCortaRect(r, [[c.x - countR(), c.y - countR()], [c.x + countR(), c.y - countR()], [c.x + countR(), c.y + countR()], [c.x - countR(), c.y + countR()]]) : inside(c.x, c.y);
+      if (dentro) g.push({ kind: 'count', id: c.id });
+    });
+    if (LV.electrical) state.wires.forEach(function (w) {
+      // el cable se curva: para 'toca' se prueba también su punto medio real
+      var dentro = toca
+        ? (segCortaRect(r, w.x1, w.y1, w.x2, w.y2) || ptEnRect(r, (w.x1 + w.x2) / 2, (w.y1 + w.y2) / 2))
+        : (inside(w.x1, w.y1) && inside(w.x2, w.y2));
+      if (dentro) g.push({ kind: 'wire', id: w.id });
+    });
     if (LV.areas) state.areas.forEach(function (ar) {
-      if (ar.pts.every(function (q) { return inside(q[0], q[1]); })) g.push({ kind: 'area', id: ar.id });
+      var dentro = toca ? poliCortaRect(r, ar.pts, !ar.open) : ar.pts.every(function (q) { return inside(q[0], q[1]); });
+      if (dentro) g.push({ kind: 'area', id: ar.id });
     });
     return g;
   }
@@ -5342,8 +5738,21 @@
       // en pantalla es exactamente lo que va a seleccionar
       if (Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) <= marcoMin()) { G.prev.innerHTML = ''; return; }
       var x0 = Math.min(drag.start[0], p[0]), y0 = Math.min(drag.start[1], p[1]);
-      G.prev.innerHTML = '<rect x="' + x0 + '" y="' + y0 + '" width="' + Math.abs(p[0] - drag.start[0]) +
-        '" height="' + Math.abs(p[1] - drag.start[1]) + '" fill="rgba(11,132,255,0.08)" stroke="#0b84ff" stroke-width="0.8" stroke-dasharray="4 3"/>';
+      var an = Math.abs(p[0] - drag.start[0]), al = Math.abs(p[1] - drag.start[1]);
+      /* DOS MARCOS, como en AutoCAD y Bluebeam. Se elige solo, por la mano:
+         hacia la DERECHA = azul entero, se lleva lo que entra COMPLETO;
+         hacia la IZQUIERDA = verde a rayas, se lleva todo lo que TOQUE. */
+      var modo = modoMarco(drag.start, p);
+      var esToca = modo === 'toca';
+      var col = esToca ? '#2E7D1E' : '#2A5BD7';
+      var rel = esToca ? 'rgba(140,240,106,0.16)' : 'rgba(42,91,215,0.09)';
+      var lw = 0.9 / view.z, tam = 9 / view.z;
+      G.prev.innerHTML = '<rect x="' + x0 + '" y="' + y0 + '" width="' + an + '" height="' + al +
+        '" fill="' + rel + '" stroke="' + col + '" stroke-width="' + lw + '"' +
+        (esToca ? ' stroke-dasharray="' + (5 / view.z) + ' ' + (3.5 / view.z) + '"' : '') + '/>' +
+        '<text x="' + (x0 + an / 2) + '" y="' + (y0 - 4 / view.z) + '" text-anchor="middle" fill="' + col +
+        '" font-size="' + tam + '" font-family="system-ui, sans-serif" style="paint-order:stroke;stroke:#f5f4ef;stroke-width:' + (2.4 / view.z) + '">' +
+        (esToca ? 'lo que toque' : 'lo que entre entero') + '</text>';
       return;
     }
     if (drag.mode === 'groupmove') {
@@ -5379,7 +5788,7 @@
           }
         }
       }
-      renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
+      renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderConteo(); renderSel();
       return;
     }
     if (drag.mode === 'rotate') {
@@ -5625,6 +6034,9 @@
       } else if (drag.kind === 'text') {
         e.x = Math.round(o.x + dx); e.y = Math.round(o.y + dy);
         renderAnnot(); renderSel();
+      } else if (drag.kind === 'count') {
+        e.x = Math.round(o.x + dx); e.y = Math.round(o.y + dy);
+        renderConteo(); renderSel();
       } else if (drag.kind === 'wall') {
         e.x1 = Math.round(o.x1 + dx); e.y1 = Math.round(o.y1 + dy);
         e.x2 = Math.round(o.x2 + dx); e.y2 = Math.round(o.y2 + dy);
@@ -5659,16 +6071,20 @@
   }
 
   function onDragEnd() {
+    setTimeout(pintaFlot, 0);   // el arrastre la escondía: vuelve donde quedó la pieza
     if (drag.mode === 'ink') { inkEnd(); drag = null; return; }
     if (drag.mode === 'erase') { if (drag.borrados) { pushUndo(drag.snap); refresh(); setHint('🧽 ' + drag.borrados + ' trazo(s) borrados · Ctrl+Z los devuelve'); } drag = null; return; }
     if (drag.mode === 'marquee') {
       G.prev.innerHTML = '';
       if (drag.cur && Math.hypot(drag.cur[0] - drag.start[0], drag.cur[1] - drag.start[1]) > marcoMin()) {
-        var g = marqueeCollect(drag.start, drag.cur);
-        selGroup = g.length ? g : null;
-        sel = null;
-        renderSel(); showProps();
-        if (selGroup) setHint(selGroup.length + ' elemento(s) seleccionados — arrastra cualquiera para mover el grupo · Supr para borrar');
+        var modoM = modoMarco(drag.start, drag.cur);
+        var g = marqueeCollect(drag.start, drag.cur, modoM);
+        // con Shift el marco SUMA a lo que ya estaba seleccionado
+        if (drag.suma) g = selRefs().concat(g);
+        var n = ponSel(g);
+        setHint(n ? n + ' elemento(s) seleccionados (' + (modoM === 'toca' ? 'lo que tocó el marco' : 'lo que entró entero') +
+          ') — arrastra cualquiera para mover el grupo · Supr los borra'
+          : 'El marco no cogió nada' + (modoM === 'contiene' ? ' — prueba arrastrando hacia la izquierda: así se lleva todo lo que toque' : ''));
       }
       drag = null;
       return;
@@ -5745,6 +6161,7 @@
         return;
       }
       recortaPuntas(wNueva);
+      estampaCofre('wall', wNueva);
       state.walls.push(wNueva);
       ajustaVecinas(wNueva);
       // en cuanto la vuelta cierra, el forro del bloque salta solo al interior
@@ -5845,6 +6262,7 @@
     pushUndo();
     var e = { id: uid(), pts: pts, pattern: 'none', rot: 0 };
     if (isCloud) { e.lineStyle = 'cloud'; e.arco = curCloudArc; }
+    estampaCofre('area', e);
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
@@ -5883,11 +6301,20 @@
       recuerdaCirc(e.circ);
     }
     if (pendingAreaLabel) e.showLabel = true;
+    estampaCofre('area', e);
+    if (esHomerun) { e.lineStyle = 'homerun'; e.capS = 'arrow'; }   // el homerun manda sobre lo del cofre
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
     if (esHomerun) {
-      var fd = $('#prCircDesc'); if (fd) { fd.focus(); }
+      /* NO se le roba el foco al campo (regresión 04/09): al terminar el
+         homerun el cursor saltaba a "Cuarto / carga", así que la siguiente
+         tecla de herramienta (A, W, T…) se escribía DENTRO del campo y
+         quedaba guardada como descripción del circuito en el Panel Schedule.
+         Ahora el campo solo se señala un momento: quien quiera escribir,
+         hace clic; quien quiera seguir dibujando, sigue con sus atajos. */
+      var fd = $('#prCircDesc');
+      if (fd) { fd.classList.add('pideDato'); setTimeout(function () { fd.classList.remove('pideDato'); }, 2600); }
       setHint('⚡ Circuito #' + e.circ.num + ' trazado: ' + fmtFtIn(perimDe(e)) + ' + ' + e.circ.drop + '\' de drop = ' + fmtFtIn(largoHomerun(e)) +
         ' de ' + e.circ.cable + ' · escribe el cuarto y ajusta cable/breaker/drop en Propiedades');
       return;
@@ -5956,17 +6383,19 @@
       var wr = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], style: lastWireStyle, side: 1, bulge: 0.22, lw: lastWireLw };
       if (lastWireCapS && lastWireCapS !== 'none') wr.capS = lastWireCapS;
       if (lastWireCapE && lastWireCapE !== 'none') wr.capE = lastWireCapE;
+      estampaCofre('wire', wr);
       state.wires.push(wr);
       sel = { kind: 'wire', id: wr.id };
       refresh();
     } else if (kind === 'leader') {
-      uiPromptArea('Texto de la nota (Enter = renglón nuevo; ej: GFI, Fridge Outlet, A-30):', '', function (txt) {
+      uiPromptArea('Texto de la nota (Enter = renglón nuevo; ej: GFI, Fridge Outlet, A-30):', textoDeCofre('leader'), function (txt) {
         if (!txt || !txt.trim()) return;
         pushUndo();
         var ld = { id: uid(), tx: a[0], ty: a[1], x: p[0], y: p[1], text: txt, size: 7 };
         // hereda el formato del último callout (fuente, tamaño, color, negrita…)
         var ref = state.leaders[state.leaders.length - 1];
         if (ref) ['size', 'font', 'bold', 'italic', 'color', 'align'].forEach(function (k) { if (ref[k] != null) ld[k] = ref[k]; });
+        estampaCofre('leader', ld);   // lo del cofre manda sobre lo heredado
         state.leaders.push(ld);
         sel = { kind: 'leader', id: ld.id };
         refresh();
@@ -5982,12 +6411,15 @@
       var ln = { id: uid(), open: true, pts: [[a[0], a[1]], [p[0], p[1]]], pattern: 'none' };
       if (curLineStyle !== 'solid') ln.lineStyle = curLineStyle;
       if (curLineCap && curLineCap !== 'none') ln.capE = curLineCap;
+      estampaCofre('area', ln);
       state.areas.push(ln);
       sel = { kind: 'area', id: ln.id };
       refresh();
     } else if (kind === 'dim') {
       pushUndo();
-      state.dims.push({ id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], off: 14 });
+      var dmC = { id: uid(), x1: a[0], y1: a[1], x2: p[0], y2: p[1], off: 14 };
+      estampaCofre('dim', dmC);
+      state.dims.push(dmC);
       renderAnnot();
     } else if (kind === 'calibrate') {
       uiPrompt('Distancia REAL entre los dos puntos:\n(ejemplos:  4\' 6"   ·   12\'   ·   54")', '', function (input) {
@@ -6018,10 +6450,13 @@
   }
   function textDown(p) {
     enciendeCapaTexto();
-    uiPromptArea('Texto (Enter = renglón nuevo):', '', function (t) {
+    // si viene de Mi cofre, el texto guardado sale ya escrito: se acepta con
+    // Enter o se cambia. Propuesto, no impuesto.
+    uiPromptArea('Texto (Enter = renglón nuevo):', textoDeCofre('text'), function (t) {
       if (!t) return;
       pushUndo();
       var e = { id: uid(), x: p[0], y: p[1], text: t, size: 9 };
+      estampaCofre('text', e);
       state.texts.push(e);
       sel = { kind: 'text', id: e.id };
       refresh();
@@ -6047,6 +6482,7 @@
     if (esEcoDeDobleClic('sym:' + placingKey, p[0], p[1])) return;
     pushUndo();
     var e = { id: uid(), key: placingKey, x: Math.round(p[0]), y: Math.round(p[1]), rot: placingRot, scale: 1 };
+    estampaCofre('symbol', e);
     state.symbols.push(e);
     renderSymbols(); refreshCounts();
   }
@@ -6090,7 +6526,7 @@
       var isFav = favs.indexOf(k) >= 0;
       html += '<button class="symBtn' + (tool === 'place' && placingKey === k ? ' active' : '') + '" data-key="' + k + '">' +
         symPreviewSvg(d) + '<span class="nm">' + esc(d.short || d.name) + '</span>' +
-        '<span class="favstar' + (isFav ? ' on' : '') + '" data-fav="' + k + '" title="★ My Tools">★</span></button>';
+        '<span class="favstar' + (isFav ? ' on' : '') + '" data-fav="' + k + '" title="★ Favoritos: tus símbolos de siempre">★</span></button>';
     });
     $('#symList').innerHTML = html || '<span class="muted" style="grid-column:1/-1">' +
       (activeCat === 'fav' ? 'Sin favoritos aún — toca la ★ de cualquier símbolo para agregarlo aquí.' : 'Sin resultados') + '</span>';
@@ -6134,6 +6570,9 @@
     refs.forEach(function (r) {
       var e = entityOf(r);
       if (!e) return;
+      // las aberturas se añaden abajo, con su pared: si además se copiaran aquí
+      // se pegarían DOS puertas en el mismo hueco
+      if (r.kind === 'opening') return;
       items.push({ kind: r.kind, data: JSON.parse(JSON.stringify(e)) });
       if (r.kind === 'wall') {
         wallIds[e.id] = true;
@@ -6173,6 +6612,9 @@
       } else if (it.kind === 'opening') {
         d.wallId = wallMap[d.wallId];
         if (d.wallId) state.openings.push(d);
+      } else if (it.kind === 'count') {
+        d.x += dx; d.y += dy;
+        state.counts.push(d); newRefs.push({ kind: 'count', id: d.id });
       } else if (it.kind === 'symbol' || it.kind === 'text') {
         d.x += dx; d.y += dy;
         state[it.kind === 'symbol' ? 'symbols' : 'texts'].push(d);
@@ -6184,6 +6626,10 @@
         d.x1 += dx; d.y1 += dy; d.x2 += dx; d.y2 += dy;
         state[it.kind === 'dim' ? 'dims' : 'wires'].push(d);
         newRefs.push({ kind: it.kind, id: d.id });
+      } else if (it.kind === 'ink') {
+        // faltaba: se copiaba el trazo del lápiz y al pegar no salía nada
+        d.pts = d.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
+        state.inks.push(d); newRefs.push({ kind: 'ink', id: d.id });
       } else if (it.kind === 'area') {
         d.pts = d.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
         // un homerun pegado es OTRO circuito: número nuevo, mismo cable/breaker
@@ -6419,6 +6865,8 @@
         if (e.rot) e.rot = ((vertical ? 180 - e.rot : -e.rot) % 360 + 360) % 360;
         // (auditoría texto 03/09) se cambiaba e.anchor, un campo que nadie lee
         if (vertical) { var alT = e.align || 'left'; if (alT === 'left') e.align = 'right'; else if (alT === 'right') e.align = 'left'; }
+      } else if (r.kind === 'count') {
+        e.x = mx(e.x); e.y = my(e.y);
       } else if (r.kind === 'leader') {
         e.x = mx(e.x); e.y = my(e.y); e.tx = mx(e.tx); e.ty = my(e.ty);
       } else if (r.kind === 'area') {
@@ -6881,7 +7329,7 @@
     limpiaHuerfanas();
     selGroup = null; sel = null;
     refresh(); renderSel(); showProps();
-    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: botón 🧭 en el panel derecho');
+    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: botón de la brújula en el panel derecho');
   }
   function borrarGuia() {
     if (!state.guia.length) { setHint('🧭 No hay guía en la hoja'); return; }
@@ -7025,7 +7473,9 @@
         state.openings = state.openings.filter(function (o) { return o.wallId !== r.id; });
         state.walls = state.walls.filter(function (w) { return w.id !== r.id; });
       } else {
-        var pool = { symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders' }[r.kind];
+        // 'ink' faltaba: el marco lo seleccionaba y Supr no lo borraba (con el
+        // marco que TOCA pasa a cada rato, antes casi nunca)
+        var pool = { symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks', count: 'counts' }[r.kind];
         if (pool) state[pool] = state[pool].filter(function (x) { return x.id !== r.id; });
       }
     });
@@ -7033,24 +7483,41 @@
     refresh();
   }
 
+  /* "Los parecidos": el botón que coge de golpe todos los de la misma clase.
+     Aparece siempre que hay algo marcado, con uno o con varios. */
+  function botonParecidos() {
+    return '<button id="prParecidos" style="width:100%;margin:6px 0" ' +
+      'title="Coge de una vez todos los de la misma clase que hay en esta hoja (todos los Duplex, todas las paredes de drywall 4½\", todo el EMT…)">' +
+      ICO.svg('varita') + ' Los parecidos de esta hoja</button>';
+  }
+  function enganchaParecidos() {
+    var b = $('#prParecidos');
+    if (b) b.addEventListener('click', seleccionaParecidos);
+  }
   function showProps() {
     var body = $('#propsBody');
     if (selGroup) {
       body.className = 'pbody';
       body.innerHTML = '<div><b>' + selGroup.length + ' elementos seleccionados</b></div>' +
         '<div class="muted small">Arrastra cualquiera para mover el grupo completo</div>' +
+        botonParecidos() +
+        botonesFormato(true, selGroup.length) +
+        bloqueMasivo(selGroup) +
         '<div style="display:flex;gap:6px;margin:6px 0">' +
         '<button id="prRotL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
         '<button id="prRot180" style="flex:1" title="Voltear 180">180°</button></div>' +
-        '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>' +
-        '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">🧩 Calzar con lo puesto</button>' +
-        '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">🎯 Encajar en el plano (guía)</button>' +
-        '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">🧭 Convertir en guía (survey)</button>' +
+        '<button id="prEndG" style="width:100%;margin-bottom:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>' +
+        '<button id="prCalce" style="width:100%;margin-bottom:6px" title="Pega esta pieza a la pared mas cercana de las ya puestas">' + ICO.svg('encaja') + ' Calzar con lo puesto</button>' +
+        '<button id="prEncaja" style="width:100%;margin-bottom:6px" title="Mete esta pieza DENTRO del contorno de guia (el plano del cliente): prueba todos los giros y elige el que mejor encaja">' + ICO.svg('diana') + ' Encajar en el plano (guía)</button>' +
+        '<button id="prGuia" style="width:100%;margin-bottom:6px" title="Las paredes seleccionadas pasan a ser CONTORNO DE GUIA: se ven punteadas, imantan las piezas, y NO cuentan en materiales ni las toca la soldadura. Para el survey de la propiedad.">' + ICO.svg('brujula') + ' Convertir en guía (survey)</button>' +
         '<button id="prFlipDryG" style="width:100%;margin-bottom:6px" title="Cambia de lado la línea fina del drywall en TODAS las paredes de bloque seleccionadas — un clic en vez de una por una">↕ Lado del drywall (grupo)</button>' +
         botonesCad(false) +
-        '<button class="danger" id="prDelGroup" style="margin-top:6px">🗑 Borrar todo el grupo</button>';
+        '<button class="danger" id="prDelGroup" style="margin-top:6px">' + ICO.svg('papelera') + ' Borrar todo el grupo</button>';
       engancharCad();
+      enganchaParecidos();
+      enganchaFormato(selGroup);
+      enganchaMasivo(selGroup);
       var bg = $('#prDelGroup');
       if (bg) bg.addEventListener('click', deleteGroup);
       var bl = $('#prRotL'), br = $('#prRotR'), b8 = $('#prRot180');
@@ -7141,7 +7608,7 @@
         var dice = intr == null ? '' : ((e.drySide || 1) === intr ? ': adentro' : ': AFUERA ⚠');
         html += '<button id="prFlipDry">↕ Drywall' + dice + '</button>';
       }
-      html += '<button class="danger" id="prDelete">🗑 Borrar pared</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar pared</button>';
     } else if (sel.kind === 'opening') {
       html += '<div class="row"><label>Tipo</label><select id="prOpenType">';
       Object.keys(OPEN_NAMES).forEach(function (k) {
@@ -7155,7 +7622,25 @@
       } else if (e.type === 'pocket') {
         html += '<div class="row"><button id="prFlipHinge" title="A qué lado corre la hoja y dónde queda el bolsillo dentro de la pared">↔ Lado del bolsillo</button></div>';
       }
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
+    } else if (sel.kind === 'count') {
+      var ctP = catCount(e.cat);
+      var nOrd = 0, vistos = 0;
+      state.counts.forEach(function (q) { if (q.cat === e.cat) { vistos++; if (q.id === e.id) nOrd = vistos; } });
+      html += '<div><b>' + esc(ctP ? ctP.nom : '(categoría borrada)') + '</b>' +
+        (nOrd ? ' <span class="muted small">· la n.º ' + nOrd + ' de ' + vistos + ' en esta hoja</span>' : '') + '</div>';
+      if (!ctP) {
+        html += '<div class="muted small">Esta marca es de una categoría que ya no existe (se borró en otra hoja). ' +
+          'Bórrala, o vuelve a crear la categoría con ese nombre y cámbiala aquí.</div>';
+      }
+      html += '<div class="row"><label>Cuenta como</label><select id="prCntCat">';
+      catsCount().forEach(function (c) {
+        html += '<option value="' + esc(c.id) + '"' + (c.id === e.cat ? ' selected' : '') + '>' + esc(c.nom) + '</option>';
+      });
+      if (!ctP) html += '<option value="" selected>(categoría borrada)</option>';
+      html += '</select></div>';
+      html += '<div class="muted small">Cambiarla aquí la pasa de una cuenta a la otra: los totales de las dos se ajustan solos.</div>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar esta marca</button>';
     } else if (sel.kind === 'symbol') {
       var def = SYMBOLS[e.key];
       html += '<div><b>' + esc(def.name) + '</b></div>';
@@ -7189,7 +7674,7 @@
       html += '<div class="row"><label>Nota</label><input id="prAttrNote" placeholder="ej: GFCI · WP · DEDICATED" value="' + esc(at.note || '') + '"></div>';
       html += '<div class="row"><label>Descripción</label><input id="prAttrDesc" placeholder="ej: BOMBA DE POZO — SERVICE SIZE 1¼&quot;C" value="' + esc(at.desc || '') + '"></div>';
       html += '<div class="row"><button id="prDup">⧉ Duplicar</button><button id="prRot45">⟳ 45°</button></div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'text') {
       // AREA de texto, no caja de una linea: aqui el Enter hace renglon nuevo.
       // Y la barra de formato va PEGADA debajo y compacta (Edgar, 08/30: "es
@@ -7210,9 +7695,9 @@
         '<button id="prTxtBold" class="' + (e.bold ? 'on' : '') + '" style="font-weight:800" title="Negrita">B</button>' +
         '<button id="prTxtItal" class="' + (e.italic ? 'on' : '') + '" style="font-style:italic" title="Cursiva">I</button>' +
         '<span class="sep"></span>' +
-        '<button class="alBtn ' + (alAct === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">⯇</button>' +
-        '<button class="alBtn ' + (alAct === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
-        '<button class="alBtn ' + (alAct === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
+        '<button class="alBtn ' + (alAct === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">' + ICO.svg('flechaIzq') + '</button>' +
+        '<button class="alBtn ' + (alAct === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">' + ICO.svg('menu') + '</button>' +
+        '<button class="alBtn ' + (alAct === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">' + ICO.svg('flechaDer') + '</button>' +
         '<span class="sep"></span>' +
         '<button id="prTxtGirL" title="Girar 90° a la izquierda">↺</button>' +
         '<input id="prTxtAng" class="n" type="number" step="5" value="' + (+(e.rot || 0)).toFixed(0) + '" title="Ángulo exacto en grados — o arrastra el círculo azul de arriba">' +
@@ -7226,12 +7711,12 @@
         '<option value="plain"' + (!e.style || e.style === 'plain' ? ' selected' : '') + '>Plain text</option>' +
         '<option value="circle"' + (e.style === 'circle' ? ' selected' : '') + '>Bubble ① (conductor #)</option>' +
         '<option value="hex"' + (e.style === 'hex' ? ' selected' : '') + '>Hexagon ⬡ (key note)</option></select></div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'dim') {
       html += '<div class="row"><label>Length</label><input id="prDimLen" value="' + fmtFtIn(Math.hypot(e.x2 - e.x1, e.y2 - e.y1)) + '"></div>';
       html += '<div class="muted small">Doble clic en la cota también edita la medida · arrástrala para separarla</div>';
       html += '<button id="prFlipDim">↕ Cambiar lado</button>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'wire') {
       html += '<div><b>Longitud: ' + fmtFtIn(wireLen(e)) + '</b></div>';
       html += '<div class="row"><label>Etiqueta</label><input id="prWireLabel" placeholder="ej: Feeder (1) FPL→MSB" value="' + esc(e.label || '') + '"></div>';
@@ -7248,8 +7733,8 @@
         }).join('') + '</select></div>';
       html += filasPuntas(e, 'prWireCap');
       if (esCurvo) html += '<button id="prWireFlip">↕ Cambiar lado del arco</button>';
-      html += '<button id="prWireToWall">▬ Convertir en pared</button>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button id="prWireToWall">' + ICO.svg('wall') + ' Convertir en pared</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'ink') {
       html += '<div><b>' + (e.modo === 'hi' ? '🖍 Resaltado' : '✒️ Trazo a mano') + '</b> · ' + fmtFtIn(polyPerim(e.pts, true)) + ' · ' + e.pts.length + ' puntos</div>';
       html += '<div class="row"><label>Color</label><div id="prInkColores" style="display:flex;gap:4px;flex-wrap:wrap">' +
@@ -7259,7 +7744,7 @@
       html += '<div class="row"><label>Grosor</label><input id="prInkLw" type="number" step="0.2" min="0.3" max="30" value="' + (e.lw || (e.modo === 'hi' ? 9 : 1.4)) + '"></div>';
       html += '<div class="row"><label>Opacidad %</label><input id="prInkOp" type="number" min="5" max="100" value="' + (e.op != null ? e.op : (e.modo === 'hi' ? 45 : 100)) + '"></div>';
       html += '<div class="row"><button id="prInkModo">' + (e.modo === 'hi' ? '✒️ Pasar a lápiz' : '🖍 Pasar a resaltador') + '</button></div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'leader') {
       // el callout usa la misma área de texto y la misma barra que el texto
       // (los manejadores de #prText, fuente, tamaño, B/I, alineado y color son
@@ -7281,16 +7766,16 @@
         '<button id="prTxtItal" class="' + (e.italic ? 'on' : '') + '" style="font-style:italic" title="Cursiva">I</button>' +
         '<span class="sep"></span>' +
         '<button class="alBtn ' + (alL === '' ? 'on' : '') + '" data-al="" title="Automático: según el lado de la flecha">↔</button>' +
-        '<button class="alBtn ' + (alL === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">⯇</button>' +
-        '<button class="alBtn ' + (alL === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">☰</button>' +
-        '<button class="alBtn ' + (alL === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">⯈</button>' +
+        '<button class="alBtn ' + (alL === 'left' ? 'on' : '') + '" data-al="left" title="Margen a la izquierda">' + ICO.svg('flechaIzq') + '</button>' +
+        '<button class="alBtn ' + (alL === 'center' ? 'on' : '') + '" data-al="center" title="Centrado">' + ICO.svg('menu') + '</button>' +
+        '<button class="alBtn ' + (alL === 'right' ? 'on' : '') + '" data-al="right" title="Margen a la derecha">' + ICO.svg('flechaDer') + '</button>' +
         '<span class="sep"></span>' +
         COLOR_PRESETS.map(function (c8) {
           return '<span class="sw' + ((e.color || '#14161a') === c8[0] ? ' cur' : '') + '" data-c="' + c8[0] + '" title="' + c8[1] + '" style="background:' + c8[0] + '"></span>';
         }).join('') +
         '</div>';
       html += '<div class="muted small">Doble clic sobre la nota también la edita. Arrastra la nota para moverla; la flecha se queda en su punto.</div>';
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     } else if (sel.kind === 'area') {
       if (e.open && e.circ) {
         var c = e.circ;
@@ -7316,7 +7801,7 @@
         html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo. Cambia el color o el grosor abajo para distinguir circuitos.</div>';
       } else if (e.open) {
         html += '<div><b>Length: ' + fmtFtIn(perimDe(e)) + '</b></div>';
-        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">⚡ Convertir en circuito (homerun)</button>';
+        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">' + ICO.svg('homerun') + ' Convertir en circuito (homerun)</button>';
       } else {
         html += '<div><b>Area: ' + (areaDe(e) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(perimDe(e)) + '</div>';
       }
@@ -7329,7 +7814,7 @@
         html += '<div class="row"><label>Rotación</label><input id="prAreaRot" type="number" step="15" value="' + (e.rot || 0) + '"></div>';
         // relleno de color: resalta el área sin tapar lo de abajo (o sólido al 100 %)
         html += '<div class="row" title="Color del interior. Con opacidad menor a 100 % resalta como marcador: lo de abajo se sigue viendo."><label>Relleno</label><div class="swRow" id="prFillRow">' +
-          '<span class="sw' + (!e.relleno ? ' cur' : '') + '" data-c="" title="Sin relleno" style="background:#fff;color:#a33;font-size:10px;line-height:14px;text-align:center">✕</span>' +
+          '<span class="sw' + (!e.relleno ? ' cur' : '') + '" data-c="" title="Sin relleno" style="background:#fff;color:#a33;font-size:10px;line-height:14px;text-align:center">' + ICO.svg('close') + '</span>' +
           COLOR_PRESETS.map(function (c) {
             return '<span class="sw' + (e.relleno === c[0] ? ' cur' : '') + '" data-c="' + c[0] + '" title="' + c[1] + '" style="background:' + c[0] + '"></span>';
           }).join('') + '</div></div>';
@@ -7400,18 +7885,18 @@
           return '<option value="' + rr9[0] + '"' + ((+(e.rc || 0)) === parseFloat(rr9[0]) ? ' selected' : '') + '>' + rr9[1] + '</option>';
         }).join('') + '</select></div>';
       if (e.bul && e.bul.some(function (v9) { return Math.abs(v9 || 0) > 0.01; })) {
-        html += '<button id="prSinCurva" title="Todos los lados vuelven a ser rectos">⌐ Enderezar los lados curvos</button>';
+        html += '<button id="prSinCurva" title="Todos los lados vuelven a ser rectos">' + ICO.svg('line') + ' Enderezar los lados curvos</button>';
       }
       html += '<div class="row"><label style="flex:1">Mostrar medida</label><input id="prAreaLbl" type="checkbox"' + (e.showLabel ? ' checked' : '') + ' title="Escribe el sq ft (o la longitud) en el plano"></div>';
       if (e.open) {
         // Edgar, 08/30: "hice un dibujo de un counter, que permita convertir
         // en poligono, para poner una isla o peninsula como un counter"
-        html += '<button id="prToPoly">▦ Convertir en polígono (isla / counter)</button>';
-        html += '<button id="prToWall">▬ Convertir en paredes</button>';
+        html += '<button id="prToPoly">' + ICO.svg('area') + ' Convertir en polígono (isla / counter)</button>';
+        html += '<button id="prToWall">' + ICO.svg('wall') + ' Convertir en paredes</button>';
       } else {
-        html += '<button id="prToLine">⌐ Convertir en línea (abrir el contorno)</button>';
+        html += '<button id="prToLine">' + ICO.svg('line') + ' Convertir en línea (abrir el contorno)</button>';
       }
-      html += '<button class="danger" id="prDelete">🗑 Borrar</button>';
+      html += '<button class="danger" id="prDelete">' + ICO.svg('papelera') + ' Borrar</button>';
     }
     if (sel && e) {
       // OPACIDAD: vale para todo lo que se puede seleccionar
@@ -7426,11 +7911,16 @@
         '<button id="prRotSelL" style="flex:1" title="Girar 90 a la izquierda">↺ 90°</button>' +
         '<button id="prRotSelR" style="flex:1" title="Girar 90 a la derecha">↻ 90°</button>' +
         '<button id="prRotSel45" style="flex:1" title="Girar 45">↻ 45°</button></div>' +
-        '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">📐 Enderezar</button>';
+        '<button id="prEndSel" style="width:100%;margin-top:6px" title="Pone la pieza a escuadra (recta)">' + ICO.svg('ortho') + ' Enderezar</button>';
     }
-    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area');
+    if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area') + botonParecidos() + botonesFormato(false, 1);
+    html += '<button id="prCofre" style="width:100%;margin-top:2px" title="Guarda esta marca YA CONFIGURADA como herramienta tuya: después es un solo toque y sale otra igual. Se guarda en este aparato y sirve en todos tus proyectos.">' + ICO.svg('cofre') + ' Guardar como herramienta</button>';
     body.innerHTML = html;
     engancharCad();
+    enganchaParecidos();
+    if (sel.kind !== 'opening') enganchaFormato([sel]);
+    var bCof = $('#prCofre');
+    if (bCof) bCof.addEventListener('click', function () { guardaEnCofre(sel); });
 
     // cada control captura su propio nodo (n) para no leer el valor de otro
     function on(id, evt, fn) {
@@ -7450,6 +7940,13 @@
       renderWalls(); renderAreas(); renderSymbols(); renderAnnot(); renderSel();
     });
     on('prOpac', 'change', function () { prOpacUndo = false; refreshCounts(); scheduleAutosave(); });
+    on('prCntCat', 'change', function (n) {
+      var q = findSel(); if (!q || !n.value || !catCount(n.value)) return;
+      pushUndo();
+      q.cat = n.value;
+      refresh(); refreshCounts();
+      setHint('Esta marca ahora cuenta como ' + catCount(n.value).nom);
+    });
     on('prDelete', 'click', deleteSelected);
     on('prRotSelL', 'click', function () { pushUndo(); rotateRefs([sel], -90); refresh(); renderSel(); });
     on('prRotSelR', 'click', function () { pushUndo(); rotateRefs([sel], 90); refresh(); renderSel(); });
@@ -7786,11 +8283,1076 @@
       state.walls = state.walls.filter(function (w) { return w.id !== e.id; });
       state.openings = state.openings.filter(function (o) { return o.wallId !== e.id; });
     } else {
-      var pool = { opening: 'openings', symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks' }[sel.kind];
+      var pool = { opening: 'openings', symbol: 'symbols', text: 'texts', dim: 'dims', area: 'areas', wire: 'wires', leader: 'leaders', ink: 'inks', count: 'counts' }[sel.kind];
       state[pool] = state[pool].filter(function (x) { return x.id !== e.id; });
     }
     sel = null;
     refresh();
+  }
+
+
+  /* ==================================================================
+     COUNT — CONTEO MANUAL (fase 5.5)
+     Para lo que NO dibujas: el plano del ingeniero ya trae los 47 cans y
+     los 63 receptáculos, y hay que contarlos para cotizar. Aquí se marca
+     cada uno con un toque y el total va corriendo por hoja y por set.
+
+     Las CATEGORÍAS son del PROYECTO (state.countCats), no de la hoja: el
+     mismo "Recept 20A" se cuenta en E-1, E-2 y E-3 y suma en el set.
+     Las MARCAS (state.counts) van por hoja, como el resto del dibujo.
+     ================================================================== */
+  var COUNT_FORMAS = { circ: 'Círculo', cuad: 'Cuadrado', rombo: 'Rombo', tri: 'Triángulo', equis: 'Equis', cruz: 'Cruz' };
+  var COUNT_COLORES = [['#d62828', 'Rojo'], ['#0b84ff', 'Azul'], ['#0a8f3c', 'Verde'], ['#f08c00', 'Naranja'],
+                       ['#8b3dbe', 'Morado'], ['#0b7285', 'Turquesa'], ['#c2255c', 'Fucsia'], ['#14161a', 'Negro']];
+  var COUNT_FORMA_ORDEN = ['circ', 'cuad', 'rombo', 'tri', 'equis', 'cruz'];
+  var catActiva = null;          // la categoría con la que se está contando
+
+  function catsCount() { if (!Array.isArray(state.countCats)) state.countCats = []; return state.countCats; }
+  function catCount(id) { var a = catsCount(); for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i]; return null; }
+  /* El tamaño de la marca sigue al de los devices: si Edgar bajó los símbolos
+     porque "están muy grandes", las marcas del conteo bajan con ellos. */
+  function countR() { return 9 * ((state.symEsc || 0.5) / 0.5); }
+
+  /* extra (opcional) viene de la Biblioteca de takeoff: alias = el Subject de
+     Bluebeam que el estimador ya entiende, set = de qué tool set salió, item =
+     el item del catálogo si casó exacto, color = el original de Bluebeam. */
+  function nuevaCatCount(nom, extra) {
+    var a = catsCount();
+    var col = COUNT_COLORES[a.length % COUNT_COLORES.length][0];
+    var frm = COUNT_FORMA_ORDEN[Math.floor(a.length / COUNT_COLORES.length) % COUNT_FORMA_ORDEN.length];
+    var c = { id: uid(), nom: String(nom || '').trim().slice(0, 60) || ('Conteo ' + (a.length + 1)), color: col, forma: frm, num: true };
+    if (extra && typeof extra === 'object') {
+      if (extra.alias) c.alias = String(extra.alias).slice(0, 80);
+      if (extra.set) c.set = String(extra.set).slice(0, 40);
+      if (extra.item) c.item = String(extra.item).slice(0, 80);
+      if (extra.unidad) c.unidad = String(extra.unidad).slice(0, 8);
+      if (extra.codigo && esCodigo(extra.codigo)) c.codigo = extra.codigo;
+      if (extra.color && /^#[0-9a-f]{6}$/i.test(extra.color)) c.color = extra.color;
+    }
+    a.push(c);
+    return c;
+  }
+  /* Si no hay ninguna categoría todavía, se crea una en el acto: contar no
+     puede empezar con un formulario. Se llama "Conteo 1" y se renombra
+     cuando quiera desde el ▾ o desde Propiedades. */
+  function catActivaSegura() {
+    var c = catActiva ? catCount(catActiva) : null;
+    if (!c) c = catsCount()[0] || nuevaCatCount('');
+    catActiva = c.id;
+    return c;
+  }
+
+  /* --- el dibujo de una marca --- */
+  function countFormaPath(forma, x, y, r) {
+    if (forma === 'cuad') return '<rect x="' + (x - r) + '" y="' + (y - r) + '" width="' + (r * 2) + '" height="' + (r * 2) + '" rx="' + (r * 0.22).toFixed(2) + '"/>';
+    if (forma === 'rombo') return '<path d="M' + x + ',' + (y - r) + ' L' + (x + r) + ',' + y + ' L' + x + ',' + (y + r) + ' L' + (x - r) + ',' + y + ' Z"/>';
+    if (forma === 'tri') return '<path d="M' + x + ',' + (y - r) + ' L' + (x + r * 0.93) + ',' + (y + r * 0.62) + ' L' + (x - r * 0.93) + ',' + (y + r * 0.62) + ' Z"/>';
+    if (forma === 'equis' || forma === 'cruz') return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '"/>';
+    return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '"/>';
+  }
+  function countMarkup(c, n) {
+    var ct = catCount(c.cat);
+    var col = ct ? ct.color : '#8a8578';
+    var r = countR();
+    var g = '<g class="cnt" data-id="' + c.id + '"' + opAttr(c) + '>';
+    g += '<g fill="' + col + '" fill-opacity="0.9" stroke="#ffffff" stroke-width="' + (r * 0.16).toFixed(2) + '">' +
+      countFormaPath(ct ? ct.forma : 'circ', c.x, c.y, r) + '</g>';
+    if (ct && ct.forma === 'equis') {
+      var q = r * 0.5;
+      g += '<path d="M' + (c.x - q) + ',' + (c.y - q) + ' L' + (c.x + q) + ',' + (c.y + q) +
+        ' M' + (c.x + q) + ',' + (c.y - q) + ' L' + (c.x - q) + ',' + (c.y + q) +
+        '" stroke="#ffffff" stroke-width="' + (r * 0.24).toFixed(2) + '" fill="none" stroke-linecap="round"/>';
+    } else if (ct && ct.forma === 'cruz') {
+      var q2 = r * 0.55;
+      g += '<path d="M' + (c.x - q2) + ',' + c.y + ' L' + (c.x + q2) + ',' + c.y +
+        ' M' + c.x + ',' + (c.y - q2) + ' L' + c.x + ',' + (c.y + q2) +
+        '" stroke="#ffffff" stroke-width="' + (r * 0.24).toFixed(2) + '" fill="none" stroke-linecap="round"/>';
+    } else if (!ct || ct.num !== false) {
+      // el número que lleva: es lo que deja VERIFICAR que no se saltó ninguno
+      g += '<text x="' + c.x + '" y="' + (c.y + r * 0.38) + '" text-anchor="middle" font-size="' + (r * 1.15).toFixed(2) +
+        '" font-weight="700" fill="#ffffff" style="paint-order:stroke" stroke="none">' + n + '</text>';
+    }
+    return g + '</g>';
+  }
+  function renderConteo() {
+    if (!G.count) return;
+    var ord = {}, s2 = '';
+    state.counts.forEach(function (c) {
+      ord[c.cat] = (ord[c.cat] || 0) + 1;
+      s2 += countMarkup(c, ord[c.cat]);
+    });
+    G.count.innerHTML = s2;
+  }
+
+  /* --- totales --- */
+  function conteoDeHoja() {
+    var m = {};
+    state.counts.forEach(function (c) { m[c.cat] = (m[c.cat] || 0) + 1; });
+    return m;
+  }
+  /* El total del SET. La hoja viva se cuenta de state (lo que se ve ahora
+     mismo, sin esperar al syncSheet); las demás, leyendo su data guardada.
+     Una hoja con datos dañados no rompe el total: se salta y se dice. */
+  function conteoDelProyecto() {
+    var m = {}, rotas = 0;
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet) { state.counts.forEach(function (c) { m[c.cat] = (m[c.cat] || 0) + 1; }); return; }
+      if (!sh || typeof sh.data !== 'string') return;
+      var o = null;
+      try { o = JSON.parse(sh.data); } catch (e) { rotas++; return; }
+      if (!o || !Array.isArray(o.counts)) return;
+      o.counts.forEach(function (c) { if (c && c.cat) m[c.cat] = (m[c.cat] || 0) + 1; });
+    });
+    m.__rotas = rotas;
+    return m;
+  }
+
+  /* --- colocar una marca --- */
+  function countDown(p) {
+    var ct = catActivaSegura();
+    var x = Math.round(p[0]), y = Math.round(p[1]);
+    // mismo cuidado que al colocar símbolos: el segundo clic de un doble clic
+    // metía una marca gemela debajo y el total salía inflado
+    if (esEcoDeDobleClic('cnt:' + ct.id, x, y)) return;
+    if (!layerVisible.count) {
+      setHint('⚠ La capa Count está apagada: enciéndela en Capas para ver lo que marcas');
+      return;
+    }
+    pushUndo();
+    var cM = { id: uid(), x: x, y: y, cat: ct.id };
+    estampaCofre('count', cM);
+    cM.cat = ct.id;                    // la categoría activa manda, no la del cofre
+    state.counts.push(cM);
+    renderConteo(); refreshCounts();
+    var hj = conteoDeHoja()[ct.id] || 0, pr = conteoDelProyecto()[ct.id] || 0;
+    setHint('✔ ' + ct.nom + ' — ' + hj + ' en esta hoja' +
+      ((state.sheets || []).length > 1 ? ' · ' + pr + ' en todo el set' : '') +
+      ' · toca otro, o Esc para salir');
+  }
+
+  /* --- gestión de categorías --- */
+  function pideNuevaCat() {
+    uiPrompt('Nombre de lo que vas a contar (ej: Recept 20A, Can 6", Switch 3-way)', '', function (v) {
+      if (v == null) return;
+      pushUndo();
+      var c = nuevaCatCount(v);
+      catActiva = c.id;
+      setTool('count');
+      refreshCounts();
+      setHint('Contando ' + c.nom + ' — toca cada uno en el plano');
+    });
+  }
+  function renombraCat(id) {
+    var c = catCount(id); if (!c) return;
+    uiPrompt('Nombre de la categoría', c.nom, function (v) {
+      if (v == null) return;
+      pushUndo();
+      c.nom = String(v).trim().slice(0, 60) || c.nom;
+      refresh(); refreshCounts();
+    });
+  }
+  function borraCat(id) {
+    var c = catCount(id); if (!c) return;
+    var enHoja = conteoDeHoja()[id] || 0, enSet = conteoDelProyecto()[id] || 0;
+    var otras = enSet - enHoja;
+    uiConfirm('Borrar la categoría "' + c.nom + '" y sus ' + enHoja + ' marca(s) de esta hoja' +
+      (otras > 0 ? '.\n\nOJO: en otras hojas quedan ' + otras + ' marca(s) de esta categoría. Esas NO se borran aquí; se van a ver en gris como "(categoría borrada)" hasta que abras esa hoja y las quites.' : '.'),
+      function (ok) {
+        if (!ok) return;
+        pushUndo();
+        state.counts = state.counts.filter(function (q) { return q.cat !== id; });
+        state.countCats = catsCount().filter(function (q) { return q.id !== id; });
+        if (catActiva === id) catActiva = null;
+        // lo que quedaba seleccionado de esa categoría ya no existe
+        ponSel(selRefs());
+        refresh(); refreshCounts();
+        setHint('Categoría "' + c.nom + '" borrada' + (otras > 0 ? ' — quedan ' + otras + ' marca(s) suyas en otras hojas' : ''));
+      });
+  }
+  function marcaCatEnHoja(id) {
+    var c = catCount(id); if (!c) return;
+    if (!layerVisible.count) { setHint('⚠ La capa Count está apagada: enciéndela para poder marcarlas'); return; }
+    var refs = state.counts.filter(function (q) { return q.cat === id; }).map(function (q) { return { kind: 'count', id: q.id }; });
+    if (!refs.length) { setHint('No hay ninguna marca de "' + c.nom + '" en esta hoja'); return; }
+    if (tool !== 'select') setTool('select');
+    var n = ponSel(refs);
+    setHint('✔ ' + n + ' marca(s) de ' + c.nom + ' seleccionadas — Supr las borra todas');
+  }
+  /* El CSV del conteo: una fila por categoría y hoja, más el total. Es lo
+     que va al estimado, así que lleva las dos columnas separadas. */
+  function conteoCsv() {
+    var cats = catsCount();
+    if (!cats.length) { uiAlert('Todavía no hay ninguna categoría de conteo.'); return; }
+    var hojas = state.sheets || [];
+    var csv = conteoCsvTexto();
+    saveFile((state.project.name || 'proyecto') + '_conteo.csv', csv);
+    setHint('Conteo exportado a CSV (' + cats.length + ' categoría(s) × ' + hojas.length + ' hoja(s))');
+  }
+  function conteoCsvTexto() {
+    var cats = catsCount();
+    var hojas = state.sheets || [];
+    var porHoja = hojas.map(function (sh, i) {
+      if (i === state.curSheet) return conteoDeHoja();
+      var m = {};
+      if (sh && typeof sh.data === 'string') {
+        try {
+          var o = JSON.parse(sh.data);
+          if (o && Array.isArray(o.counts)) o.counts.forEach(function (c) { if (c && c.cat) m[c.cat] = (m[c.cat] || 0) + 1; });
+        } catch (e) {}
+      }
+      return m;
+    });
+    var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set', 'Código de partida'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
+    cats.forEach(function (c) {
+      var tot = 0;
+      var fila = [c.nom, c.alias || c.nom, c.item || '', c.set || '', codigoDeCat(c)].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
+      fila.push(tot);
+      rows.push(fila);
+    });
+    return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+  }
+
+  /* --- el bloque del conteo dentro del panel Materiales --- */
+  function conteoBloqueHtml() {
+    var cats = catsCount();
+    var hoja = conteoDeHoja(), set = conteoDelProyecto();
+    var varias = (state.sheets || []).length > 1;
+    var h = '<tr class="cat"><td colspan="2">Conteo manual (Count)' + (varias ? ' — esta hoja / todo el set' : '') + '</td></tr>';
+    if (!cats.length) {
+      h += '<tr><td colspan="2" class="muted small">Sin categorías todavía — coge Count en la barra y toca el plano</td></tr>';
+      return h;
+    }
+    var totH = 0, totS = 0;
+    cats.forEach(function (c) {
+      var nh = hoja[c.id] || 0, ns = set[c.id] || 0;
+      totH += nh; totS += ns;
+      h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
+        '<td><span class="cntChip" style="background:' + esc(c.color) + '"></span>' + esc(c.nom) +
+        (c.item ? ' <span class="muted small" title="Item del catálogo del estimador">· catálogo</span>' : (c.alias ? ' <span class="muted small" title="Tool de Bluebeam sin item en el catálogo: al estimador llega por alias">· sin item</span>' : '')) +
+        ' <span class="cntCod' + (c.codigo ? '' : ' def') + '" title="' + (c.codigo ? 'Código de partida' : 'Sin código propio: sale como ' + CODIGO_DEFECTO + '. Cámbialo en Count ▾ → Código de partida') + '">' + esc(codigoDeCat(c)) + '</span>' +
+        (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
+        '<td class="n">' + nh + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
+    });
+    h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
+    if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
+    h += '<tr><td colspan="2" style="padding-top:6px">' +
+      '<button id="cntNueva" style="width:100%;margin-bottom:4px" title="Crear otra categoría de conteo">Nueva categoría de conteo</button>' +
+      '<button id="cntTlib" style="width:100%;margin-bottom:4px" title="Tus 17 tool sets de Bluebeam (Boxes, Receptacles, Lights, Fire Alarm…): eliges qué contar y cada categoría llega al estimador con el nombre que ya entiende">Biblioteca de takeoff</button>' +
+      '<button id="cntCsv" style="width:100%" title="Exportar el conteo a CSV: una columna por hoja y el total del set">Conteo a CSV</button></td></tr>';
+    return h;
+  }
+  function enganchaConteoPanel() {
+    var bN = $('#cntNueva'); if (bN) bN.addEventListener('click', pideNuevaCat);
+    var bT = $('#cntTlib'); if (bT) bT.addEventListener('click', abreTlib);
+    var bC = $('#cntCsv'); if (bC) bC.addEventListener('click', conteoCsv);
+    $$('#countsBody tr.cntFila').forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        catActiva = tr.dataset.cat;
+        setTool('count');
+        var c = catCount(catActiva);
+        refreshCounts();
+        setHint('Contando ' + (c ? c.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+      });
+    });
+  }
+
+  /* ==================================================================
+     BIBLIOTECA DE TAKEOFF (punto E1)
+     Los 17 tool sets de Bluebeam de Edgar, ya cruzados con el catálogo del
+     estimador (js/takeoff-lib.js, generado por tools/genera-takeoff-lib.js).
+     Aquí NO se cuenta nada: se eligen categorías. Cada una nace con el
+     Subject de Bluebeam como alias — el nombre que el estimador entiende —
+     y, si casó exacto, con el item del catálogo. Los tools de LARGO
+     (Feeders, Branch Circuits) se ven pero no se añaden: eso va por Medir /
+     Cable y es el punto E5.
+     ================================================================== */
+  var tlibAbiertos = {};          // tool sets desplegados en el panel
+  var tlibMarcados = {};          // subj marcados con el checkbox (por set|subj)
+  function tlibSets() { var L = window.TAKEOFF_LIB; return (L && Array.isArray(L.sets)) ? L.sets : []; }
+  function tlibKey(setNom, subj) { return setNom + '|' + subj; }
+  /* Qué categorías del proyecto vienen ya de la biblioteca: por alias, o por
+     nombre si la creó a mano con el mismo texto. */
+  function tlibEnProyecto() {
+    var m = {};
+    catsCount().forEach(function (c) { var k = String(c.alias || c.nom || '').trim().toUpperCase(); if (k) m[k] = c; });
+    return m;
+  }
+  function tlibFiltroTxt() { var i = $('#tlibTxt'); return i ? String(i.value || '').trim().toUpperCase() : ''; }
+  function tlibPasaFiltro(it, q, soloCat) {
+    if (soloCat && !it.item) return false;
+    if (!q) return true;
+    var pal = q.split(/\s+/);
+    var txt = (it.subj + ' ' + (it.item || '') + ' ' + (it.material || '')).toUpperCase();
+    return pal.every(function (w) { return txt.indexOf(w) >= 0; });
+  }
+  function pintaTlib() {
+    var L = $('#tlibLista'); if (!L) return;
+    var sets = tlibSets();
+    if (!sets.length) { L.innerHTML = '<div class="bMuted">La biblioteca no cargó (js/takeoff-lib.js). Recarga la app.</div>'; return; }
+    var q = tlibFiltroTxt(), soloCat = !!($('#tlibSoloCat') && $('#tlibSoloCat').checked);
+    var enP = tlibEnProyecto();
+    var h = '', nVis = 0, nMarc = 0;
+    sets.forEach(function (st) {
+      var vis = st.items.filter(function (it) { return tlibPasaFiltro(it, q, soloCat); });
+      if (!vis.length) return;
+      var abierto = q ? true : !!tlibAbiertos[st.nom];
+      var nYa = 0, nLargo = 0, nCat = 0;
+      st.items.forEach(function (it) { if (it.tipo === 'largo' || it.descartado) nLargo++; else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
+      var nCont = st.items.length - nLargo;
+      h += '<div class="tlSet' + (abierto ? ' on' : '') + '" data-set="' + esc(st.nom) + '">' +
+        '<span class="tlFlecha"></span><span class="tlNom">' + esc(st.nom) + '</span>' +
+        '<span class="tlN">' + (nCont ? nCont + ' ' + (nCont === 1 ? 'tool' : 'tools') : '') + (nLargo ? (nCont ? ' · ' : '') + nLargo + ' de largo' : '') +
+        (nYa ? ' · <b>' + nYa + ' en el proyecto</b>' : '') + '</span>' +
+        (nCont && nYa < nCont ? '<button class="tlTodo" data-set="' + esc(st.nom) + '" title="Añadir al proyecto todos los tools de conteo de este set que aún no estén">Todo el set</button>' : '') +
+        '</div>';
+      if (!abierto) return;
+      vis.forEach(function (it) {
+        nVis++;
+        var ya = it.tipo !== 'largo' && !it.descartado && enP[it.subj.toUpperCase()];
+        var k = tlibKey(st.nom, it.subj);
+        var marc = !ya && it.tipo !== 'largo' && !it.descartado && tlibMarcados[k]; if (marc) nMarc++;
+        var det;
+        if (it.descartado) det = 'descartado — equipo que ya no se usa (Edgar, 14/09)';
+        else if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
+        else if (ya) det = 'ya en el proyecto';
+        else if (it.item) det = (it.item.replace(/\s+/g, ' ').toUpperCase() === it.subj.replace(/\s+/g, ' ').toUpperCase() ? 'en el catálogo' : 'catálogo: ' + esc(it.item.replace(/\s+/g, ' '))) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.via === 'propuesto' ? ' · propuesto' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
+        else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
+        h += '<label class="tlFila' + (ya ? ' ya' : '') + ((it.tipo === 'largo' || it.descartado) ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
+          '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo' || it.descartado) ? ' disabled' : '') + '>' +
+          '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
+          '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + '</span></span></label>';
+      });
+    });
+    if (!h) h = '<div class="bMuted">Nada casa con "' + esc(q) + '"' + (soloCat ? ' entre los que tienen item en el catálogo' : '') + '.</div>';
+    L.innerHTML = h;
+    var nSel = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).length;
+    var sp = $('#tlibSel'); if (sp) sp.textContent = nSel ? nSel + ' marcado(s)' : '';
+    var bA = $('#tlibAnadir'); if (bA) bA.disabled = !nSel;
+    var nT = $('#tlibN'); if (nT) { var tot = 0, ya = 0; sets.forEach(function (st) { st.items.forEach(function (it) { if (it.tipo !== 'largo') { tot++; if (enP[it.subj.toUpperCase()]) ya++; } }); }); nT.textContent = ya + ' de ' + tot + ' en el proyecto'; }
+  }
+  function tlibItemDe(k) {
+    var i = k.indexOf('|'); if (i < 0) return null;
+    var sn = k.slice(0, i), sj = k.slice(i + 1), out = null;
+    tlibSets().forEach(function (st) { if (st.nom !== sn) return; st.items.forEach(function (it) { if (it.subj === sj) out = { set: st, it: it }; }); });
+    return out;
+  }
+  /* Añadir categorías: una sola → queda activa y se enciende Count; varias →
+     quedan en el panel Conteo y en Count ▾, sin cambiar la herramienta. */
+  function tlibAnade(pares) {
+    var enP = tlibEnProyecto(), nuevas = [];
+    pares.forEach(function (pr) {
+      if (!pr || !pr.it || pr.it.tipo === 'largo' || pr.it.descartado) return;
+      var k = pr.it.subj.toUpperCase();
+      if (enP[k]) return;
+      var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color, codigo: pr.it.codigo });
+      enP[k] = c; nuevas.push(c);
+    });
+    return nuevas;
+  }
+  function tlibAnadirMarcados() {
+    var pares = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).map(tlibItemDe).filter(Boolean);
+    if (!pares.length) return;
+    pushUndo();
+    var nuevas = tlibAnade(pares);
+    if (!nuevas.length) { popUndoVacio(); setHint('Esas ya estaban en el proyecto'); return; }
+    tlibMarcados = {};
+    tlibTrasAnadir(nuevas);
+  }
+  function tlibAnadirSet(setNom) {
+    var st = null; tlibSets().forEach(function (x) { if (x.nom === setNom) st = x; });
+    if (!st) return;
+    pushUndo();
+    var nuevas = tlibAnade(st.items.map(function (it) { return { set: st, it: it }; }));
+    if (!nuevas.length) { popUndoVacio(); setHint('Todo "' + st.nom + '" ya estaba en el proyecto'); return; }
+    tlibTrasAnadir(nuevas);
+  }
+  function popUndoVacio() { try { if (undoStack && undoStack.length) undoStack.pop(); } catch (e) {} }
+  function tlibTrasAnadir(nuevas) {
+    if (nuevas.length === 1) {
+      // una sola: la quiere contar YA — el panel se quita de encima del plano
+      catActiva = nuevas[0].id;
+      setTool('count');
+      cierraTlib();
+      setHint('Contando ' + nuevas[0].nom + ' — toca cada uno en el plano');
+    } else {
+      setHint('✔ ' + nuevas.length + ' categorías añadidas — están en el panel Conteo y en Count ▾');
+    }
+    refresh(); refreshCounts(); pintaTlib();
+  }
+  function abreTlib() {
+    var b = $('#tlibBox'); if (!b) return;
+    b.classList.remove('oculto');
+    pintaTlib();
+    var i = $('#tlibTxt'); if (i && !document.body.classList.contains('touch')) { try { i.focus(); } catch (e) {} }
+  }
+  function cierraTlib() { var b = $('#tlibBox'); if (b) b.classList.add('oculto'); }
+  function enganchaTlib() {
+    var b = $('#tlibBox'); if (!b) return;
+    arrastraPanel($('#tlibCab'), b);
+    var bc = $('#tlibCerrar'); if (bc) bc.addEventListener('click', cierraTlib);
+    var i = $('#tlibTxt'); if (i) i.addEventListener('input', pintaTlib);
+    var sc = $('#tlibSoloCat'); if (sc) sc.addEventListener('change', pintaTlib);
+    var bA = $('#tlibAnadir'); if (bA) bA.addEventListener('click', tlibAnadirMarcados);
+    var L = $('#tlibLista');
+    if (L) {
+      L.addEventListener('click', function (ev) {
+        var bt = ev.target.closest && ev.target.closest('.tlTodo');
+        if (bt) { ev.preventDefault(); ev.stopPropagation(); tlibAnadirSet(bt.dataset.set); return; }
+        var cab = ev.target.closest && ev.target.closest('.tlSet');
+        if (cab) { tlibAbiertos[cab.dataset.set] = !tlibAbiertos[cab.dataset.set]; pintaTlib(); return; }
+      });
+      L.addEventListener('change', function (ev) {
+        var fila = ev.target.closest && ev.target.closest('.tlFila');
+        if (!fila || ev.target.type !== 'checkbox') return;
+        tlibMarcados[fila.dataset.k] = !!ev.target.checked;
+        var nSel = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).length;
+        var sp = $('#tlibSel'); if (sp) sp.textContent = nSel ? nSel + ' marcado(s)' : '';
+        var bA2 = $('#tlibAnadir'); if (bA2) bA2.disabled = !nSel;
+      });
+    }
+  }
+  enganchaTlib();
+  window.__tlibDbg = { abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
+
+
+  /* ==================================================================
+     MATCH PROPERTIES / COPIAR FORMATO y EDICIÓN MASIVA (fase 5.7)
+
+     Dos cosas que en Bluebeam y en AutoCAD se usan a diario:
+     · COPIAR FORMATO (Format Painter / MATCHPROP): coges el aspecto de una
+       marca y se lo pasas a las demás con un toque cada una.
+     · EDICIÓN MASIVA: con veinte cosas seleccionadas, cambiar de una vez lo
+       que TODAS tienen en común — color, tamaño, grosor, tipo de pared,
+       material del cable, el circuito de doce receptáculos…
+
+     Qué es "formato" y qué no: el formato es el ASPECTO (color, grosor,
+     tamaño, tipo). NO viaja la posición, ni el giro, ni el texto escrito, ni
+     el largo: eso es la pieza, no su aspecto. Copiar un rótulo no debe
+     copiar lo que dice.
+     ================================================================== */
+  var FORMATO_CAMPOS = {
+    wall:    ['type', 'op'],
+    opening: ['type', 'w', 'op'],
+    symbol:  ['scale', 'sx', 'sy', 'raya', 'bg', 'op'],
+    text:    ['size', 'font', 'color', 'align', 'bold', 'italic', 'style', 'op'],
+    leader:  ['size', 'font', 'color', 'align', 'bold', 'italic', 'op'],
+    dim:     ['op'],
+    wire:    ['style', 'lw', 'capS', 'capE', 'op'],
+    area:    ['pattern', 'lineStyle', 'lw', 'color', 'relleno', 'rellenoOp', 'arco', 'op'],
+    ink:     ['modo', 'color', 'lw', 'op'],
+    count:   ['cat', 'op']
+  };
+  /* Estos campos SOLO viajan entre piezas del mismo tipo: 'style' quiere decir
+     una cosa en un texto (burbuja/hexágono), otra en un cable (EMT, PVC) y
+     otra en una superficie. Pasarlos de una clase a otra sería un disparate
+     silencioso. */
+  var FORMATO_SOLO_IGUAL = { style: 1, type: 1, pattern: 1, cat: 1, w: 1, modo: 1, arco: 1, relleno: 1, rellenoOp: 1 };
+  /* Lo que hay que hacer DESPUÉS de escribir un campo (el grosor de la pared
+     sale de su tipo, y tocarlo a mano la marca como manual para que Soldar no
+     se la vuelva a cambiar). */
+  var FORMATO_TRAS = {
+    wall: function (e, k) { if (k === 'type' && WALL_TYPES[e.type]) { e.t = WALL_TYPES[e.type].t; e.manual = 1; } },
+    opening: function (e, k) { if (k === 'type' && OPEN_DEFAULT[e.type] && e.w == null) e.w = OPEN_DEFAULT[e.type]; }
+  };
+  var formatoClip = null;     // { kind, nom, props }
+  var pincelPuestos = 0;      // cuántas van en esta pasada del pincel
+  /* En la PC el origen se cambia con SHIFT+toque. En el iPad no hay Shift:
+     por eso el ▾ del botón trae "Coger otro origen", que arma el próximo
+     toque para eso. Sin esto, en el iPad había que salir y volver a entrar. */
+  var pincelCogeOrigen = false;
+
+  function formatoDe(kind, e) {
+    var campos = FORMATO_CAMPOS[kind];
+    if (!campos || !e) return null;
+    var out = {};
+    campos.forEach(function (k) { out[k] = (e[k] === undefined) ? null : e[k]; });
+    return out;
+  }
+  /* Aplica lo que SEA APLICABLE y devuelve cuántos campos cambiaron. Si la
+     pieza de destino no comparte nada con la de origen, devuelve 0 y quien
+     llama lo dice en cristiano: nunca se hace el que trabajó sin trabajar. */
+  function aplicaFormato(ref, fmt, kindOrigen) {
+    var e = entityOf(ref); if (!e || !fmt) return 0;
+    var campos = FORMATO_CAMPOS[ref.kind]; if (!campos) return 0;
+    var mismo = (ref.kind === kindOrigen), n = 0;
+    campos.forEach(function (k) {
+      if (!(k in fmt)) return;
+      if (!mismo && FORMATO_SOLO_IGUAL[k]) return;
+      var v = fmt[k];
+      var antes = (e[k] === undefined) ? null : e[k];
+      if (antes === v) return;
+      if (v === null || v === undefined) delete e[k]; else e[k] = v;
+      n++;
+    });
+    if (n && FORMATO_TRAS[ref.kind]) campos.forEach(function (k) { if (k in fmt) FORMATO_TRAS[ref.kind](e, k); });
+    return n;
+  }
+  function nombreDe(ref) {
+    var e = entityOf(ref); if (!e) return 'eso';
+    if (ref.kind === 'wall') return (WALL_TYPES[e.type] || {}).name || 'pared';
+    if (ref.kind === 'symbol') return (SYMBOLS[e.key] || {}).name || 'símbolo';
+    if (ref.kind === 'text') return 'texto';
+    if (ref.kind === 'leader') return 'nota';
+    if (ref.kind === 'dim') return 'cota';
+    if (ref.kind === 'wire') return WIRE_STYLE_NAMES[e.style || 'dashed'] || 'cable';
+    if (ref.kind === 'area') return e.open ? 'línea' : ((AREA_PATTERNS[e.pattern] || {}).name || 'superficie');
+    if (ref.kind === 'ink') return e.modo === 'hi' ? 'resaltado' : 'trazo a mano';
+    if (ref.kind === 'count') { var c = catCount(e.cat); return c ? c.nom : 'conteo'; }
+    if (ref.kind === 'opening') return OPEN_NAMES[e.type] || 'abertura';
+    return ref.kind;
+  }
+  /* Coge el formato de LO QUE ESTÉ SELECCIONADO (si es una sola pieza) y
+     enciende el pincel. Es el paso 1 del Format Painter. */
+  function copiarFormato(ref) {
+    var r = ref || (sel && sel.kind !== 'opening' ? sel : null);
+    if (!r) { setHint('⚠ Primero toca la marca cuyo formato quieres copiar'); return false; }
+    var f = formatoDe(r.kind, entityOf(r));
+    if (!f) { setHint('⚠ De eso no se puede copiar formato'); return false; }
+    formatoClip = { kind: r.kind, nom: nombreDe(r), props: f };
+    pincelPuestos = 0;
+    return true;
+  }
+  function pegarFormatoEn(refs) {
+    if (!formatoClip) { setHint('⚠ Todavía no has copiado ningún formato'); return 0; }
+    var cambiadas = 0, tocadas = 0;
+    // el paso de deshacer se mete ANTES de tocar nada, pero si al final no
+    // cambió nada se retira: un Ctrl+Z que no deshace nada es un Ctrl+Z roto
+    var antes = snapshot();
+    pushUndo(antes);
+    refs.forEach(function (r) {
+      tocadas++;
+      if (aplicaFormato(r, formatoClip.props, formatoClip.kind)) cambiadas++;
+    });
+    if (!cambiadas) {
+      if (undoStack[undoStack.length - 1] === antes) undoStack.pop();
+      setHint(tocadas === 1
+        ? 'Nada que pasarle: el formato de ' + formatoClip.nom + ' no le aplica a eso'
+        : '⚠ De las ' + tocadas + ', ninguna comparte formato con ' + formatoClip.nom);
+      return 0;
+    }
+    refresh(); renderSel(); refreshCounts(); scheduleAutosave();
+    return cambiadas;
+  }
+  /* Paso 2 del pincel: cada toque en el plano deja igual a la de origen. */
+  function matchDown(p, ev) {
+    var h = hitTest(p);
+    if (!h) {
+      setHint(formatoClip
+        ? 'Ahí no hay nada — toca la marca que quieres dejar igual que ' + formatoClip.nom + ' · Esc para salir'
+        : 'Toca la marca cuyo formato quieres copiar');
+      return;
+    }
+    if (!formatoClip) {
+      if (!copiarFormato(h)) return;
+      ponSel([h]);
+      setHint('Formato copiado de ' + formatoClip.nom + ' — ahora toca las que quieras dejar iguales · Esc para salir');
+      return;
+    }
+    // ojo: con SHIFT (o con "Coger otro origen" del ▾) se cambia el origen
+    // sin salir de la herramienta
+    if (esSumar(ev) || pincelCogeOrigen) {
+      pincelCogeOrigen = false;
+      if (copiarFormato(h)) { ponSel([h]); setHint('Nuevo origen: ' + formatoClip.nom + ' — toca las que quieras dejar iguales'); }
+      return;
+    }
+    var n = pegarFormatoEn([h]);
+    if (n) {
+      pincelPuestos++;
+      setHint('✔ ' + pincelPuestos + ' marca(s) igualadas a ' + formatoClip.nom + ' · sigue tocando · Esc para salir');
+    }
+  }
+
+  /* ---------------- EDICIÓN MASIVA ----------------
+     Una tabla y ya: cada fila dice qué campo es, en qué clases existe y cómo
+     se pinta. Un campo solo sale si TODAS las piezas seleccionadas lo tienen
+     — así nunca se le cambia algo a la mitad del grupo sin querer. */
+  function opsColor() { return COLOR_PRESETS.map(function (c) { return [c[0], c[1]]; }); }
+  var CAMPOS_MASIVOS = [
+    { k: 'op', nom: 'Opacidad', tipo: 'rango', min: 10, max: 100, step: 5, def: 100,
+      kinds: ['wall', 'opening', 'symbol', 'text', 'leader', 'dim', 'wire', 'area', 'ink', 'count'] },
+    { k: 'type', nom: 'Tipo de pared', tipo: 'ops', kinds: ['wall'],
+      ops: function () { return Object.keys(WALL_TYPES).map(function (k) { return [k, WALL_TYPES[k].name]; }); } },
+    { k: 'style', nom: 'Material', tipo: 'ops', def: 'dashed', kinds: ['wire'], ops: function () { return WIRE_OPTS.slice(); } },
+    { k: 'lw', nom: 'Grosor', tipo: 'num', min: 0.1, step: 0.1, kinds: ['wire', 'area', 'ink'] },
+    { k: 'pattern', nom: 'Patrón', tipo: 'ops', kinds: ['area'],
+      ops: function () { return Object.keys(AREA_PATTERNS).map(function (k) { return [k, AREA_PATTERNS[k].name]; }); } },
+    { k: 'lineStyle', nom: 'Tipo de línea', tipo: 'ops', def: 'solid', kinds: ['area'],
+      ops: function () { return Object.keys(LINE_STYLES).map(function (k) { return [k, LINE_STYLES[k].name.replace(/^[^A-Za-zÁ-ú]+/, '')]; }); } },
+    { k: 'size', nom: 'Tamaño', tipo: 'num', min: 3, step: 0.5, def: 9, kinds: ['text', 'leader'] },
+    { k: 'font', nom: 'Fuente', tipo: 'ops', def: 'arch', kinds: ['text', 'leader'],
+      ops: function () { return Object.keys(TEXT_FONTS).map(function (k) { return [k, TEXT_FONTS[k].corto]; }); } },
+    { k: 'align', nom: 'Alineación', tipo: 'ops', def: 'left', kinds: ['text', 'leader'],
+      ops: function () { return [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']]; } },
+    { k: 'color', nom: 'Color', tipo: 'swatch', kinds: ['text', 'leader', 'area', 'ink'], ops: opsColor },
+    { k: 'scale', nom: 'Escala', tipo: 'num', min: 0.1, step: 0.1, def: 1, kinds: ['symbol'] },
+    { k: 'raya', nom: 'Contorno', tipo: 'ops', def: '', kinds: ['symbol'],
+      ops: function () { return [['', 'Continuo'], ['fut', 'Discontinuo (futuro / N.I.C.)'], ['ex', 'Punteado (existente)']]; } },
+    { k: 'cat', nom: 'Cuenta como', tipo: 'ops', kinds: ['count'],
+      ops: function () { return catsCount().map(function (c) { return [c.id, c.nom]; }); } },
+    { k: 'attrs.ckt', nom: 'Circuito', tipo: 'texto', mayus: true, ph: 'ej: A-12', kinds: ['symbol'] },
+    { k: 'attrs.h', nom: 'Altura', tipo: 'texto', ph: 'ej: 48" AFF', kinds: ['symbol'] },
+    { k: 'attrs.note', nom: 'Nota', tipo: 'texto', mayus: true, ph: 'ej: GFCI · WP', kinds: ['symbol'] }
+  ];
+  function leeCampo(e, k) {
+    if (k.indexOf('attrs.') === 0) { var a = e.attrs || {}; var v = a[k.slice(6)]; return (v === undefined || v === '') ? null : v; }
+    return (e[k] === undefined) ? null : e[k];
+  }
+  function escribeCampo(e, k, v) {
+    if (k.indexOf('attrs.') === 0) {
+      var sub = k.slice(6);
+      e.attrs = e.attrs || {};
+      if (v === null || v === '') delete e.attrs[sub]; else e.attrs[sub] = v;
+      if (!Object.keys(e.attrs).length) delete e.attrs;
+      return;
+    }
+    if (v === null) delete e[k]; else e[k] = v;
+  }
+  /* El valor que enseña el cuadro: el común si todas lo tienen igual, o null
+     (= "(varios)") si difieren. El campo por defecto cuenta como valor: doce
+     textos sin 'font' escrito son doce textos en Arial, no doce sin fuente. */
+  function valorComun(refs, campo) {
+    var v, primero = true;
+    for (var i = 0; i < refs.length; i++) {
+      var e = entityOf(refs[i]); if (!e) continue;
+      var q = leeCampo(e, campo.k);
+      if (q === null && campo.def !== undefined) q = campo.def;
+      if (primero) { v = q; primero = false; }
+      else if (q !== v) return { varios: true, v: null };
+    }
+    return { varios: false, v: primero ? null : v };
+  }
+  function camposDe(refs) {
+    if (!refs.length) return [];
+    return CAMPOS_MASIVOS.filter(function (c) {
+      return refs.every(function (r) { return c.kinds.indexOf(r.kind) >= 0; });
+    });
+  }
+  function bloqueMasivo(refs) {
+    var campos = camposDe(refs);
+    if (!campos.length) {
+      return '<div class="muted small" style="margin-top:8px">Este grupo mezcla clases que no comparten nada que cambiar de una vez. ' +
+        'Con "Los parecidos" coges solo los de una clase y ahí sí se editan todos juntos.</div>';
+    }
+    var h = '<div class="muted small" style="margin-top:10px"><b>Cambiar en las ' + refs.length + ' a la vez</b></div>';
+    campos.forEach(function (c) {
+      var vc = valorComun(refs, c);
+      var id = 'prMas_' + c.k.replace('.', '_');
+      if (c.tipo === 'rango') {
+        var vr = vc.varios ? 100 : (vc.v == null ? (c.def || 100) : vc.v);
+        h += '<div class="row"><label>' + c.nom + '</label>' +
+          '<input id="' + id + '" type="range" min="' + c.min + '" max="' + c.max + '" step="' + c.step + '" value="' + vr + '" style="flex:1">' +
+          '<span id="' + id + 'N" class="muted small" style="width:52px;text-align:right">' + (vc.varios ? 'varios' : vr + '%') + '</span></div>';
+      } else if (c.tipo === 'ops') {
+        h += '<div class="row"><label>' + c.nom + '</label><select id="' + id + '">' +
+          (vc.varios ? '<option value="__varios" selected>(varios)</option>' : '') +
+          c.ops().map(function (o) {
+            return '<option value="' + esc(String(o[0])) + '"' + (!vc.varios && String(vc.v == null ? '' : vc.v) === String(o[0]) ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+          }).join('') + '</select></div>';
+      } else if (c.tipo === 'swatch') {
+        h += '<div class="row"><label>' + c.nom + '</label><div class="swRow" id="' + id + '">' +
+          c.ops().map(function (o) {
+            return '<span class="sw' + (!vc.varios && vc.v === o[0] ? ' cur' : '') + '" data-c="' + o[0] + '" title="' + esc(o[1]) + '" style="background:' + o[0] + '"></span>';
+          }).join('') + '</div></div>';
+      } else if (c.tipo === 'num') {
+        h += '<div class="row"><label>' + c.nom + '</label><input id="' + id + '" type="number" step="' + c.step + '" min="' + c.min + '"' +
+          (vc.varios ? ' placeholder="(varios)"' : ' value="' + (vc.v == null ? '' : vc.v) + '"') + '></div>';
+      } else {
+        h += '<div class="row"><label>' + c.nom + '</label><input id="' + id + '"' +
+          (vc.varios ? ' placeholder="(varios)"' : ' value="' + esc(vc.v == null ? '' : vc.v) + '"') +
+          (c.ph && !vc.varios ? ' placeholder="' + esc(c.ph) + '"' : '') + '></div>';
+      }
+    });
+    h += '<div class="muted small">Lo que escribas aquí se le pone a las ' + refs.length + '. Ctrl+Z lo devuelve todo de una vez.</div>';
+    return h;
+  }
+  function aplicaMasivo(refs, campo, v) {
+    pushUndo();
+    refs.forEach(function (r) {
+      var e = entityOf(r); if (!e) return;
+      escribeCampo(e, campo.k, v);
+      if (FORMATO_TRAS[r.kind]) FORMATO_TRAS[r.kind](e, campo.k);
+    });
+    refresh(); renderSel(); refreshCounts(); scheduleAutosave();
+    setHint('✔ ' + campo.nom + ' cambiado en las ' + refs.length + ' — Ctrl+Z lo devuelve');
+  }
+  function enganchaMasivo(refs) {
+    camposDe(refs).forEach(function (c) {
+      var id = 'prMas_' + c.k.replace('.', '_'), n = $('#' + id);
+      if (!n) return;
+      if (c.tipo === 'rango') {
+        var lbl = $('#' + id + 'N');
+        n.addEventListener('input', function () { if (lbl) lbl.textContent = n.value + '%'; });
+        n.addEventListener('change', function () {
+          var v = parseInt(n.value, 10); if (!isFinite(v)) return;
+          aplicaMasivo(refs, c, v >= 100 ? null : v);
+        });
+      } else if (c.tipo === 'ops') {
+        n.addEventListener('change', function () {
+          if (n.value === '__varios') return;
+          aplicaMasivo(refs, c, n.value === '' ? null : n.value);
+        });
+      } else if (c.tipo === 'swatch') {
+        $$('#' + id + ' .sw').forEach(function (sw) {
+          sw.addEventListener('click', function () { aplicaMasivo(refs, c, sw.dataset.c); });
+        });
+      } else if (c.tipo === 'num') {
+        n.addEventListener('change', function () {
+          var v = parseFloat(n.value);
+          if (n.value === '') return;
+          if (!isFinite(v)) { setHint('⚠ Eso no es un número'); return; }
+          if (c.min != null) v = Math.max(c.min, v);
+          aplicaMasivo(refs, c, v);
+        });
+      } else {
+        n.addEventListener('change', function () {
+          var v = String(n.value || '').trim();
+          if (c.mayus) v = v.toUpperCase();
+          aplicaMasivo(refs, c, v === '' ? null : v);
+        });
+      }
+    });
+  }
+  /* Los dos botones del Format Painter, para el panel de Propiedades. */
+  function botonesFormato(esGrupo, n) {
+    var h = '<div style="display:flex;gap:6px;margin:6px 0">';
+    if (!esGrupo) h += '<button id="prCopiaFmt" style="flex:1" title="Coge el aspecto de esta marca (color, grosor, tamaño, tipo) y luego se lo pasas a las demás con un toque cada una. No copia ni la posición, ni el giro, ni el texto.">' + ICO.svg('pincel') + ' Copiar formato</button>';
+    if (formatoClip) {
+      h += '<button id="prPegaFmt" style="flex:1" title="Deja ' + (esGrupo ? 'las ' + n + ' marcas' : 'esta marca') + ' con el formato de ' + esc(formatoClip.nom) + '">' +
+        ICO.svg('pincel') + ' Pegar formato' + (esGrupo ? ' en las ' + n : '') + '</button>';
+    }
+    return h + '</div>' +
+      (formatoClip ? '<div class="muted small" style="margin-top:-2px">Formato en memoria: <b>' + esc(formatoClip.nom) + '</b></div>' : '');
+  }
+  function enganchaFormato(refs) {
+    var bc = $('#prCopiaFmt');
+    if (bc) bc.addEventListener('click', function () {
+      if (!copiarFormato(refs.length === 1 ? refs[0] : null)) return;
+      setTool('match');
+      setHint('Formato copiado de ' + formatoClip.nom + ' — toca las marcas que quieras dejar iguales · Esc para salir');
+      showProps();
+    });
+    var bp = $('#prPegaFmt');
+    if (bp) bp.addEventListener('click', function () {
+      var n = pegarFormatoEn(refs);
+      if (n) setHint('✔ ' + n + ' marca(s) con el formato de ' + formatoClip.nom);
+    });
+  }
+
+
+  /* ==================================================================
+     TOOL CHEST — MI COFRE (fase 5.10)
+     El Tool Chest de Bluebeam: dejas una marca CONFIGURADA como herramienta
+     tuya. Un GFCI a 48" con su circuito escrito, una nube de revisión roja
+     gruesa, una nota "WP — WEATHERPROOF", un EMT ½" con flecha: se guarda
+     una vez y después es un toque, no doce ajustes.
+
+     Vive en el APARATO (localStorage 'mxp_cofre'), no en el proyecto: las
+     herramientas de Edgar son suyas y le sirven en todos los trabajos, igual
+     que la disposición de las barras.
+     ================================================================== */
+  var COFRE_MAX = 40;
+  var cofre = [];            // se llena en cargaCofre(), abajo: necesita TOOL_DEFS
+  var cofrePend = null;      // lo que hay que estampar a la próxima pieza creada
+  var cofreEncendiendo = false;   // setTool viene DEL cofre: no borres lo pendiente
+
+  function cargaCofre() {
+    var g = null;
+    try { g = JSON.parse(localStorage.getItem('mxp_cofre') || 'null'); } catch (e) { g = null; }
+    var arr = (g && Array.isArray(g.items)) ? g.items : [];
+    var out = [];
+    arr.forEach(function (it) {
+      if (!it || typeof it !== 'object' || !it.id || !it.tool) return;
+      if (!defDe(it.tool) && it.tool !== 'place') return;      // herramienta que ya no existe
+      if (it.tool === 'place' && !(it.cfg && SYMBOLS[it.cfg.key])) return;   // símbolo retirado
+      out.push({ id: String(it.id).slice(0, 40), nom: String(it.nom || '').slice(0, 40) || 'Herramienta',
+                 tool: it.tool, kind: String(it.kind || ''), cfg: (it.cfg && typeof it.cfg === 'object') ? it.cfg : {} });
+    });
+    return out.slice(0, COFRE_MAX);
+  }
+  function guardaCofre() { try { localStorage.setItem('mxp_cofre', JSON.stringify({ v: 1, items: cofre })); } catch (e) {} }
+  function cofreDe(id) { for (var i = 0; i < cofre.length; i++) if (cofre[i].id === id) return cofre[i]; return null; }
+
+  /* De qué herramienta salió esta pieza: es lo que hay que volver a encender
+     para dibujar otra igual. */
+  function toolDePieza(ref, e) {
+    if (ref.kind === 'symbol') return 'place';
+    if (ref.kind === 'wall') return 'wall';
+    if (ref.kind === 'opening') return (e.type === 'window' ? 'window' : 'door');
+    if (ref.kind === 'text') return 'text';
+    if (ref.kind === 'leader') return 'leader';
+    if (ref.kind === 'dim') return e.meas ? 'measure' : 'dim';
+    if (ref.kind === 'wire') return 'wire';
+    if (ref.kind === 'ink') return e.modo === 'hi' ? 'hi' : 'pen';
+    if (ref.kind === 'count') return 'count';
+    if (ref.kind === 'area') {
+      if (e.circ) return 'homerun';
+      if (e.arco) return 'cloud';
+      if (e.open) return (e.pts && e.pts.length === 2) ? 'line' : 'pline';
+      return 'area';
+    }
+    return null;
+  }
+  /* Nombre que se propone al guardar: el de la pieza, para no hacerle
+     escribir cuando lo obvio ya se sabe. */
+  function nomPropuesto(ref, e) {
+    var base = nombreDe(ref);
+    if (ref.kind === 'text' || ref.kind === 'leader') {
+      var t = String(e.text || '').split(/\r?\n/)[0].trim();
+      if (t) return t.slice(0, 28);
+    }
+    if (ref.kind === 'symbol') {
+      var at = attrsTexto(e);
+      if (at.length) return (base + ' ' + at[0]).slice(0, 34);
+    }
+    return base;
+  }
+  /* Lo que hay que recordar de la pieza. El ASPECTO sale de formatoDe (el
+     mismo de Copiar formato: una sola definición de qué es formato), y
+     encima van los datos de identidad que el formato no lleva a propósito
+     — la clave del símbolo, el texto de la nota, el giro. */
+  function cfgDePieza(ref, e) {
+    var cfg = { props: {} };
+    var fmt = formatoDe(ref.kind, e) || {};
+    Object.keys(fmt).forEach(function (k) { if (fmt[k] !== null && fmt[k] !== undefined) cfg.props[k] = fmt[k]; });
+    if (ref.kind === 'symbol') {
+      cfg.key = e.key; cfg.rot = e.rot || 0;
+      if (e.attrs) cfg.props.attrs = JSON.parse(JSON.stringify(e.attrs));
+    } else if (ref.kind === 'wall') { cfg.type = e.type; }
+    else if (ref.kind === 'opening') { cfg.type = e.type; cfg.w = e.w; }
+    else if (ref.kind === 'text' || ref.kind === 'leader') { cfg.texto = String(e.text || ''); }
+    else if (ref.kind === 'wire') { cfg.style = e.style || 'dashed'; cfg.lw = e.lw || 0.7; cfg.capS = e.capS || 'none'; cfg.capE = e.capE || 'none'; }
+    else if (ref.kind === 'ink') { cfg.color = e.color; cfg.lw = e.lw; }
+    else if (ref.kind === 'count') { cfg.cat = e.cat; }
+    else if (ref.kind === 'area') {
+      cfg.pattern = e.pattern || 'none';
+      if (e.lineStyle) cfg.lineStyle = e.lineStyle;
+      if (e.arco) cfg.arco = e.arco;
+      if (e.capE) cfg.capE = e.capE;
+    }
+    return cfg;
+  }
+  function guardaEnCofre(ref) {
+    var e = entityOf(ref); if (!e) return;
+    var tl = toolDePieza(ref, e);
+    if (!tl) { setHint('⚠ De eso todavía no se puede hacer una herramienta'); return; }
+    if (cofre.length >= COFRE_MAX) { uiAlert('El cofre ya tiene ' + COFRE_MAX + ' herramientas. Borra alguna antes de guardar otra.'); return; }
+    uiPrompt('Nombre de la herramienta (así la vas a ver en Mi cofre):', nomPropuesto(ref, e), function (v) {
+      if (v == null) return;
+      var nom = String(v).trim().slice(0, 40);
+      if (!nom) return;
+      cofre.push({ id: uid(), nom: nom, tool: tl, kind: ref.kind, cfg: cfgDePieza(ref, e) });
+      guardaCofre();
+      // si la barra estaba oculta (nunca se había usado el cofre) se enciende
+      var k = layout.ocultas.indexOf('cofre');
+      if (k >= 0) { layout.ocultas.splice(k, 1); guardaLayout(); }
+      pintaBarras();
+      setHint('✔ "' + nom + '" guardada en Mi cofre — un toque y dibujas otra igual');
+    });
+  }
+  /* Encender una herramienta del cofre: se ponen los "últimos usados" que ya
+     usa cada herramienta, y lo que no tiene sitio en un global queda pendiente
+     para estamparlo en la pieza que se cree ahora. */
+  function usaCofre(id) {
+    var it = cofreDe(id); if (!it) return;
+    var c = it.cfg || {}, t = it.tool;
+    if (t === 'place') { if (!SYMBOLS[c.key]) { setHint('⚠ Ese símbolo ya no existe en el catálogo'); return; } placingKey = c.key; placingRot = c.rot || 0; }
+    else if (t === 'wall') { var wt = $('#wallType'); if (wt && WALL_TYPES[c.type]) wt.value = c.type; }
+    else if (t === 'door') { curDoorType = c.type || 'door'; curDoorW = c.w || 0; var ds = $('#doorSize'); if (ds) ds.value = (c.type === 'door') ? String(curDoorW || 0) : '0'; }
+    else if (t === 'window') { curWinType = c.type || 'window'; }
+    else if (t === 'area') { curAreaPattern = c.pattern || 'none'; if (c.lineStyle) curLineStyle = c.lineStyle; }
+    else if (t === 'cloud') { if (c.arco && CLOUD_ARCS[c.arco]) curCloudArc = c.arco; }
+    else if (t === 'line' || t === 'pline') { if (c.lineStyle) curLineStyle = c.lineStyle; if (c.capE) curLineCap = c.capE; }
+    else if (t === 'wire') { lastWireStyle = c.style || 'dashed'; lastWireLw = c.lw || 0.7; lastWireCapS = c.capS || 'none'; lastWireCapE = c.capE || 'none'; }
+    else if (t === 'pen' || t === 'hi') { if (c.color) lastInk[t].color = c.color; if (c.lw) lastInk[t].lw = c.lw; }
+    else if (t === 'count') { if (c.cat && catCount(c.cat)) catActiva = c.cat; else setHint('⚠ Esa categoría de conteo no está en este proyecto'); }
+    cofreEncendiendo = true;
+    try { setTool(t); } finally { cofreEncendiendo = false; }
+    cofrePend = { kind: it.kind, props: c.props || {}, texto: c.texto, nom: it.nom };
+    $$('.dock .cofreBtn').forEach(function (b) { b.classList.toggle('active', b.dataset.cofre === id); });
+    setHint('Mi cofre: ' + it.nom + ' — ' + (HINTS[t] || 'dibuja en el plano') );
+  }
+  /* Se estampa en la pieza recién creada lo que no cabía en un "último usado".
+     Se llama en cada sitio donde nace una pieza a mano. */
+  function estampaCofre(kind, e) {
+    if (!cofrePend || !e || cofrePend.kind !== kind) return;
+    var pr = cofrePend.props || {};
+    Object.keys(pr).forEach(function (k) {
+      var v = pr[k];
+      if (v === null || v === undefined) return;
+      if (k === 'attrs') { e.attrs = JSON.parse(JSON.stringify(v)); return; }
+      e[k] = v;
+    });
+  }
+  function textoDeCofre(kind) { return (cofrePend && cofrePend.kind === kind && cofrePend.texto) ? cofrePend.texto : ''; }
+  function borraDeCofre(id) {
+    var it = cofreDe(id); if (!it) return;
+    uiConfirm('¿Quitar "' + it.nom + '" de Mi cofre?', function (ok) {
+      if (!ok) return;
+      cofre = cofre.filter(function (q) { return q.id !== id; });
+      guardaCofre(); pintaBarras();
+      setHint('"' + it.nom + '" quitada del cofre');
+    });
+  }
+  function renombraEnCofre(id) {
+    var it = cofreDe(id); if (!it) return;
+    uiPrompt('Nombre de la herramienta:', it.nom, function (v) {
+      if (v == null) return;
+      var nom = String(v).trim().slice(0, 40); if (!nom) return;
+      it.nom = nom; guardaCofre(); pintaBarras();
+    });
+  }
+  function mueveEnCofre(id, d) {
+    var i = cofre.findIndex(function (q) { return q.id === id; });
+    var j = i + d;
+    if (i < 0 || j < 0 || j >= cofre.length) return;
+    var t = cofre[i]; cofre[i] = cofre[j]; cofre[j] = t;
+    guardaCofre(); pintaBarras();
+  }
+  /* El botón de cada herramienta del cofre: si es un símbolo se ve el SÍMBOLO,
+     que es como se reconoce de un vistazo; si no, el icono de su herramienta
+     teñido de su color. */
+  function btnCofre(it) {
+    var d = defDe(it.tool), c = it.cfg || {};
+    var ico;
+    if (it.tool === 'place' && SYMBOLS[c.key]) {
+      ico = '<span class="cofIco">' + symPreviewSvg(SYMBOLS[c.key], 22, 18) + '</span>';
+    } else {
+      var col = (c.props && c.props.color) || c.color || '';
+      ico = '<span class="cofIco"' + (col ? ' style="color:' + esc(col) + '"' : '') + '>' + ICO.svg(d ? d.ico : 'fav') + '</span>';
+    }
+    return '<button class="tool cofreBtn" data-cofre="' + esc(it.id) + '" title="' + esc(it.nom) + ' — herramienta tuya (' + esc(d ? d.nom : it.tool) + '). El ▾ la renombra, la mueve o la quita.">' +
+      ico + '<label>' + esc(it.nom) + '</label><span class="dd" data-cofmenu="' + esc(it.id) + '" title="Renombrar, mover o quitar">▾</span></button>';
+  }
+
+
+  /* ==================================================================
+     BARRA FLOTANTE DE PROPIEDADES (fase 4.5)
+     La brecha #1 contra Bluebeam en el iPad: allá seleccionas algo y la
+     barra con lo que más se usa aparece PEGADA a la marca. Aquí había que
+     abrir la gaveta de Propiedades cada vez, y la gaveta tapa medio plano.
+
+     Solo sale en pantalla de dedo: en la PC el panel de Propiedades está
+     siempre a la vista y otra barra encima sería estorbo.
+     Sustituye al antiguo botón flotante "🗑 Borrar" — que además llevaba
+     emoji, contra la guía de la casa.
+     ================================================================== */
+  var flotEl = null;
+  function creaFlot() {
+    if (flotEl) return flotEl;
+    flotEl = document.createElement('div');
+    flotEl.id = 'propFlot';
+    flotEl.hidden = true;
+    var w = $('#canvasWrap'); if (!w) return null;
+    w.appendChild(flotEl);
+    flotEl.addEventListener('click', function (ev) {
+      var b = ev.target.closest && ev.target.closest('button');
+      if (b) accionFlot(b.dataset.a);
+    });
+    return flotEl;
+  }
+  /* Qué botones salen: lo que de verdad se usa en esa marca, no todo.
+     Máximo siete, para que quepan en el iPad sin achicarlos. */
+  function accionesFlot() {
+    var refs = selRefs();
+    if (!refs.length) return [];
+    var mismos = refs.every(function (r) { return r.kind === refs[0].kind; });
+    var k = mismos ? refs[0].kind : null;
+    var a = [{ id: 'props', ico: 'props', tip: 'Abrir Propiedades' }];
+    if (refs.length === 1 && (k === 'text' || k === 'leader')) a.push({ id: 'texto', ico: 'editar', tip: 'Cambiar el texto' });
+    if (k === 'text' || k === 'leader') {
+      a.push({ id: 'menos', ico: 'menos', tip: 'Letra más chica' });
+      a.push({ id: 'mas', ico: 'mas', tip: 'Letra más grande' });
+    } else if (k === 'symbol') {
+      a.push({ id: 'menos', ico: 'menos', tip: 'Más chico' });
+      a.push({ id: 'mas', ico: 'mas', tip: 'Más grande' });
+    }
+    if (k !== 'opening') a.push({ id: 'girar', ico: 'girar', tip: k === 'symbol' ? 'Girar 45°' : 'Girar 90°' });
+    if (k && k !== 'opening') a.push({ id: 'parecidos', ico: 'varita', tip: 'Marcar los parecidos de esta hoja' });
+    if (k !== 'opening') a.push({ id: 'fmt', ico: 'pincel', tip: formatoClip ? 'Pegar el formato copiado' : 'Copiar el formato de esto' });
+    if (k !== 'opening') a.push({ id: 'dup', ico: 'copiar', tip: 'Duplicar' });
+    a.push({ id: 'del', ico: 'papelera', tip: 'Borrar', clase: 'mal' });
+    return a;
+  }
+  function accionFlot(id) {
+    var refs = selRefs(); if (!refs.length) return;
+    var uno = refs.length === 1 ? refs[0] : null;
+    if (id === 'props') { var bq = $('#btnProps'); if (bq) bq.click(); return; }
+    if (id === 'del') { if (selGroup) deleteGroup(); else if (sel) deleteSelected(); return; }
+    if (id === 'dup') { copySel(); pasteClip(null, 24); return; }
+    if (id === 'parecidos') { seleccionaParecidos(); return; }
+    if (id === 'fmt') {
+      if (formatoClip) { var n = pegarFormatoEn(refs); if (n) setHint('✔ ' + n + ' con el formato de ' + formatoClip.nom); }
+      else if (uno && copiarFormato(uno)) { setTool('match'); showProps(); }
+      pintaFlot();
+      return;
+    }
+    if (id === 'girar') {
+      pushUndo();
+      if (uno && uno.kind === 'symbol') { var es = entityOf(uno); if (es) es.rot = ((es.rot || 0) + 45) % 360; }
+      else rotateRefs(refs, 90);
+      refresh(); renderSel();
+      return;
+    }
+    if (id === 'mas' || id === 'menos') {
+      var d = (id === 'mas') ? 1 : -1;
+      pushUndo();
+      refs.forEach(function (r) {
+        var e = entityOf(r); if (!e) return;
+        if (r.kind === 'text' || r.kind === 'leader') e.size = Math.max(3, Math.round(((e.size || 9) + d) * 2) / 2);
+        else if (r.kind === 'symbol') e.scale = Math.max(0.1, Math.round(((e.scale || 1) + d * 0.1) * 100) / 100);
+      });
+      refresh(); renderSel();
+      return;
+    }
+    if (id === 'texto' && uno) {
+      var et = entityOf(uno); if (!et) return;
+      uiPromptArea('Texto (Enter = renglón nuevo):', String(et.text || ''), function (t) {
+        if (t == null) return;
+        pushUndo(); et.text = t; refresh(); renderSel();
+      });
+    }
+  }
+  /* Se coloca ENCIMA de lo seleccionado; si arriba no cabe, debajo. Nunca se
+     sale del lienzo, y desaparece mientras se arrastra o se dibuja para no
+     estorbar la mano. */
+  function pintaFlot() {
+    if (!isTouch) return;
+    var el = creaFlot(); if (!el) return;
+    var refs = selRefs();
+    if (!refs.length || drawing || drag) { el.hidden = true; return; }
+    var acts = accionesFlot();
+    if (!acts.length) { el.hidden = true; return; }
+    var firma = acts.map(function (a) { return a.id; }).join(',');
+    if (el.dataset.firma !== firma) {
+      el.innerHTML = acts.map(function (a) {
+        return '<button data-a="' + a.id + '"' + (a.clase ? ' class="' + a.clase + '"' : '') + ' title="' + esc(a.tip) + '" aria-label="' + esc(a.tip) + '">' + ICO.svg(a.ico) + '</button>';
+      }).join('');
+      el.dataset.firma = firma;
+    }
+    /* La caja se saca de bboxDe, no de refsBBox: refsBBox de un texto es solo
+       su punto de anclaje, y la barra salía ENCIMA del rótulo en vez de
+       arriba (medido en el iPad). bboxDe sí mide la caja real. */
+    var x0 = null, x1 = null, y0 = null, y1 = null;
+    refs.forEach(function (r) {
+      var e = entityOf(r); if (!e) return;
+      var c = bboxDe(r.kind, e); if (!c) return;
+      if (x0 === null) { x0 = c.x; x1 = c.x + c.w; y0 = c.y; y1 = c.y + c.h; return; }
+      x0 = Math.min(x0, c.x); x1 = Math.max(x1, c.x + c.w);
+      y0 = Math.min(y0, c.y); y1 = Math.max(y1, c.y + c.h);
+    });
+    if (x0 === null) { el.hidden = true; return; }
+    el.hidden = false;
+    var wrap = $('#canvasWrap').getBoundingClientRect();
+    var sx = view.tx + ((x0 + x1) / 2) * view.z;             // centro, en píxeles del lienzo
+    var sTop = view.ty + y0 * view.z;
+    var sBot = view.ty + y1 * view.z;
+    var w = el.offsetWidth || 300, h = el.offsetHeight || 48;
+    var x = Math.max(6, Math.min(sx - w / 2, wrap.width - w - 6));
+    var y = sTop - h - 14;
+    if (y < 6) y = Math.min(sBot + 14, wrap.height - h - 6);
+    if (y < 6) y = 6;
+    el.style.left = Math.round(x) + 'px';
+    el.style.top = Math.round(y) + 'px';
   }
 
   /* ---------------- conteo de materiales ----------------
@@ -7898,7 +9460,7 @@
       brk[kb] = (brk[kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // × unidades también en el breaker
     });
     if (nCirc) {
-      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">📋 → Panel Schedule</button></td></tr>';
+      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">' + ICO.svg('panelsch') + ' → Panel Schedule</button></td></tr>';
       Object.keys(cabPorTipo).forEach(function (k) {
         rows += '<tr><td>' + esc(k) + ' <span class="muted small">(trazo + drop)</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
       });
@@ -7930,7 +9492,11 @@
         rows += '<tr><td>' + esc(WALL_TYPES[k] ? WALL_TYPES[k].name : k) + '</td><td class="n">' + (wallLen[k] / 12).toFixed(1) + ' ft</td></tr>';
       });
     }
+    // el Count va al final: es conteo de lo que YA está en el plano del
+    // ingeniero, no de lo que dibujamos nosotros
+    if (catsCount().length || state.counts.length) rows += conteoBloqueHtml();
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
+    enganchaConteoPanel();
     var bcp = $('#btnCircPanel');
     if (bcp) bcp.addEventListener('click', function () {
       pushUndo();
@@ -7950,7 +9516,30 @@
      Es un panel FLOTANTE, no un modal: se queda abierto mientras recorres el
      plano fila por fila. Se arrastra por la barra y se redimensiona por la
      esquina, igual que el chat. */
-  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo', ink: 'Tinta' };
+  /* Arrastrar un panel flotante por su barra. Estaba escrito a mano en la
+     Lista de marcas; ahora lo usan también el buscador del PDF y quien venga.
+     closest('button') y no ev.target.tagName: los botones de estas cabeceras
+     llevan dentro su icono SVG, así que el toque cae sobre el hijo y no sobre
+     el <button>. Con la comprobación vieja, tocar el icono arrastraba el panel
+     y se comía el clic. */
+  function arrastraPanel(cab, box) {
+    if (!cab || !box) return;
+    var ar = null;
+    cab.addEventListener('pointerdown', function (ev) {
+      if (ev.target.closest && ev.target.closest('button')) return;
+      var r = box.getBoundingClientRect();
+      ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+      cab.setPointerCapture(ev.pointerId); ev.preventDefault();
+    });
+    cab.addEventListener('pointermove', function (ev) {
+      if (!ar) return;
+      box.style.left = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - ar.dx)) + 'px';
+      box.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - ar.dy)) + 'px';
+    });
+    cab.addEventListener('pointerup', function () { ar = null; });
+    cab.addEventListener('pointercancel', function () { ar = null; });
+  }
+  var MARCAS_TIPO = { wall: 'Pared', opening: 'Puerta/Ventana', symbol: 'Símbolo', text: 'Texto', leader: 'Nota', dim: 'Cota', area: 'Superficie', line: 'Línea', circ: 'Circuito', wire: 'Cable/Tubo', ink: 'Tinta', count: 'Conteo' };
   function filasMarcas() {
     var out = [];
     state.walls.forEach(function (w) {
@@ -7965,6 +9554,14 @@
       var an = d.w * (sy.scale || 1) * (sy.sx || 1) * symK(d), al = d.h * (sy.scale || 1) * (sy.sy || 1) * symK(d);
       var atx = attrsTexto(sy);
       out.push({ kind: 'symbol', tipo: 'symbol', id: sy.id, nombre: d.name, det: (SYMBOL_CATS[d.cat] || d.cat) + (atx.length ? ' · ' + atx.join(' ') : ''), medida: (d.layer === 'furniture' || d.cat === 'riser' || d.cat === 'site' || d.cat === 'siteplan') ? fmtFtIn(an) + ' × ' + fmtFtIn(al) : '', num: 1 });
+    });
+    // el Count: cada marca es una fila, con el numero que lleva en su categoria
+    var ordCat = {};
+    state.counts.forEach(function (c) {
+      var ct = catCount(c.cat);
+      ordCat[c.cat] = (ordCat[c.cat] || 0) + 1;
+      out.push({ kind: 'count', tipo: 'count', id: c.id, nombre: ct ? ct.nom : '(categoría borrada)',
+        det: ct ? (COUNT_FORMAS[ct.forma] || '') : '', medida: '#' + ordCat[c.cat], num: ordCat[c.cat] });
     });
     state.texts.forEach(function (t) {
       out.push({ kind: 'text', tipo: 'text', id: t.id, nombre: String(t.text || '').replace(/\n/g, ' / '), det: t.style === 'circle' ? 'burbuja' : t.style === 'hex' ? 'hexágono' : '', medida: '', num: 0 });
@@ -8007,6 +9604,7 @@
       var w = state.walls.find(function (q) { return q.id === e.wallId; });
       if (w) { var g = wallGeom(w), P = ptAlong(w, g, e.pos); xs.push(P[0] - e.w / 2, P[0] + e.w / 2); ys.push(P[1] - e.w / 2, P[1] + e.w / 2); }
     }
+    else if (kind === 'count') { var rB = countR() + 2; xs.push(e.x - rB, e.x + rB); ys.push(e.y - rB, e.y + rB); }
     else if (kind === 'symbol') { var cs = symCorners(e) || [[e.x, e.y]]; cs.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); }
     else if (kind === 'text') {
       // (auditoría texto 03/09, GRAVE) se llamaba textAncho(e.text…) con el
@@ -8045,6 +9643,56 @@
     view.ty = r.height / 2 - (b.y + b.h / 2) * view.z;
     applyView();
   }
+  /* ── MARCAR LO QUE QUEDÓ EN LA LISTA ──
+     Esto es la "selección por filtro": en vez de otra pantalla que aprender,
+     se usa la Lista de marcas que ya existe. Filtras (por tipo, por texto) y
+     marcas de una vez todo lo que quedó a la vista. No cambia el plano. */
+  function marcarLista() {
+    if (!marcasCache.length) { setHint('No hay nada en la lista para marcar'); return; }
+    var LV = layerVisible, refs = [], apagadas = 0, puertas = 0;
+    marcasCache.forEach(function (f) {
+      if (f.kind === 'opening') { puertas++; return; }   // van pegadas a su pared
+      if (!capaVisibleDe(f.kind, f.id)) { apagadas++; return; }
+      refs.push({ kind: f.kind, id: f.id });
+    });
+    void LV;
+    if (!refs.length) {
+      setHint(apagadas ? '⚠ Nada que marcar: las ' + apagadas + ' de la lista están en una capa apagada'
+        : puertas ? 'Las puertas y ventanas se tocan de una en una: viven pegadas a su pared'
+        : 'No hay nada que marcar con ese filtro');
+      return;
+    }
+    var n = ponSel(refs);
+    var extra = apagadas ? ' · ' + apagadas + ' no: su capa está apagada' : '';
+    if (puertas) extra += ' · las puertas y ventanas se cambian una por una';
+    setHint((n > 200 ? '⚠ ' : '✔ ') + n + ' marcados desde la lista' + extra +
+      (n > 200 ? ' — ojo al arrastrar el plano: se mueven los ' + n : ' — Propiedades los cambia todos a la vez'));
+    renderMarcas();
+  }
+  /* ¿Se ve la capa de este elemento? Mismo criterio que el marco de selección. */
+  function capaVisibleDe(kind, id) {
+    var LV = layerVisible;
+    if (kind === 'wall') return !!LV.architecture;
+    if (kind === 'symbol') {
+      var sy = null;
+      state.symbols.forEach(function (x) { if (x.id === id) sy = x; });
+      var d = sy && SYMBOLS[sy.key];
+      return !!LV[(d && d.layer === 'furniture') ? 'furniture' : 'electrical'];
+    }
+    if (kind === 'wire') return !!LV.electrical;
+    if (kind === 'area') return !!LV.areas;
+    if (kind === 'count') return !!LV.count;
+    if (kind === 'text' || kind === 'dim' || kind === 'leader' || kind === 'ink') return !!LV.annotation;
+    return true;
+  }
+  function pintaBotonMarcar() {
+    var b = $('#marcasMarcar'); if (!b) return;
+    var n = marcasCache.length;
+    var lbl = b.querySelector('.lbl');
+    if (!lbl) { lbl = document.createElement('span'); lbl.className = 'lbl'; b.appendChild(lbl); }
+    lbl.textContent = n === 0 ? 'Nada que marcar' : n === 1 ? 'Marcar el único' : 'Marcar los ' + n;
+    b.disabled = !n;
+  }
   var marcasCache = [];
   var marcasOrden = { col: 'tipo', asc: true };
   function marcasAbierto() { var b = $('#marcasBox'); return b && !b.classList.contains('oculto'); }
@@ -8065,21 +9713,26 @@
       return (va < vb ? -1 : va > vb ? 1 : 0) * asc;
     });
     marcasCache = filas;
+    // se resaltan TODAS las seleccionadas, no solo la única: con "Marcar la
+    // lista" y con Shift+clic lo normal es llevar veinte a la vez
+    var marcadas = {};
+    selRefs().forEach(function (r) { marcadas[r.kind + '/' + r.id] = 1; });
     var flecha = function (c) { return marcasOrden.col === c ? (marcasOrden.asc ? ' ▲' : ' ▼') : ''; };
     var h = '<thead><tr><th data-c="tipo">Tipo' + flecha('tipo') + '</th><th data-c="nombre">Nombre' + flecha('nombre') + '</th><th data-c="det">Detalle' + flecha('det') + '</th><th data-c="medida" style="text-align:right">Medida' + flecha('medida') + '</th></tr></thead><tbody>';
     filas.forEach(function (f, i) {
-      var cur = sel && sel.kind === f.kind && sel.id === f.id;
+      var cur = !!marcadas[f.kind + '/' + f.id];
       h += '<tr class="fila' + (cur ? ' cur' : '') + '" data-i="' + i + '"><td class="k">' + esc(MARCAS_TIPO[f.tipo] || f.tipo) + '</td><td title="' + esc(f.nombre) + '">' + esc(f.nombre) + '</td><td class="k">' + esc(f.det) + '</td><td class="n">' + esc(f.medida) + '</td></tr>';
     });
     if (!filas.length) h += '<tr><td colspan="4" class="k" style="padding:14px;text-align:center">Nada que listar' + (q || tipo ? ' con ese filtro' : ' — el plano está vacío') + '</td></tr>';
     $('#marcasTabla').innerHTML = h + '</tbody>';
     $('#marcasN').textContent = filas.length === todas.length ? todas.length + ' marcas' : filas.length + ' de ' + todas.length;
+    pintaBotonMarcar();
     // clic en fila = seleccionar y encuadrar; el panel se queda abierto
     $$('#marcasTabla tr.fila').forEach(function (tr) {
       tr.addEventListener('click', function () {
         var f = marcasCache[+tr.dataset.i]; if (!f) return;
-        selGroup = null; sel = { kind: f.kind, id: f.id };
-        var e = findSel(); if (!e) { sel = null; renderMarcas(); return; }
+        ponSel([{ kind: f.kind, id: f.id }]);
+        var e = findSel(); if (!e) { ponSel([]); renderMarcas(); return; }
         if (tool !== 'select') setTool('select');
         zoomToBox(bboxDe(f.kind, e));
         renderSel(); showProps();
@@ -8111,23 +9764,10 @@
     });
     $('#marcasCerrar').addEventListener('click', function () { box.classList.add('oculto'); });
     $('#marcasCsv').addEventListener('click', marcasCsv);
+    $('#marcasMarcar').addEventListener('click', marcarLista);
     $('#marcasBusca').addEventListener('input', renderMarcas);
     $('#marcasTipo').addEventListener('change', renderMarcas);
-    // arrastrar por la barra, igual que el chat
-    var cab = $('#marcasCab'), ar = null;
-    cab.addEventListener('pointerdown', function (ev) {
-      if (/BUTTON/.test(ev.target.tagName)) return;
-      var r = box.getBoundingClientRect();
-      ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
-      cab.setPointerCapture(ev.pointerId); ev.preventDefault();
-    });
-    cab.addEventListener('pointermove', function (ev) {
-      if (!ar) return;
-      box.style.left = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - ar.dx)) + 'px';
-      box.style.top = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - ar.dy)) + 'px';
-    });
-    cab.addEventListener('pointerup', function () { ar = null; });
-    cab.addEventListener('pointercancel', function () { ar = null; });
+    arrastraPanel($('#marcasCab'), box);
   })();
 
   /* ---------------- exportar lista de materiales (estilo Markups List) ---------------- */
@@ -8288,7 +9928,7 @@
       uiPrompt('Contraseña:', '', function (pw) {
         var inp0 = $('#askInput'); if (inp0) inp0.type = 'text';
         if (pw === null || pw === '') return;
-        setHint('Entrando al estimador…');
+        setHint('Entrando…');
         sbLogin(em.trim(), pw).then(function () { setHint('✔ Sesión iniciada'); done(); })
           .catch(function (e) { uiAlert('No se pudo entrar: ' + e.message); setHint(''); });
       });
@@ -8324,6 +9964,63 @@
     riser_panel_480_400: 'Panel / Load Center', riser_panel_480_600: 'Panel / Load Center'
   };
   function nombreEst(k) { return EST_NOMBRE[k] || (SYMBOLS[k] ? SYMBOLS[k].name : k); }
+
+  /* ==================================================================
+     CÓDIGOS DE PARTIDA (cost codes) — contrato de datos §4 (punto E2)
+     Todo renglón que sale hacia el estimador lleva uno. La lista viva es la
+     tabla codigos_partida del estimador; esta es la copia inicial y se
+     refresca cada vez que se manda un takeoff (localStorage mxp_codigos).
+     ================================================================== */
+  var CODIGOS_PARTIDA_BASE = [
+    ['01-DEMO', 'Demolición'], ['02-TEMP', 'Servicio temporal'], ['03-UG', 'Subterráneo'], ['04-SERV', 'Servicio y meter'],
+    ['05-PANEL', 'Paneles y switchgear'], ['06-FEED', 'Feeders'], ['07-GND', 'Tierra'], ['08-ROUGH', 'Rough de circuitos'],
+    ['09-COND', 'Tubería expuesta'], ['10-DEV', 'Piezas (devices)'], ['11-LIGHT', 'Luminarias'], ['12-TRIM', 'Trim'],
+    ['13-LV', 'Low voltage / data / F.A.'], ['14-EV', 'Cargadores EV'], ['15-GEN', 'Generadores / ATS'], ['16-SMART', 'Smart panel'],
+    ['17-INSP', 'Inspecciones'], ['18-PERM', 'Permisos'], ['19-EQUIP', 'Renta de equipos'], ['20-MISC', 'Misceláneas']];
+  var CODIGO_DEFECTO = '20-MISC';
+  function codigosPartida() {
+    var g = null;
+    try { g = JSON.parse(localStorage.getItem('mxp_codigos') || 'null'); } catch (e) { g = null; }
+    var arr = (g && Array.isArray(g.items) && g.items.length) ? g.items : CODIGOS_PARTIDA_BASE;
+    return arr.filter(function (c) { return Array.isArray(c) && c[0]; });
+  }
+  function guardaCodigos(rows) {
+    if (!Array.isArray(rows) || !rows.length) return;
+    var items = rows.map(function (r) { return [String(r.codigo || r.code || '').trim(), String(r.nombre || r.descripcion || r.name || '').trim()]; }).filter(function (c) { return c[0]; });
+    if (items.length) { try { localStorage.setItem('mxp_codigos', JSON.stringify({ v: 1, items: items })); } catch (e) {} }
+  }
+  function nombreCodigo(c) { var a = codigosPartida(); for (var i = 0; i < a.length; i++) if (a[i][0] === c) return a[i][1]; return ''; }
+  function esCodigo(c) { return codigosPartida().some(function (x) { return x[0] === c; }); }
+  /* El código de un símbolo del catálogo de Planos: por clave y, si no, por
+     categoría. Es el que hereda el renglón del takeoff; en el estimador se
+     puede cambiar renglón a renglón. */
+  var CODIGO_SYM_RE = [
+    [/^riser_(meter|mast|ct|wh|gutter)/, '04-SERV'],
+    [/^riser_(ats|gen|bat|pv)/, '15-GEN'],
+    [/^riser_ev$|^site_evped$/, '14-EV'],
+    [/^riser_(ground|gnd)|^ol_(gec|mbj|sbj|ground_bar)$/, '07-GND'],
+    [/^riser_|^ol_|^panel$|^subpanel$|^disconnect$/, '05-PANEL'],
+    [/^(tv_outlet|data_outlet)$/, '13-LV'],
+    [/^(jbox|homerun)$/, '08-ROUGH'],
+    [/^site_(pole|service_pt|handhole|pullbox|trench|lp_bur|lp)/, '03-UG'],
+    [/^site_(lightpole|bollard|wallpack)/, '11-LIGHT'],
+    [/^site_ac$/, '10-DEV']
+  ];
+  var CODIGO_CAT = { electrical: '10-DEV', lighting: '11-LIGHT', lutron: '11-LIGHT', outdoor: '10-DEV', oneline: '05-PANEL', riser: '05-PANEL' };
+  function codigoDeSimbolo(k) {
+    for (var i = 0; i < CODIGO_SYM_RE.length; i++) if (CODIGO_SYM_RE[i][0].test(k)) return CODIGO_SYM_RE[i][1];
+    var d = SYMBOLS[k];
+    return (d && CODIGO_CAT[d.cat]) || CODIGO_DEFECTO;
+  }
+  function codigoDeCat(c) { return (c && esCodigo(c.codigo)) ? c.codigo : CODIGO_DEFECTO; }
+  /* Resumen por partida de una lista de renglones: lo que se enseña al
+     confirmar el envío y lo que sale en el CSV. */
+  function resumenPorPartida(entries) {
+    var m = {};
+    (entries || []).forEach(function (e) { var c = e.codigo || CODIGO_DEFECTO; if (!m[c]) m[c] = { codigo: c, renglones: 0, qty: 0 }; m[c].renglones++; m[c].qty += (+e.qty || 0); });
+    return Object.keys(m).sort().map(function (k) { return m[k]; });
+  }
+  window.__partidasDbg = { lista: codigosPartida, deSimbolo: codigoDeSimbolo, resumen: function () { return resumenPorPartida(buildTakeoffEntries(true)); }, menu: function (k) { showToolMenu(k || 'count', $('#navFijo') || document.body); } };
   // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,
   // paisajismo (engordaban la lista SIN MAPEAR del estimador)
   function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing' && d.cat !== 'notas'; }
@@ -8331,10 +10028,10 @@
   function buildTakeoffEntries(soloHoja) {
     syncSheet();
     var out = [];
-    function add(name, qty, unit) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {};   // lf: líneas que se cotizan por pie (LED strip)
+    function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {};   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría
     var fuentes = soloHoja
-      ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls }]
+      ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
     fuentes.forEach(function (d) {
       (d.symbols || []).forEach(function (s) { if (SYMBOLS[s.key] && vaAlEstimador(SYMBOLS[s.key])) byKey[s.key] = (byKey[s.key] || 0) + 1; });
@@ -8354,6 +10051,9 @@
         byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // 3 pisos = 3 breakers
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
+      // el Count: cada marca suma 1 a su categoría; al estimador va con el
+      // alias (el Subject de Bluebeam que ya entiende) o con el nombre
+      (d.counts || []).forEach(function (q) { if (q && q.cat) cnt[q.cat] = (cnt[q.cat] || 0) + 1; });
       (d.areas || []).forEach(function (a) {
         var estA = LINE_STYLES[a.lineStyle];
         if (estA && estA.ft && Array.isArray(a.pts) && a.pts.length >= 2) {
@@ -8365,12 +10065,18 @@
         areaSumE[nomA] = (areaSumE[nomA] || 0) + areaDe(a);   // se agrupa y se redondea la SUMA
       });
     });
-    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA'); else if (SYMBOLS[k]) add(nombreEst(k), byKey[k], 'EA'); });
-    Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA'); });
-    Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
-    Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
-    Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF'); });
-    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT'); });
+    // cada renglón sale con su código de partida (contrato §4): breakers y
+    // equipo → 05-PANEL, cable → 08-ROUGH, luz por pie → 11-LIGHT, lo demás
+    // hereda del símbolo o de la categoría de conteo; paredes y superficies → 20-MISC
+    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA', '05-PANEL'); else if (SYMBOLS[k]) add(nombreEst(k), byKey[k], 'EA', codigoDeSimbolo(k)); });
+    Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA', CODIGO_DEFECTO); });
+    Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT', '08-ROUGH'); });
+    Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT', CODIGO_DEFECTO); });
+    Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF', CODIGO_DEFECTO); });
+    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', '11-LIGHT'); });
+    var cntNom = {};
+    Object.keys(cnt).forEach(function (id) { var c = catCount(id); var nm = c ? (c.alias || c.nom) : null; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
+    Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
     return out;
   }
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
@@ -8391,10 +10097,13 @@
     entries = buildTakeoffEntries(true);
     if (!entries.length) { uiAlert('El plano no tiene nada que contar todavía — coloca símbolos, paredes o cableado primero.'); return; }
     function go() {
+      var sinColumnaCodigo = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
         sbFetch('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad'),
-        sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor')
+        sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor'),
+        // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
+        sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; })
       ]).then(function (res) {
         var cat = res[0] || [], alias = res[1] || [];
         if (!cat.length) {
@@ -8411,11 +10120,13 @@
           if (al) { target = catByNorm[normTxt2(al.item)]; factor = Number(al.factor) || 1; }
           if (!target) target = catByNorm[n];
           if (!target) { unmapped.push(e.name + ' (' + e.qty + ' ' + e.unit + ')'); return; }
-          var k = target.item;
-          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: target.precio || 0, horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff' };
+          // el mismo item en dos partidas (jbox en rough y en feeders) son dos renglones
+          var cod = esCodigo(e.codigo) ? e.codigo : CODIGO_DEFECTO;
+          var k = target.item + '|' + cod;
+          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: target.precio || 0, horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff', codigo: cod };
           mapped[k].cantidad += e.qty * factor;
         });
-        var items = Object.keys(mapped).map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
+        var items = Object.keys(mapped).sort().map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
         if (!items.length) {
           uiAlert('Ninguna pieza del plano coincide todavía con el catálogo del estimador.\n\nSIN MAPEAR:\n• ' + unmapped.join('\n• ') + '\n\nAgrega esos nombres en la tabla de alias del estimador (alias_takeoff) y vuelve a intentar.');
           setHint(''); return;
@@ -8437,12 +10148,21 @@
           var est = rows && rows[0];
           if (!est) throw new Error('no se recibió el estimado creado');
           items.forEach(function (it) { it.estimado_id = est.id; });
-          return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }).then(function () { return est; });
+          return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }).then(function () { return est; }, function (err) {
+            // el estimador todavía no tiene la columna codigo (SQL en docs/takeoff/sql): se manda sin ella y se avisa
+            if (!/codigo/i.test(String(err && err.message || err))) throw err;
+            sinColumnaCodigo = true;
+            var sinCod = items.map(function (it) { var o = {}; Object.keys(it).forEach(function (q) { if (q !== 'codigo') o[q] = it[q]; }); return o; });
+            return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: sinCod }).then(function () { return est; });
+          });
         }).then(function (est) {
           localStorage.setItem('mxp_est_seq_' + year, String(seq));
           state.project.estimateId = estId;
           scheduleAutosave();
+          var porCod = resumenPorPartida(items.map(function (it) { return { codigo: it.codigo, qty: it.cantidad }; }));
           uiAlert('✔ Takeoff enviado al estimador de Max Power.\n\nEstimado: "' + est.nombre + '" — BORRADOR\nRenglones enviados: ' + items.length +
+            '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
+            (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
             '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
           setHint('✔ Estimado ' + estId + ' creado como borrador en el estimador');
@@ -8459,7 +10179,7 @@
   });
 
   /* ---------------- capas ---------------- */
-  var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], grid: ['gGridBase'] };
+  var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], count: ['gCount'], grid: ['gGridBase'] };
   /* NOMBRES DEL EQUIPO DEL RISER (Edgar, 31/08). Es una casilla, no una
      decisión mía: el que arma el riser decide si quiere el nombre impreso
      dentro de cada caja o la caja limpia. Se guarda con el proyecto. */
@@ -8589,7 +10309,7 @@
     }
     tintTo(url, 198, 40, 30, function (u) { if (state.bg2) { state.bg2.url = u; renderBg(); } });
     renderBg(); updateOvUI(); scheduleAutosave();
-    setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca 🎯 Alinear para cuadrarlo por 2 puntos de control.');
+    setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca Alinear para cuadrarlo por 2 puntos de control.');
   }
   // 🧲 SOLDAR ARMADO: tras arrastrar cada cuarto (pieza) a su sitio, este
   // botón une todo: fusiona las paredes dobladas donde dos piezas empatan,
@@ -9068,8 +10788,8 @@
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
       '<div style="font-weight:700;font-size:12.5px">💬 Pregúntale a Claude sobre este plano</div>' +
       '<div style="display:flex;gap:5px">' +
-      (cfg.url ? '<button id="aiPingBtn" title="Comprueba dirección, token y qué instrucciones corren. No cuesta nada." style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">🔌 Probar</button>' : '') +
-      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">⚙ Ajustes</button></div></div>' +
+      (cfg.url ? '<button id="aiPingBtn" title="Comprueba dirección, token y qué instrucciones corren. No cuesta nada." style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">' + ICO.svg('probar') + ' Probar</button>' : '') +
+      '<button id="aiCfgBtn" style="font-size:10.5px;padding:2px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer">' + ICO.svg('props') + ' Ajustes</button></div></div>' +
       (cfg.url
         ? '<div class="muted small" style="margin:4px 0 6px">Va con el plano entero: cada pared con sus medidas, las aberturas y los cuartos. Cuesta unos 9 centavos por pregunta.</div>' +
           '<textarea id="aiPreg" rows="2" placeholder="ej: ¿cómo armo estas 13 piezas? · ¿este cuarto puede ser dormitorio? · ¿qué circuitos necesita esta cocina?" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-family:inherit;font-size:12.5px"></textarea>' +
@@ -9115,7 +10835,7 @@
      ping de siempre — gratis, no llama a Claude. */
   function pingCerebro() {
     var c2 = cerebroCfg();
-    if (!c2.url) { setHint('🔌 Falta la dirección del cerebro — ponla en ⚙ Ajustes'); return; }
+    if (!c2.url) { setHint('🔌 Falta la dirección del cerebro — ponla en Ajustes'); return; }
     setHint('🔌 Probando el cerebro…');
     fetch(c2.url, {
       method: 'POST',
@@ -9207,6 +10927,18 @@
     }
     if (state.guia && state.guia.length) {
       L.push('HAY GUÍA en la hoja (' + state.guia.length + ' tramos): el contorno del survey o la casa fantasma — referencia, no cuenta en materiales.');
+    }
+    // el Count: lo que Edgar contó A MANO sobre el plano del ingeniero. No son
+    // piezas que él dibujó, son piezas que YA estaban: si te preguntan cuántos
+    // cans hay, esto es la respuesta buena.
+    if (state.counts && state.counts.length) {
+      var hj = conteoDeHoja(), st = conteoDelProyecto(), variasH = (state.sheets || []).length > 1;
+      L.push('CONTEO A MANO (Count) — lo que Edgar contó del plano del ingeniero' + (variasH ? ', esta hoja / todo el set:' : ':'));
+      catsCount().forEach(function (c) {
+        var a = hj[c.id] || 0, b2 = st[c.id] || 0;
+        if (!a && !b2) return;
+        L.push(' · ' + c.nom + ': ' + a + (variasH ? ' en esta hoja, ' + b2 + ' en todo el set' : ''));
+      });
     }
     // Aquí iba el "diagnóstico ya medido por la app". Fuera: ese diagnóstico
     // medía las paredes contra los ejes DEL PAPEL, y en una casa girada un
@@ -9307,13 +11039,13 @@
       '<div id="chatCab">' +
         '<span id="chatTit">💬 Claude</span>' +
         '<span id="chatCoste"></span>' +
-        '<button id="chatLimpiar" title="Empezar una conversación nueva">🗑</button>' +
+        '<button id="chatLimpiar" title="Empezar una conversación nueva">' + ICO.svg('papelera') + '</button>' +
         '<button id="chatMin" title="Encoger">–</button>' +
       '</div>' +
       '<div id="chatCuerpo"></div>' +
       '<div id="chatPie">' +
         '<textarea id="chatTxt" rows="2" placeholder="Pregúntale sobre este plano…"></textarea>' +
-        '<button id="chatEnv" title="Enviar (Enter)">➤</button>' +
+        '<button id="chatEnv" title="Enviar (Enter)">' + ICO.svg('send') + '</button>' +
       '</div>';
     document.body.appendChild(d);
 
@@ -9324,7 +11056,11 @@
     // arrastrar por la barra de arriba
     var cab = document.getElementById('chatCab'), ar = null;
     cab.addEventListener('pointerdown', function (ev) {
-      if (/BUTTON/.test(ev.target.tagName)) return;
+      /* closest('button') y no ev.target.tagName: los botones de estas cabeceras
+         llevan dentro su icono SVG (y alguno su rótulo), así que el toque cae
+         sobre el hijo y no sobre el <button>. Con la comprobación vieja, tocar
+         el icono arrastraba el panel y se comía el clic. */
+      if (ev.target.closest && ev.target.closest('button')) return;
       var r = d.getBoundingClientRect();
       ar = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
       d.style.right = 'auto'; d.style.bottom = 'auto';
@@ -9390,12 +11126,14 @@
     var b = document.getElementById('chatBurbuja'); if (b) b.classList.add('oculto');
     try { localStorage.setItem('mxpChatOpen', '1'); } catch (e) {}
     chatPinta();
+    if (typeof chatEsquiva === 'function') chatEsquiva();
     if (foco !== false) { var t = document.getElementById('chatTxt'); if (t) t.focus(); }
   }
   function chatCierra() {
     var d = chatEl(); if (d) d.classList.add('oculto');
     var b = document.getElementById('chatBurbuja'); if (b) b.classList.remove('oculto');
     try { localStorage.setItem('mxpChatOpen', '0'); } catch (e) {}
+    if (typeof chatEsquiva === 'function') chatEsquiva();
   }
 
   function chatCoste() {
@@ -9598,7 +11336,8 @@
     b.id = 'chatBurbuja'; b.textContent = '💬';
     b.title = 'Preguntarle a Claude sin salir del plano';
     b.addEventListener('click', function () { chatAbre(true); });
-    document.body.appendChild(b);
+    // vive DENTRO del lienzo: así nunca tapa el panel derecho (Entrar, Nube…) ni la barra de abajo
+    ($('#canvasWrap') || document.body).appendChild(b);
     var abierto = false;
     try { abierto = localStorage.getItem('mxpChatOpen') === '1'; } catch (e) {}
     if (abierto && cerebroCfg().url) setTimeout(function () { chatAbre(false); }, 300);
@@ -9620,7 +11359,7 @@
         (d.uso ? '<div style="margin-top:8px;color:#777;font-size:11px">— ' + mdEsc(d.uso.centavos) + ' centavos</div>' : '');
     }).catch(function (e) {
       if (btn) btn.disabled = false;
-      out.textContent = '⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en ⚙ Ajustes?';
+      out.textContent = '⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en Ajustes?';
     });
   }
 
@@ -9980,7 +11719,7 @@
         sigue();
       }).catch(function (e) {
         termina(); setHint('');
-        uiAlert('⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en ⚙ Ajustes?');
+        uiAlert('⚠️ No se pudo llegar al cerebro (' + e.message + '). ¿Hay internet? ¿Está bien la dirección en Ajustes?');
       });
     };
     img.onerror = function () { termina(); uiAlert('⚠️ No se pudo leer esa imagen.'); };
@@ -10105,7 +11844,7 @@
       var elegidas = state.walls.filter(function (w) { return idsSel[w.id]; });
       if (elegidas.length >= 2) {
         /* LA COSTURA. Soldar SOLO lo seleccionado dejaba la unión sin tocar:
-           al calzar una pieza queda seleccionada, se pulsa 🧲 y no pasa nada
+           al calzar una pieza queda seleccionada, se pulsas Imanes y no pasa nada
            — la pared repetida sigue ahí doble. Medido 28/08: 8 paredes → 8.
            Por eso al universo se le suman las paredes de al lado (a menos de
            30"): son justo las de la costura. Lo lejano sigue sin tocarse. */
@@ -10412,6 +12151,7 @@
     pintaEscalas(); scheduleAutosave();
   });
   pintaEscalas();
+  (function () { var sl = $('#pjSello'); if (sl) sl.addEventListener('change', function () { state.printSello = sl.value; scheduleAutosave(); }); })();
   $('#pjScale').addEventListener('change', function () {
     state.printScale = this.value; scheduleAutosave();
   });
@@ -10582,7 +12322,7 @@
       walls: state.walls, openings: state.openings, symbols: state.symbols,
       texts: state.texts, dims: state.dims, areas: state.areas,
       wires: state.wires, leaders: state.leaders, bg: state.bg, bg2: state.bg2,
-      guia: state.guia, huecos: state.huecos, inks: state.inks,
+      guia: state.guia, huecos: state.huecos, inks: state.inks, counts: state.counts,
       view: { tx: view.tx, ty: view.ty, z: view.z }
     });
   }
@@ -10626,6 +12366,17 @@
     (state.wires || []).forEach(function (o) { nums(o, ['x1', 'y1', 'x2', 'y2', 'lw', 'bulge', 'side', 'op']); if (o.label != null) o.label = String(o.label); });
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
+    state.counts = (state.counts || []).filter(function (o) { return o && typeof o === 'object'; });
+    state.counts.forEach(function (o) { nums(o, ['x', 'y']); if (o.cat != null) o.cat = String(o.cat).slice(0, 40); });
+    state.countCats = (state.countCats || []).filter(function (o) { return o && typeof o === 'object' && o.id; });
+    state.countCats.forEach(function (o) {
+      o.id = String(o.id).slice(0, 40);
+      o.nom = String(o.nom == null ? '' : o.nom).slice(0, 60) || 'Sin nombre';
+      o.color = colorSeguro(o.color, '#d62828');
+      if (!COUNT_FORMAS[o.forma]) o.forma = 'circ';
+      o.num = o.num === false ? false : true;
+      ['alias', 'set', 'item', 'unidad', 'codigo'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
+    });
     ['bg', 'bg2'].forEach(function (k) {
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
       if (!urlFondoSegura(b.url)) { state[k] = null; return; }
@@ -10647,6 +12398,7 @@
     state.dims = o.dims || []; state.areas = o.areas || [];
     state.wires = o.wires || []; state.leaders = o.leaders || [];
     state.inks = o.inks || [];
+    state.counts = o.counts || [];
     state.bg = o.bg || null;
     state.bg2 = o.bg2 || null;
     state.guia = o.guia || []; state.huecos = o.huecos || [];
@@ -10714,7 +12466,7 @@
               syncProjectInputs();
               renderSheetTabs();
               scheduleAutosave();
-              setHint('Hoja en blanco — dibuja, o abre un plano con 📂 Abrir');
+              setHint('Hoja en blanco — dibuja, o abre un plano con el botón Abrir');
             });
             return;
           }
@@ -11915,7 +13667,7 @@
   // exporta" — aquí es donde se pierde información entre las dos apps, así
   // que en vez de confiar, se cuenta y se compara.
   var reciboDib = [];      // [{name, sqft}] de cada cuarto que se dibujó
-  var ultimoRecibo = null; // texto del último recibo (botón 📋 Recibo)
+  var ultimoRecibo = null; // texto del último recibo (botón "Recibo del último escaneo")
   var reciboNota = '';     // aviso extra del importador para el recibo
   var reciboLimpio = null; // qué hizo la limpieza automática al importar
   // lo que el ARCHIVO trae, contado sin tocar el dibujo
@@ -12837,7 +14589,7 @@
     return totals;
   }
 
-  var COLECCIONES = ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks'];
+  var COLECCIONES = ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks', 'counts', 'countCats'];
   /* VALIDAR ANTES DE TOCAR (auditoría robustez 03/09): un archivo con
      walls:"hola" o sheets:[null] destruía el proyecto abierto, dejaba la app
      muerta y el autosave lo perpetuaba tras F5. Devuelve un texto de error o
@@ -12876,7 +14628,7 @@
     return null;
   }
   function hayContenido() {
-    return COLECCIONES.some(function (k) { return k !== 'panels' && k !== 'huecos' && Array.isArray(state[k]) && state[k].length > 0; }) || !!state.bg;
+    return COLECCIONES.some(function (k) { return k !== 'panels' && k !== 'huecos' && k !== 'countCats' && Array.isArray(state[k]) && state[k].length > 0; }) || !!state.bg;
   }
   function restoreProject(o) {
     var errV = validaProyecto(o);
@@ -12891,7 +14643,7 @@
     undoStack.length = 0; redoStack.length = 0;
     pdfLive = {};
     sel = null; selGroup = null; drawing = null; G.prev.innerHTML = '';
-    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks'].forEach(function (k) {
+    ['walls', 'openings', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'panels', 'guia', 'huecos', 'inks', 'counts', 'countCats'].forEach(function (k) {
       state[k] = Array.isArray(o.state[k]) ? o.state[k] : [];
     });
     state.bg = o.state.bg || null;
@@ -12927,9 +14679,11 @@
     $('#pjPrec').value = String(state.precision);
     pintaEscalas();
     state.printScale = o.state.printScale || 'fit';
+    state.printSello = o.state.printSello || '';
     $('#pjScale').value = state.printScale;
     ponEqName(!!o.state.eqNameOff);   // la casilla de los nombres viaja con el proyecto
     var hs = $('#pjSheet'); if (hs && o.state.printSheet) hs.value = o.state.printSheet;   // (auditoria 31/08) se guardaba y no se restauraba
+    var sl0 = $('#pjSello'); if (sl0 && o.state.printSello != null) sl0.value = o.state.printSello;
     // proyectos viejos (sin multi-hoja): se envuelven en una sola hoja
     if (!state.sheets || !state.sheets.length) {
       state.sheets = [{ no: state.project.sheetNo || 'E-1', title: state.project.sheetTitle || '', data: null }];
@@ -12985,7 +14739,7 @@
             setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' aberturas, ' +
               n.windows + ' ventanas' + (n.floors > 1 ? ' en ' + n.floors + ' pisos' : '') +
               (withFurn && n.furn ? ' + ' + n.furn + ' muebles de referencia' : ' — plano limpio, sin muebles') +
-              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — botón 📋 Recibo en Capas'
+              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — botón "Recibo del último escaneo" en Capas'
                           : ' · 📋 recibo: todo llegó completo') +
               ' · a escala real, en drywall (el block lo pone 🧲 Soldar)');
             // si algo se perdió, se enseña en la cara: es el punto débil
@@ -13032,6 +14786,7 @@
       xs.push(d.x1, d.x2, d.x1 + nxD, d.x2 + nxD); ys.push(d.y1, d.y2, d.y1 + nyD, d.y2 + nyD);   // tambien la linea de cota desplazada
     });
     state.inks.forEach(function (k) { k.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); });
+    state.counts.forEach(function (c) { var rC = countR() + 2; xs.push(c.x - rC, c.x + rC); ys.push(c.y - rC, c.y + rC); });
     state.areas.forEach(function (a) {
       a.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); });
       // el ápice de cada lado curvo sobresale de los vértices (se recortaba en el PDF)
@@ -13068,9 +14823,6 @@
     applyView();
   }
   $('#btnCsv').addEventListener('click', exportTakeoffCsv);
-  $('#btnZoomIn').addEventListener('click', function () { zoomBy(1.25); });
-  $('#btnZoomOut').addEventListener('click', function () { zoomBy(0.8); });
-  $('#btnZoomFit').addEventListener('click', zoomFit);
   $('#btnUndo').addEventListener('click', undo);
   $('#btnRedo').addEventListener('click', redo);
 
@@ -13122,7 +14874,7 @@
     // 'bgHires' (auditoria 31/08): la teja nitida del PDF de fondo es una
     // ayuda de PANTALLA que se pinta encima de la imagen del fondo; al PNG/PDF
     // iban las dos al 0.7 una sobre otra y salia un rectangulo mas oscuro
-    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia', 'bgHires'].forEach(function (id) {
+    ['gGridBase', 'gSel', 'gPreview', 'gMeasure', 'gGuia', 'gBusca', 'gVisual', 'bgHires'].forEach(function (id) {
       var n = clone.querySelector('#' + id);
       if (n) n.parentNode.removeChild(n);
     });
@@ -13159,7 +14911,7 @@
         saveFile((state.project.name || 'plano') + '.png', blob);
       }, 'image/png');
     };
-    img.onerror = function () { setHint('❌ No se pudo rasterizar el PNG (el SVG no cargó). Prueba 🖨 PDF, que no pasa por imagen.'); };
+    img.onerror = function () { setHint('❌ No se pudo rasterizar el PNG (el SVG no cargó). Prueba el botón PDF, que no pasa por imagen.'); };
     var pngT = setTimeout(function () { if (/Exportando PNG/.test($('#hint').textContent)) setHint('⏳ El PNG está tardando — con un plano de fondo grande puede llevar varios segundos'); }, 6000);
     img.addEventListener('load', function () { clearTimeout(pngT); });
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data);
@@ -13184,9 +14936,1450 @@
     var ps = document.getElementById('printSheet');
     if (ps) ps.classList.toggle('vert', !!vertical);
   }
+
+  /* ==================================================================
+     LA HOJA IMPRESA (fase 4.3)
+     Escala gráfica, leyenda dinámica de verdad y sello. Es lo que separa
+     "una captura del dibujo" de "un plano".
+     ================================================================== */
+  /* ESCALA GRÁFICA. Va DENTRO del SVG, en unidades del plano: así se imprime
+     exactamente a la misma escala que el dibujo y la regla sigue siendo
+     verdad aunque la hoja se reduzca en la copiadora — que es justo para lo
+     que existe una escala gráfica. La barra mide un número redondo de pies.
+     Devuelve el markup y cuánto alto hay que añadirle a la hoja. */
+  var ESC_GRAF_FT = [1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100, 200, 400];
+  function escalaGrafica(b, texto) {
+    if (!b || !(b.w > 0)) return null;
+    var objetivoFt = (b.w * 0.28) / 12;
+    var ft = ESC_GRAF_FT[0];
+    ESC_GRAF_FT.forEach(function (f) { if (f <= objetivoFt) ft = f; });
+    var L = ft * 12;                                   // largo de la barra, en pulgadas de obra
+    var h = Math.max(2, Math.min(b.w * 0.007, L / 22));   // grosor de la barra
+    var fs = h * 2.4;                                  // letra de los rótulos
+    var pad = h * 2;
+    var y = b.y + b.h + h * 3.2;
+    var x = b.x + pad;
+    var seg = L / 4, sw = h * 0.16;
+    var g = '<g id="escalaGraf" font-family="Arial, Helvetica, sans-serif">';
+    for (var i = 0; i < 4; i++) {
+      g += '<rect x="' + (x + seg * i).toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + seg.toFixed(2) + '" height="' + h.toFixed(2) +
+        '" fill="' + (i % 2 ? '#ffffff' : '#14161a') + '" stroke="#14161a" stroke-width="' + sw.toFixed(3) + '"/>';
+    }
+    [0, 2, 4].forEach(function (i) {
+      var v = ft * i / 4;
+      var etq = (v === Math.round(v) ? String(Math.round(v)) : String(Math.round(v * 10) / 10)) + (i === 4 ? " FT" : '');
+      g += '<text x="' + (x + seg * i).toFixed(2) + '" y="' + (y + h + fs * 1.05).toFixed(2) +
+        '" font-size="' + fs.toFixed(2) + '" fill="#14161a" text-anchor="middle">' + etq + '</text>';
+    });
+    if (texto) {
+      g += '<text x="' + (x + L + h * 2.4).toFixed(2) + '" y="' + (y + h * 0.85).toFixed(2) +
+        '" font-size="' + (fs * 0.95).toFixed(2) + '" fill="#14161a" font-weight="bold">SCALE: ' + esc(texto) + '</text>';
+    }
+    g += '</g>';
+    return { svg: g, alto: h * 3.2 + h + fs * 1.6 + pad, ft: ft };
+  }
+  /* LEYENDA DINÁMICA: solo lo que de verdad está en esta hoja — símbolos,
+     tipos de pared, tipos de línea, patrones de superficie y las categorías
+     del Count con su cantidad. Una leyenda que enseña lo que no se usó es
+     ruido; una que se olvida de lo que sí, es un plano que no se entiende. */
+  function leyendaHtml() {
+    var items = [];
+    var usados = {};
+    state.symbols.forEach(function (s) { usados[s.key] = (usados[s.key] || 0) + 1; });
+    Object.keys(usados).forEach(function (k) {
+      var d = SYMBOLS[k]; if (!d) return;
+      items.push('<span class="it">' + symPreviewSvg(d, 26, 20) + esc(d.short || d.name) + '</span>');
+    });
+    var wt = {};
+    state.walls.forEach(function (w) { if (WALL_TYPES[w.type]) wt[w.type] = 1; });
+    Object.keys(wt).forEach(function (k) {
+      items.push('<span class="it">' + wallSwatch(k) + esc(WALL_TYPES[k].name) + '</span>');
+    });
+    var pat = {}, lin = {};
+    state.areas.forEach(function (a) {
+      if (a.open) { if (a.lineStyle && LINE_STYLES[a.lineStyle]) lin[a.lineStyle] = 1; }
+      else if (a.pattern && a.pattern !== 'none' && AREA_PATTERNS[a.pattern]) pat[a.pattern] = 1;
+    });
+    state.wires.forEach(function (w) { if (WIRE_STYLE_NAMES[w.style || 'dashed']) lin['w:' + (w.style || 'dashed')] = 1; });
+    Object.keys(pat).forEach(function (k) {
+      items.push('<span class="it">' + patternSwatch(k) + esc(AREA_PATTERNS[k].name) + '</span>');
+    });
+    Object.keys(lin).forEach(function (k) {
+      if (k.indexOf('w:') === 0) {
+        items.push('<span class="it"><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#14161a" stroke-width="1.2" stroke-dasharray="5 3"/></svg>' +
+          esc(WIRE_STYLE_NAMES[k.slice(2)]) + '</span>');
+        return;
+      }
+      var st = LINE_STYLES[k];
+      items.push('<span class="it"><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#14161a" stroke-width="' +
+        (st.lw || 0.9) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/></svg>' +
+        esc(st.name.replace(/^[^A-Za-zÁ-ú]+/, '')) + '</span>');
+    });
+    var hoja = conteoDeHoja();
+    catsCount().forEach(function (c) {
+      var n = hoja[c.id] || 0; if (!n) return;
+      items.push('<span class="it"><svg width="16" height="14"><circle cx="8" cy="7" r="5.4" fill="' + esc(c.color) +
+        '" fill-opacity="0.9" stroke="#fff" stroke-width="1"/></svg>' + esc(c.nom) + ' (' + n + ')</span>');
+    });
+    if (!items.length) return '';
+    return '<div class="legend"><b style="font-size:8px">LEGEND:</b>' + items.join('') + '</div>';
+  }
+  /* EL SELLO. Un plano de ingeniero dice para qué sirve: FOR PERMIT, AS-BUILT,
+     NOT FOR CONSTRUCTION. Va estampado sobre el dibujo, arriba a la derecha,
+     donde se ve sin tapar el trabajo. */
+  function selloHtml() {
+    var sl = $('#pjSello');
+    var t = sl ? String(sl.value || '').trim() : '';
+    if (!t) return '';
+    var rojo = /NOT FOR|REVISION|REVIEW/.test(t);
+    return '<div class="selloPlano' + (rojo ? ' ojo' : '') + '">' + esc(t) + '</div>';
+  }
+
+
+  /* ==================================================================
+     BUSCAR TEXTO EN EL PDF DEL INGENIERO (fase 5.8)
+     "¿Dónde dice PANEL A?" en un set de doce hojas. Bluebeam lo hace y es de
+     las cosas que más tiempo ahorran: el PDF vectorial YA trae su texto, solo
+     hay que preguntárselo a pdf.js y llevar el resultado a coordenadas del
+     plano.
+
+     Ojo con la verdad: un PDF ESCANEADO (una foto de la hoja) no trae texto
+     ninguno. Ahí no hay nada que buscar sin OCR, y eso se dice tal cual en
+     vez de enseñar "0 resultados" y que parezca que la palabra no está.
+     ================================================================== */
+  var buscaCache = {};        // 'pdfId:pagina' → [{txt, x, y, w, h}] en coordenadas 0..1 de la página
+  var buscaRes = [];          // resultados vivos
+  var buscaIdx = -1;
+  function buscaAbierto() { var b = $('#buscaBox'); return b && !b.classList.contains('oculto'); }
+
+  /* Texto de una página, normalizado a 0..1 sobre el papel: así vale para
+     cualquier tamaño del fondo, y no hay que rehacerlo si se recalibra. */
+  function textoDePagina(rec, cb) {
+    if (!rec || !rec.doc) { cb(null); return; }
+    var k = (rec.key || 'x') + ':' + rec.page;
+    if (buscaCache[k]) { cb(buscaCache[k]); return; }
+    rec.doc.getPage(rec.page).then(function (page) {
+      var vp = page.getViewport({ scale: 1 });
+      return page.getTextContent().then(function (tc) {
+        var out = [];
+        (tc.items || []).forEach(function (it) {
+          var t = String(it.str == null ? '' : it.str);
+          if (!t.trim()) return;
+          var tr = pdfjsLib.Util.transform(vp.transform, it.transform);
+          /* OJO (medido, no supuesto): pdf.js ya devuelve item.width e
+             item.height EN PUNTOS del papel, no en unidades de texto. Al
+             multiplicarlos otra vez por la escala de la letra, la caja de
+             "PANEL A" salía 24 veces más alta y el recuadro caía FUERA de la
+             hoja, por encima del borde de arriba (y = -0.61 del papel). */
+          var escY = Math.hypot(tr[1], tr[3]) || 1;      // alto de la letra, en puntos
+          var an = (it.width > 0 ? it.width : t.length * escY * 0.5);
+          var al = (it.height > 0 ? it.height : escY);
+          out.push({
+            txt: t,
+            x: tr[4] / vp.width,
+            y: (tr[5] - al) / vp.height,        // tr[5] es la línea base: la caja empieza arriba
+            w: an / vp.width,
+            h: al * 1.25 / vp.height
+          });
+        });
+        buscaCache[k] = out;
+        cb(out);
+      });
+    }).catch(function () { cb(null); });
+  }
+  /* El fondo de una hoja cualquiera, sin cambiar de hoja: la activa se lee de
+     state, las demás de su data guardada. */
+  function fondoDeHoja(i) {
+    if (i === state.curSheet) return state.bg;
+    var sh = (state.sheets || [])[i];
+    if (!sh || typeof sh.data !== 'string') return null;
+    try { var o = JSON.parse(sh.data); return (o && o.bg) || null; } catch (e) { return null; }
+  }
+  function hojasConPdf(todas) {
+    var out = [];
+    (state.sheets || []).forEach(function (sh, i) {
+      if (!todas && i !== state.curSheet) return;
+      var rec = pdfLive[i], bg = fondoDeHoja(i);
+      if (rec && rec.doc && bg) out.push({ i: i, rec: { doc: rec.doc, page: rec.page, key: (bg.pdfId || '') }, bg: bg });
+    });
+    return out;
+  }
+  function buscaEnPdf() {
+    var q = String(($('#buscaTxt') || {}).value || '').trim();
+    var todas = !!($('#buscaTodas') || {}).checked;
+    buscaRes = []; buscaIdx = -1;
+    pintaBusca(q ? 'buscando' : '');
+    if (!q) { pintaMarcasBusca(); return; }
+    var hojas = hojasConPdf(todas);
+    if (!hojas.length) {
+      pintaBusca(state.bg ? 'sinpdf' : 'sinfondo');
+      return;
+    }
+    var pend = hojas.length, ql = q.toLowerCase(), conTexto = 0;
+    hojas.forEach(function (h) {
+      textoDePagina(h.rec, function (items) {
+        if (items && items.length) conTexto++;
+        (items || []).forEach(function (it) {
+          if (it.txt.toLowerCase().indexOf(ql) < 0) return;
+          buscaRes.push({
+            hoja: h.i, txt: it.txt,
+            x: h.bg.x + it.x * h.bg.w, y: h.bg.y + it.y * h.bg.h,
+            w: it.w * h.bg.w, h: it.h * h.bg.h
+          });
+        });
+        if (--pend === 0) {
+          buscaRes.sort(function (a, b) { return a.hoja - b.hoja || a.y - b.y || a.x - b.x; });
+          pintaBusca(conTexto ? '' : 'escaneado');
+          pintaMarcasBusca();
+        }
+      });
+    });
+  }
+  function pintaBusca(estado) {
+    var lista = $('#buscaLista'), n = $('#buscaN');
+    if (!lista) return;
+    if (estado === 'buscando') { lista.innerHTML = '<div class="bMuted">Buscando…</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'sinfondo') { lista.innerHTML = '<div class="bMuted">Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero con el botón <b>Fondo</b>.</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'sinpdf') { lista.innerHTML = '<div class="bMuted">El fondo de esta hoja es una <b>imagen</b>, no un PDF: no trae texto que buscar. Vuelve a importarlo como PDF y se puede buscar dentro.</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'escaneado') {
+      lista.innerHTML = '<div class="bMuted">Ese PDF <b>no trae texto</b>: está escaneado, es una foto de la hoja. Para buscar ahí haría falta OCR, y la app todavía no lo hace. La verdad es esa: no es que la palabra no esté, es que no hay texto que leer.</div>';
+      if (n) n.textContent = ''; return;
+    }
+    if (!estado && !String(($('#buscaTxt') || {}).value || '').trim()) { lista.innerHTML = '<div class="bMuted">Escribe una palabra del plano: PANEL A, GFCI, 2-WAY, DISHWASHER…</div>'; if (n) n.textContent = ''; return; }
+    if (n) n.textContent = buscaRes.length ? buscaRes.length + (buscaRes.length === 1 ? ' resultado' : ' resultados') : '';
+    if (!buscaRes.length) { lista.innerHTML = '<div class="bMuted">No aparece en el texto del PDF.</div>'; return; }
+    var h = '';
+    buscaRes.forEach(function (r, i) {
+      var sh = (state.sheets || [])[r.hoja] || {};
+      h += '<div class="bFila' + (i === buscaIdx ? ' cur' : '') + '" data-i="' + i + '">' +
+        '<span class="bHoja">' + esc(sh.no || ('H' + (r.hoja + 1))) + '</span>' +
+        '<span class="bTxt">' + esc(r.txt.length > 60 ? r.txt.slice(0, 60) + '…' : r.txt) + '</span></div>';
+    });
+    lista.innerHTML = h;
+    $$('#buscaLista .bFila').forEach(function (f) {
+      f.addEventListener('click', function () { vaAResultado(+f.dataset.i); });
+    });
+  }
+  /* Los recuadros amarillos sobre el plano: solo los de la hoja que se ve. */
+  function pintaMarcasBusca() {
+    var g = document.getElementById('gBusca'); if (!g) return;
+    if (!buscaAbierto() || !buscaRes.length) { g.innerHTML = ''; return; }
+    var s2 = '';
+    buscaRes.forEach(function (r, i) {
+      if (r.hoja !== state.curSheet) return;
+      var pad = Math.max(r.h * 0.12, 0.5);
+      s2 += '<rect class="busca' + (i === buscaIdx ? ' cur' : '') + '" x="' + (r.x - pad).toFixed(2) + '" y="' + (r.y - pad).toFixed(2) +
+        '" width="' + (r.w + pad * 2).toFixed(2) + '" height="' + (r.h + pad * 2).toFixed(2) + '"/>';
+    });
+    g.innerHTML = s2;
+  }
+  function vaAResultado(i) {
+    if (!buscaRes.length) return;
+    buscaIdx = ((i % buscaRes.length) + buscaRes.length) % buscaRes.length;
+    var r = buscaRes[buscaIdx];
+    if (r.hoja !== state.curSheet && state.sheets[r.hoja]) switchSheet(r.hoja);
+    var m = Math.max(r.w, r.h) * 2 + 24;
+    zoomToBox({ x: r.x - m, y: r.y - m, w: r.w + m * 2, h: r.h + m * 2 });
+    pintaBusca(''); pintaMarcasBusca();
+    setHint('“' + r.txt.trim().slice(0, 40) + '” — ' + (buscaIdx + 1) + ' de ' + buscaRes.length +
+      ' · hoja ' + ((state.sheets[r.hoja] || {}).no || (r.hoja + 1)));
+  }
+  (function () {
+    var vb = $('#visualBox'); if (!vb) return;
+    var bc = $('#visualCerrar'); if (bc) bc.addEventListener('click', cierraVisual);
+    arrastraPanel($('#visualCab'), vb);
+  })();
+  (function () {
+    var box = $('#buscaBox'); if (!box) return;
+    var bt = $('#btnBuscaPdf');
+    if (bt) bt.addEventListener('click', function () {
+      box.classList.toggle('oculto');
+      if (buscaAbierto()) { pintaBusca(''); pintaMarcasBusca(); var i = $('#buscaTxt'); if (i) { i.focus(); i.select(); } }
+      else { var g = document.getElementById('gBusca'); if (g) g.innerHTML = ''; }
+    });
+    var bc = $('#buscaCerrar');
+    if (bc) bc.addEventListener('click', function () { box.classList.add('oculto'); var g = document.getElementById('gBusca'); if (g) g.innerHTML = ''; });
+    var ti = null;
+    var inp = $('#buscaTxt');
+    if (inp) {
+      inp.addEventListener('input', function () { clearTimeout(ti); ti = setTimeout(buscaEnPdf, 260); });
+      inp.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        if (buscaRes.length) vaAResultado(buscaIdx + (ev.shiftKey ? -1 : 1)); else buscaEnPdf();
+      });
+    }
+    var tt = $('#buscaTodas'); if (tt) tt.addEventListener('change', buscaEnPdf);
+    var bp = $('#buscaPrev'); if (bp) bp.addEventListener('click', function () { vaAResultado(buscaIdx - 1); });
+    var bs = $('#buscaSig'); if (bs) bs.addEventListener('click', function () { vaAResultado(buscaIdx + 1); });
+    arrastraPanel($('#buscaCab'), box);
+  })();
+
+
+  /* ==================================================================
+     TRIM / EXTEND / BREAK  (fase 5.2)
+     Las tres de AutoCAD que en un plano se usan a diario: recortar lo que
+     sobra de una línea contra lo que se cruza, alargarla hasta que toque, y
+     partirla en dos.
+
+     Se hace en modo RÁPIDO, como el TRIM moderno de AutoCAD: no se pide
+     primero "el borde que corta". Tocas el pedazo que sobra y se va. Menos
+     pasos y menos que explicar.
+
+     Vale para lo que es una línea: paredes, cables y polilíneas/líneas
+     abiertas. Una superficie cerrada NO se recorta (dejaría de ser un área),
+     pero sí SIRVE de borde que corta.
+     ================================================================== */
+  /* Cruce de dos rectas infinitas, devolviendo el parámetro en cada una.
+     t es sobre AB (0 = A, 1 = B) y u sobre CD. Null si son paralelas. */
+  function cruceRectas(ax, ay, bx, by, cx, cy, dx, dy) {
+    var r1 = bx - ax, r2 = by - ay, s1 = dx - cx, s2 = dy - cy;
+    var den = r1 * s2 - r2 * s1;
+    if (Math.abs(den) < 1e-9) return null;
+    var qx = cx - ax, qy = cy - ay;
+    var t = (qx * s2 - qy * s1) / den;
+    var u = (qx * r2 - qy * r1) / den;
+    return { t: t, u: u, x: ax + r1 * t, y: ay + r2 * t };
+  }
+  /* Todos los segmentos que pueden servir de borde que corta, menos el propio
+     objeto. Una superficie cerrada cuenta como borde aunque no se pueda
+     recortar ella misma. */
+  function cortadores(excl) {
+    var out = [];
+    function pon(x1, y1, x2, y2) { if (Math.hypot(x2 - x1, y2 - y1) > 0.02) out.push({ x1: x1, y1: y1, x2: x2, y2: y2 }); }
+    state.walls.forEach(function (w) { if (!(excl && excl.kind === 'wall' && excl.id === w.id)) pon(w.x1, w.y1, w.x2, w.y2); });
+    state.wires.forEach(function (w) { if (!(excl && excl.kind === 'wire' && excl.id === w.id)) pon(w.x1, w.y1, w.x2, w.y2); });
+    state.areas.forEach(function (a) {
+      if (excl && excl.kind === 'area' && excl.id === a.id) return;
+      var pts = a.pts || [];
+      for (var i = 0; i + 1 < pts.length; i++) pon(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      if (!a.open && pts.length > 2) pon(pts[pts.length - 1][0], pts[pts.length - 1][1], pts[0][0], pts[0][1]);
+    });
+    return out;
+  }
+  /* La lista de puntos (parámetro t en 0..1) donde ALGO cruza este segmento. */
+  function cortesEn(x1, y1, x2, y2, segs) {
+    var ts = [];
+    segs.forEach(function (c) {
+      var r = cruceRectas(x1, y1, x2, y2, c.x1, c.y1, c.x2, c.y2);
+      if (!r) return;
+      if (r.t <= 1e-6 || r.t >= 1 - 1e-6) return;      // en la punta no cuenta
+      if (r.u < -1e-6 || r.u > 1 + 1e-6) return;       // fuera del borde
+      ts.push(r.t);
+    });
+    ts.sort(function (a, b) { return a - b; });
+    // dos cortes en el mismo sitio (esquina de dos paredes) son uno
+    var out = [];
+    ts.forEach(function (t) { if (!out.length || t - out[out.length - 1] > 1e-4) out.push(t); });
+    return out;
+  }
+  /* Dónde cayó el dedo sobre el segmento (0..1), pegado al segmento. */
+  function tDePunto(p, x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+    if (!L2) return 0;
+    return Math.max(0, Math.min(1, ((p[0] - x1) * dx + (p[1] - y1) * dy) / L2));
+  }
+  /* El tramo del segmento donde cayó el dedo, entre corte y corte (o entre
+     una punta y el primer corte). Devuelve [t0, t1] o null si no hay ningún
+     corte: ahí no hay nada que recortar y hay que decirlo. */
+  function tramoDe(ts, t) {
+    if (!ts.length) return null;
+    var a = 0, b = 1;
+    for (var i = 0; i < ts.length; i++) { if (ts[i] <= t) a = ts[i]; else { b = ts[i]; break; } }
+    return [a, b];
+  }
+  function ptEn(x1, y1, x2, y2, t) { return [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]; }
+
+  /* ---- RECORTAR ---- */
+  /* Reparte las puertas y ventanas de una pared entre los pedazos que quedan
+     vivos. Cada tramo dice qué id se lleva las suyas y cuánto hay que restarle
+     a 'pos' (que se mide desde x1, y x1 se pudo mover). La que no cae en
+     ningún tramo vivo se va: quedarse sería una puerta flotando en el aire,
+     inseleccionable y contando en materiales. */
+  function repartAberturas(wallId, tramos) {
+    var quitadas = 0;
+    state.openings = state.openings.filter(function (o) {
+      if (o.wallId !== wallId) return true;
+      for (var i = 0; i < tramos.length; i++) {
+        var tr = tramos[i];
+        if (o.pos >= tr.d0 - 0.01 && o.pos <= tr.d1 + 0.01) {
+          o.wallId = tr.destino;
+          o.pos = o.pos - tr.restar;
+          return true;
+        }
+      }
+      quitadas++;
+      return false;
+    });
+    return quitadas;
+  }
+  function recorta(ref, p) {
+    var e = entityOf(ref); if (!e) return { ok: false, msg: 'Eso ya no está' };
+    var segs = cortadores(ref);
+    if (ref.kind === 'area') return recortaPoli(ref, e, p, segs);
+    var ts = cortesEn(e.x1, e.y1, e.x2, e.y2, segs);
+    if (!ts.length) return { ok: false, msg: 'Nada la cruza: no hay por dónde recortarla. Cruza otra línea encima y vuelve a tocar aquí.' };
+    var t = tDePunto(p, e.x1, e.y1, e.x2, e.y2);
+    var tr = tramoDe(ts, t);
+    var L = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+    pushUndo();
+    var quitadas = 0, copia = null;
+    if (tr[0] <= 1e-6) {                                     // sobra el principio
+      var pA = ptEn(e.x1, e.y1, e.x2, e.y2, tr[1]);
+      // x1 se corre: lo que sobrevive empieza en tr[1], así que 'pos' baja igual
+      quitadas = repartAberturas(e.id, [{ d0: L * tr[1], d1: L, destino: e.id, restar: L * tr[1] }]);
+      e.x1 = Math.round(pA[0]); e.y1 = Math.round(pA[1]);
+    } else if (tr[1] >= 1 - 1e-6) {                          // sobra el final
+      var pB = ptEn(e.x1, e.y1, e.x2, e.y2, tr[0]);
+      quitadas = repartAberturas(e.id, [{ d0: 0, d1: L * tr[0], destino: e.id, restar: 0 }]);
+      e.x2 = Math.round(pB[0]); e.y2 = Math.round(pB[1]);
+    } else {                                                 // sobra un pedazo del medio: quedan dos
+      var q0 = ptEn(e.x1, e.y1, e.x2, e.y2, tr[0]);
+      var q1 = ptEn(e.x1, e.y1, e.x2, e.y2, tr[1]);
+      copia = JSON.parse(JSON.stringify(e));
+      copia.id = uid();
+      copia.x1 = Math.round(q1[0]); copia.y1 = Math.round(q1[1]);
+      quitadas = repartAberturas(e.id, [
+        { d0: 0, d1: L * tr[0], destino: e.id, restar: 0 },
+        { d0: L * tr[1], d1: L, destino: copia.id, restar: L * tr[1] }
+      ]);
+      e.x2 = Math.round(q0[0]); e.y2 = Math.round(q0[1]);
+      (ref.kind === 'wall' ? state.walls : state.wires).push(copia);
+    }
+    return { ok: true, msg: 'Recortado' + (copia ? ' — quedó partida en dos' : '') +
+      (quitadas ? ' · ' + quitadas + ' puerta(s)/ventana(s) que estaban en el pedazo quitado se fueron con él' : '') };
+  }
+  /* Polilínea abierta: el tramo que sobra se quita y, si estaba en el medio,
+     queda partida en dos. */
+  function recortaPoli(ref, e, p, segs) {
+    if (!e.open || !e.pts || e.pts.length < 2) return { ok: false, msg: 'Una superficie cerrada no se recorta: dejaría de ser un área. Sí sirve de borde para recortar otras.' };
+    var pts = e.pts, mejor = null;
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var d = distToSeg(p[0], p[1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      if (!mejor || d.d < mejor.d) mejor = { i: i, d: d.d, t: d.t };
+    }
+    if (!mejor) return { ok: false, msg: 'No entendí qué tramo tocaste' };
+    var i0 = mejor.i;
+    var a = pts[i0], b = pts[i0 + 1];
+    var ts = cortesEn(a[0], a[1], b[0], b[1], segs);
+    if (!ts.length) return { ok: false, msg: 'Ese tramo no lo cruza nada: no hay por dónde recortarlo' };
+    var tr = tramoDe(ts, mejor.t);
+    var q0 = ptEn(a[0], a[1], b[0], b[1], tr[0]);
+    var q1 = ptEn(a[0], a[1], b[0], b[1], tr[1]);
+    pushUndo();
+    var izq = pts.slice(0, i0 + 1), der = pts.slice(i0 + 1);
+    if (tr[0] > 1e-6) izq.push([Math.round(q0[0]), Math.round(q0[1])]);
+    if (tr[1] < 1 - 1e-6) der.unshift([Math.round(q1[0]), Math.round(q1[1])]);
+    var vivos = [];
+    if (izq.length >= 2) vivos.push(izq);
+    if (der.length >= 2) vivos.push(der);
+    if (!vivos.length) { state.areas = state.areas.filter(function (q) { return q.id !== e.id; }); return { ok: true, msg: 'Recortado — no quedó nada de esa línea' }; }
+    e.pts = vivos[0];
+    if (vivos[1]) {
+      var c2 = JSON.parse(JSON.stringify(e));
+      c2.id = uid(); c2.pts = vivos[1];
+      delete c2.circ;   // un homerun partido en dos no son dos circuitos
+      state.areas.push(c2);
+    }
+    return { ok: true, msg: 'Recortado' + (vivos[1] ? ' — quedó partida en dos' : '') };
+  }
+
+  /* ---- ALARGAR ---- */
+  function alarga(ref, p) {
+    var e = entityOf(ref); if (!e) return { ok: false, msg: 'Eso ya no está' };
+    var segs = cortadores(ref);
+    var A, B, ponPunta;
+    if (ref.kind === 'area') {
+      if (!e.open || !e.pts || e.pts.length < 2) return { ok: false, msg: 'Una superficie cerrada no se alarga' };
+      var pts = e.pts;
+      var dIni = Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]);
+      var dFin = Math.hypot(p[0] - pts[pts.length - 1][0], p[1] - pts[pts.length - 1][1]);
+      if (dIni <= dFin) { A = pts[1]; B = pts[0]; ponPunta = function (q) { pts[0] = q; }; }
+      else { A = pts[pts.length - 2]; B = pts[pts.length - 1]; ponPunta = function (q) { pts[pts.length - 1] = q; }; }
+      A = [A[0], A[1]]; B = [B[0], B[1]];
+    } else {
+      var d1 = Math.hypot(p[0] - e.x1, p[1] - e.y1), d2 = Math.hypot(p[0] - e.x2, p[1] - e.y2);
+      if (d1 <= d2) { A = [e.x2, e.y2]; B = [e.x1, e.y1]; ponPunta = function (q) { e.x1 = q[0]; e.y1 = q[1]; }; }
+      else { A = [e.x1, e.y1]; B = [e.x2, e.y2]; ponPunta = function (q) { e.x2 = q[0]; e.y2 = q[1]; }; }
+    }
+    // rayo desde B alejándose de A: el primer borde que toque manda
+    var mejor = null;
+    segs.forEach(function (c) {
+      var r = cruceRectas(A[0], A[1], B[0], B[1], c.x1, c.y1, c.x2, c.y2);
+      if (!r) return;
+      if (r.t <= 1 + 1e-6) return;                       // detrás o dentro de lo que ya hay
+      if (r.u < -1e-6 || r.u > 1 + 1e-6) return;
+      if (!mejor || r.t < mejor.t) mejor = r;
+    });
+    if (!mejor) return { ok: false, msg: 'Por ese lado no hay nada que la pare: alargarla sería inventar hasta dónde' };
+    pushUndo();
+    ponPunta([Math.round(mejor.x), Math.round(mejor.y)]);
+    var cuanto = Math.hypot(mejor.x - B[0], mejor.y - B[1]);
+    return { ok: true, msg: 'Alargada ' + fmtFtIn(cuanto) + ' hasta la línea que la para' };
+  }
+
+  /* ---- PARTIR ---- */
+  function parte(ref, p) {
+    var e = entityOf(ref); if (!e) return { ok: false, msg: 'Eso ya no está' };
+    if (ref.kind === 'area') {
+      if (!e.open || !e.pts || e.pts.length < 2) return { ok: false, msg: 'Una superficie cerrada no se parte por un punto' };
+      var pts = e.pts, mejor = null;
+      for (var i = 0; i + 1 < pts.length; i++) {
+        var d = distToSeg(p[0], p[1], pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+        if (!mejor || d.d < mejor.d) mejor = { i: i, d: d.d, t: d.t };
+      }
+      if (!mejor) return { ok: false, msg: 'No entendí dónde partirla' };
+      var a = pts[mejor.i], b = pts[mejor.i + 1];
+      var q = ptEn(a[0], a[1], b[0], b[1], mejor.t).map(Math.round);
+      var izq = pts.slice(0, mejor.i + 1).concat([q]);
+      var der = [q].concat(pts.slice(mejor.i + 1));
+      if (izq.length < 2 || der.length < 2) return { ok: false, msg: 'Ahí no se puede partir: cae justo en una punta' };
+      pushUndo();
+      var c2 = JSON.parse(JSON.stringify(e));
+      c2.id = uid(); c2.pts = der; delete c2.circ;
+      e.pts = izq;
+      state.areas.push(c2);
+      return { ok: true, msg: 'Partida en dos' };
+    }
+    var t = tDePunto(p, e.x1, e.y1, e.x2, e.y2);
+    var L = Math.hypot(e.x2 - e.x1, e.y2 - e.y1);
+    if (t * L < 1 || (1 - t) * L < 1) return { ok: false, msg: 'Ahí no se puede partir: cae justo en la punta' };
+    var qp = ptEn(e.x1, e.y1, e.x2, e.y2, t).map(Math.round);
+    pushUndo();
+    var copia = JSON.parse(JSON.stringify(e));
+    copia.id = uid();
+    copia.x1 = qp[0]; copia.y1 = qp[1];
+    // las puertas y ventanas pasadas del corte se van con el segundo pedazo
+    if (ref.kind === 'wall') {
+      var corte = L * t;
+      state.openings.forEach(function (o) {
+        if (o.wallId !== e.id || o.pos <= corte) return;
+        o.wallId = copia.id; o.pos = o.pos - corte;
+      });
+    }
+    e.x2 = qp[0]; e.y2 = qp[1];
+    (ref.kind === 'wall' ? state.walls : state.wires).push(copia);
+    return { ok: true, msg: 'Partida en dos por ahí' };
+  }
+
+  var trimModo = 'trim';    // trim | extend | break
+  var TRIM_NOM = { trim: 'Recortar', extend: 'Alargar', break: 'Partir' };
+  function trimDown(p) {
+    var h = hitTest(p);
+    if (!h || (h.kind !== 'wall' && h.kind !== 'wire' && h.kind !== 'area')) {
+      setHint('Toca una pared, un cable o una línea — es lo que se puede ' + TRIM_NOM[trimModo].toLowerCase());
+      return;
+    }
+    var r = trimModo === 'extend' ? alarga(h, p) : trimModo === 'break' ? parte(h, p) : recorta(h, p);
+    if (r.ok) {
+      limpiaHuerfanas();
+      ponSel([]);
+      refresh(); refreshCounts(); scheduleAutosave();
+      setHint('✔ ' + r.msg + ' · sigue tocando · Esc para salir');
+    } else {
+      setHint('⚠ ' + r.msg);
+    }
+  }
+
+
+  /* ==================================================================
+     DXF — EXPORTAR E IMPORTAR (fase 5.12)
+     Para hablar con el ingeniero y con el arquitecto sin pasar por PDF: el
+     DXF entra en AutoCAD, Revit, LibreCAD, QCAD y en casi todo.
+
+     EXPORTAR: en vez de traducir pieza por pieza (paredes sí, símbolos no,
+     puertas a medias…), se recorre el DIBUJO YA HECHO — el mismo SVG que se
+     ve en pantalla — y se pasa a DXF cada trazo con su capa. Así lo que sale
+     es exactamente lo que se ve: los arcos de las puertas, el glifo de cada
+     símbolo, el patrón de la superficie. Se escribe DXF R12 (AC1009) con solo
+     LINE, CIRCLE y TEXT, que es el que abre en todas partes.
+
+     El eje Y se voltea: en un plano de CAD la Y sube y aquí baja.
+     ================================================================== */
+  var DXF_CAPAS = {
+    gWalls: ['A-WALL', 7], gAreas: ['A-AREA', 3], gFurniture: ['A-FURN', 4],
+    gElectrical: ['E-POWR', 1], gAnnot: ['A-ANNO', 2], gCount: ['M-COUNT', 6],
+    gBackground: ['X-BACKGROUND', 8]
+  };
+  var DXF_MAX_SEG = 120000;      // tope de trazos: pasado eso el archivo no lo abre nadie con gusto
+
+  function dxfNum(v) { return (Math.round(v * 1000) / 1000).toFixed(3); }
+  function dxfPar(cod, val) { return cod + '\n' + val + '\n'; }
+  function dxfLinea(capa, x1, y1, x2, y2) {
+    return '0\nLINE\n' + dxfPar(8, capa) +
+      dxfPar(10, dxfNum(x1)) + dxfPar(20, dxfNum(-y1)) + dxfPar(30, '0.0') +
+      dxfPar(11, dxfNum(x2)) + dxfPar(21, dxfNum(-y2)) + dxfPar(31, '0.0');
+  }
+  function dxfCirculo(capa, cx, cy, r) {
+    return '0\nCIRCLE\n' + dxfPar(8, capa) +
+      dxfPar(10, dxfNum(cx)) + dxfPar(20, dxfNum(-cy)) + dxfPar(30, '0.0') + dxfPar(40, dxfNum(r));
+  }
+  function dxfTexto(capa, x, y, alto, txt, rot) {
+    // el DXF R12 no lleva acentos fuera de ASCII con garantías: se pasan a su
+    // letra sin tilde antes que salga un símbolo raro en AutoCAD
+    var t = String(txt).replace(/\r?\n/g, ' ').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7E]/g, '');
+    if (!t) return '';
+    return '0\nTEXT\n' + dxfPar(8, capa) +
+      dxfPar(10, dxfNum(x)) + dxfPar(20, dxfNum(-y)) + dxfPar(30, '0.0') +
+      dxfPar(40, dxfNum(alto)) + dxfPar(1, t) + (rot ? dxfPar(50, dxfNum(-rot)) : '');
+  }
+  /* La capa DXF de un nodo: el <g> de más arriba que la app conoce. */
+  function dxfCapaDe(el, raiz) {
+    var n = el;
+    while (n && n !== raiz) {
+      if (n.id && DXF_CAPAS[n.id]) return DXF_CAPAS[n.id][0];
+      n = n.parentNode;
+    }
+    return '0';
+  }
+  /* Trocea el atributo d de un <path> en subtrazos: si no, el muestreo une el
+     final de un subtrazo con el principio del siguiente y salen rayas que en
+     el dibujo no existen (la vuelta de una nube, por ejemplo). */
+  function dxfSubtrazos(d) {
+    var out = [], cur = '';
+    var re = /[MmZzLlHhVvCcSsQqTtAa][^MmZz]*/g, m;
+    while ((m = re.exec(d))) {
+      var c = m[0];
+      if (/^[Mm]/.test(c)) { if (cur.trim()) out.push(cur); cur = c; }
+      else if (/^[Zz]/.test(c)) { cur += c; out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    if (cur.trim()) out.push(cur);
+    return out.filter(function (q) { return /[MmLlHhVvCcSsQqTtAa]/.test(q.slice(1)) || /[Zz]/.test(q); });
+  }
+  /* ── UN SOLO RECORRIDO DEL DIBUJO ──
+     Tanto el DXF como el PDF vectorial necesitan lo mismo: recorrer el SVG que
+     se ve y sacar cada trazo en coordenadas del plano, con su capa y su
+     estilo. Se hace UNA vez y los dos formatos lo usan; si mañana se arregla
+     algo aquí, se arregla en los dos.
+     Devuelve por callback piezas { tipo:'poli'|'circ'|'texto', ... }. */
+  var DIBUJO_FUERA = { gGridBase: 1, gSel: 1, gPreview: 1, gMeasure: 1, gGuia: 1, gBusca: 1, gVisual: 1, bgHires: 1, gBackground: 1 };
+  function recorreDibujo(cb) {
+    var world = G.world;
+    var inv = world.getScreenCTM();
+    if (!inv) return 0;
+    inv = inv.inverse();
+    var pt = svg.createSVGPoint();
+    var n = 0;
+    function aMundo(m, x, y) { pt.x = x; pt.y = y; var q = pt.matrixTransform(m); return [q.x, q.y]; }
+    var tmpPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    world.appendChild(tmpPath);
+    tmpPath.style.display = 'none';
+    function estiloDe(el) {
+      var cs = getComputedStyle(el);
+      var trazo = cs.stroke && cs.stroke !== 'none' ? cs.stroke : null;
+      var relleno = cs.fill && cs.fill !== 'none' && cs.fill.indexOf('url(') < 0 ? cs.fill : null;
+      var lw = parseFloat(cs.strokeWidth) || 0;
+      var op = parseFloat(cs.opacity);
+      return { trazo: trazo, relleno: relleno, lw: lw, op: isFinite(op) ? op : 1, patron: (cs.fill || '').indexOf('url(') === 0 };
+    }
+    var todos = world.querySelectorAll('line, polyline, polygon, rect, circle, ellipse, path, text');
+    for (var i = 0; i < todos.length; i++) {
+      var el = todos[i];
+      if (el === tmpPath) continue;
+      var salta = false, n2 = el;
+      while (n2 && n2 !== world) {
+        if (n2.id && DIBUJO_FUERA[n2.id]) { salta = true; break; }
+        if (n2.style && n2.style.display === 'none') { salta = true; break; }
+        n2 = n2.parentNode;
+      }
+      if (salta) continue;
+      var m = el.getScreenCTM();
+      if (!m) continue;
+      m = inv.multiply(m);
+      var capa = dxfCapaDe(el, world);
+      var est = estiloDe(el);
+      var tag = el.tagName.toLowerCase();
+      if (tag === 'line') {
+        cb({ tipo: 'poli', capa: capa, est: est, cerrado: false, pts: [aMundo(m, +el.getAttribute('x1') || 0, +el.getAttribute('y1') || 0), aMundo(m, +el.getAttribute('x2') || 0, +el.getAttribute('y2') || 0)] }); n++;
+      } else if (tag === 'rect') {
+        var rx = +el.getAttribute('x') || 0, ry = +el.getAttribute('y') || 0;
+        var rw = +el.getAttribute('width') || 0, rh = +el.getAttribute('height') || 0;
+        if (rw > 6000 && rh > 6000) continue;      // el rectángulo blanco del fondo, no es dibujo
+        cb({ tipo: 'poli', capa: capa, est: est, cerrado: true, pts: [[rx, ry], [rx + rw, ry], [rx + rw, ry + rh], [rx, ry + rh]].map(function (q) { return aMundo(m, q[0], q[1]); }) }); n++;
+      } else if (tag === 'polyline' || tag === 'polygon') {
+        var ps = (el.getAttribute('points') || '').trim().split(/[\s,]+/).map(Number), arr = [];
+        for (var k = 0; k + 1 < ps.length; k += 2) arr.push(aMundo(m, ps[k], ps[k + 1]));
+        if (arr.length >= 2) { cb({ tipo: 'poli', capa: capa, est: est, cerrado: tag === 'polygon', pts: arr }); n++; }
+      } else if (tag === 'circle' || tag === 'ellipse') {
+        var cx = +(el.getAttribute('cx') || 0), cy = +(el.getAttribute('cy') || 0);
+        var r1 = +(el.getAttribute('r') || el.getAttribute('rx') || 0);
+        var r2 = +(el.getAttribute('r') || el.getAttribute('ry') || 0);
+        if (!r1 || !r2) continue;
+        var c0 = aMundo(m, cx, cy), cA = aMundo(m, cx + r1, cy), cB = aMundo(m, cx, cy + r2);
+        var ra = Math.hypot(cA[0] - c0[0], cA[1] - c0[1]), rb = Math.hypot(cB[0] - c0[0], cB[1] - c0[1]);
+        if (Math.abs(ra - rb) < Math.max(ra, rb) * 0.02) { cb({ tipo: 'circ', capa: capa, est: est, c: c0, r: (ra + rb) / 2 }); n++; }
+        else {
+          var el2 = [];
+          for (var a2 = 0; a2 <= 40; a2++) { var th = a2 / 40 * Math.PI * 2; el2.push(aMundo(m, cx + r1 * Math.cos(th), cy + r2 * Math.sin(th))); }
+          cb({ tipo: 'poli', capa: capa, est: est, cerrado: true, pts: el2 }); n++;
+        }
+      } else if (tag === 'path') {
+        var d = el.getAttribute('d'); if (!d) continue;
+        dxfSubtrazos(d).forEach(function (sd) {
+          tmpPath.setAttribute('d', sd);
+          var L = 0;
+          try { L = tmpPath.getTotalLength(); } catch (e) { L = 0; }
+          if (!(L > 0)) return;
+          var pasos = Math.max(2, Math.min(96, Math.ceil(L / 1.2)));
+          var pts2 = [];
+          for (var q2 = 0; q2 <= pasos; q2++) { var pp = tmpPath.getPointAtLength(L * q2 / pasos); pts2.push(aMundo(m, pp.x, pp.y)); }
+          cb({ tipo: 'poli', capa: capa, est: est, cerrado: /[Zz]\s*$/.test(sd), pts: pts2 }); n++;
+        });
+      } else if (tag === 'text') {
+        var tx = +(el.getAttribute('x') || 0), ty = +(el.getAttribute('y') || 0);
+        var fs = parseFloat(el.getAttribute('font-size') || getComputedStyle(el).fontSize) || 9;
+        var pw = aMundo(m, tx, ty), pw2 = aMundo(m, tx, ty - fs);
+        var alto = Math.hypot(pw2[0] - pw[0], pw2[1] - pw[1]) || fs;
+        var ang = Math.atan2(pw2[0] - pw[0], -(pw2[1] - pw[1])) * 180 / Math.PI;
+        var anc = getComputedStyle(el).textAnchor || el.getAttribute('text-anchor') || 'start';
+        cb({ tipo: 'texto', capa: capa, est: est, p: pw, alto: alto, rot: ang, txt: el.textContent, anchor: anc, ancho: (el.getComputedTextLength ? el.getComputedTextLength() : 0) });
+        n++;
+      }
+    }
+    world.removeChild(tmpPath);
+    return n;
+  }
+  function dxfDelPlano() {
+    var ent = '', nSeg = 0, cortado = false;
+    function pon(capa, a, b) {
+      if (nSeg >= DXF_MAX_SEG) { cortado = true; return; }
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.01) return;
+      ent += dxfLinea(capa, a[0], a[1], b[0], b[1]);
+      nSeg++;
+    }
+    recorreDibujo(function (o) {
+      if (o.tipo === 'poli') {
+        for (var i = 0; i + 1 < o.pts.length; i++) pon(o.capa, o.pts[i], o.pts[i + 1]);
+        if (o.cerrado && o.pts.length > 2) pon(o.capa, o.pts[o.pts.length - 1], o.pts[0]);
+      } else if (o.tipo === 'circ') {
+        if (nSeg < DXF_MAX_SEG) { ent += dxfCirculo(o.capa, o.c[0], o.c[1], o.r); nSeg++; }
+      } else if (o.tipo === 'texto') {
+        if (nSeg < DXF_MAX_SEG) { var t = dxfTexto(o.capa, o.p[0], o.p[1], o.alto, o.txt, o.rot); if (t) { ent += t; nSeg++; } }
+      }
+    });
+
+    var capas = Object.keys(DXF_CAPAS).map(function (k) { return DXF_CAPAS[k]; }).concat([['0', 7]]);
+    var tabla = '0\nTABLE\n' + dxfPar(2, 'LAYER') + dxfPar(70, capas.length);
+    capas.forEach(function (c) {
+      tabla += '0\nLAYER\n' + dxfPar(2, c[0]) + dxfPar(70, 0) + dxfPar(62, c[1]) + dxfPar(6, 'CONTINUOUS');
+    });
+    tabla += '0\nENDTAB\n';
+
+    var dxf = '0\nSECTION\n' + dxfPar(2, 'HEADER') +
+      dxfPar(9, '$ACADVER') + dxfPar(1, 'AC1009') +
+      dxfPar(9, '$INSUNITS') + dxfPar(70, 1) +          // 1 = pulgadas
+      '0\nENDSEC\n' +
+      '0\nSECTION\n' + dxfPar(2, 'TABLES') + tabla + '0\nENDSEC\n' +
+      '0\nSECTION\n' + dxfPar(2, 'ENTITIES') + ent + '0\nENDSEC\n0\nEOF\n';
+    return { dxf: dxf, n: nSeg, cortado: cortado };
+  }
+  function exportaDxf() {
+    var r = null;
+    try { r = dxfDelPlano(); } catch (e) { uiAlert('No se pudo armar el DXF: ' + (e && e.message)); return; }
+    if (!r || !r.n) { uiAlert('No hay nada dibujado en esta hoja para exportar.'); return; }
+    var nom = (state.project.name || 'plano') + '_' + ((state.sheets[state.curSheet] || {}).no || 'H1') + '.dxf';
+    saveFile(nom, r.dxf);
+    setHint((r.cortado ? '⚠ ' : '✔ ') + r.n + ' trazos exportados a DXF (pulgadas, capas A-WALL / E-POWR / A-ANNO…)' +
+      (r.cortado ? ' — se cortó en ' + DXF_MAX_SEG + ': el plano es enorme y un DXF más grande no lo abre nadie con gusto' : ''));
+  }
+
+  /* ---------------- IMPORTAR DXF ----------------
+     Se lee lo que de verdad se usa en un plano: LINE, LWPOLYLINE, POLYLINE,
+     CIRCLE, ARC y TEXT. Todo entra como LÍNEAS y RÓTULOS, no como paredes:
+     un DXF ajeno no dice cuál de sus líneas es una pared de 4½" y cuál es la
+     acera. Después, con "Convertir en paredes" de Propiedades, Edgar decide
+     cuáles lo son. Señalar, no obligar. */
+  var DXF_UNIDADES = { 1: 1, 2: 12, 4: 1 / 25.4, 5: 1 / 2.54, 6: 1000 / 25.4, 0: 1 };
+  function parseaDxf(txt) {
+    var lin = String(txt).split(/\r\n|\r|\n/);
+    var pares = [];
+    for (var i = 0; i + 1 < lin.length; i += 2) {
+      var c = parseInt(lin[i], 10);
+      if (isNaN(c)) { i -= 1; continue; }       // archivo con líneas sueltas: se resincroniza
+      pares.push([c, lin[i + 1]]);
+    }
+    var uds = 1, enHeader = false, esperaUnid = false;
+    var ents = [], cur = null, sec = '';
+    pares.forEach(function (pr) {
+      var c = pr[0], v = pr[1];
+      if (c === 0) {
+        if (cur) ents.push(cur);
+        cur = null;
+        if (v === 'SECTION') { sec = '?'; return; }
+        if (v === 'ENDSEC') { sec = ''; enHeader = false; return; }
+        if (v === 'EOF') return;
+        if (sec === 'ENTITIES') cur = { tipo: v, cap: '0', x: [], y: [], v: {} };
+        return;
+      }
+      if (sec === '?' && c === 2) { sec = v; enHeader = (v === 'HEADER'); return; }
+      if (enHeader) {
+        if (c === 9) { esperaUnid = (v === '$INSUNITS'); return; }
+        if (esperaUnid && c === 70) { uds = DXF_UNIDADES[parseInt(v, 10)] || 1; esperaUnid = false; }
+        return;
+      }
+      if (!cur) return;
+      if (c === 8) { cur.cap = v; return; }
+      if (c === 10 || c === 11) { cur.x.push(parseFloat(v)); return; }
+      if (c === 20 || c === 21) { cur.y.push(parseFloat(v)); return; }
+      if (c === 1) { cur.v.txt = v; return; }
+      if (c === 40) { cur.v.r = parseFloat(v); return; }
+      if (c === 50) { cur.v.a1 = parseFloat(v); return; }
+      if (c === 51) { cur.v.a2 = parseFloat(v); return; }
+      if (c === 70) { cur.v.flags = parseInt(v, 10) || 0; return; }
+    });
+    if (cur) ents.push(cur);
+    return { ents: ents, uds: uds };
+  }
+  function importaDxf(txt, cb) {
+    var r;
+    try { r = parseaDxf(txt); } catch (e) { cb({ err: 'El archivo no se pudo leer como DXF' }); return; }
+    var U = r.uds;
+    var lineas = [], textos = [], vertices = null;
+    function P(x, y) { return [Math.round(x * U), Math.round(-y * U)]; }   // la Y del CAD sube; la nuestra baja
+    r.ents.forEach(function (e) {
+      var t = e.tipo;
+      if (t === 'LINE' && e.x.length >= 2 && e.y.length >= 2) {
+        lineas.push([P(e.x[0], e.y[0]), P(e.x[1], e.y[1])]);
+      } else if (t === 'LWPOLYLINE' && e.x.length) {
+        var pl = [];
+        for (var i = 0; i < e.x.length && i < e.y.length; i++) pl.push(P(e.x[i], e.y[i]));
+        if ((e.v.flags & 1) && pl.length > 2) pl.push(pl[0]);
+        if (pl.length >= 2) lineas.push(pl);
+      } else if (t === 'POLYLINE') {
+        vertices = { pts: [], cerrada: !!(e.v.flags & 1) };
+      } else if (t === 'VERTEX' && vertices && e.x.length && e.y.length) {
+        vertices.pts.push(P(e.x[0], e.y[0]));
+      } else if (t === 'SEQEND' && vertices) {
+        if (vertices.cerrada && vertices.pts.length > 2) vertices.pts.push(vertices.pts[0]);
+        if (vertices.pts.length >= 2) lineas.push(vertices.pts);
+        vertices = null;
+      } else if (t === 'CIRCLE' && e.v.r > 0 && e.x.length) {
+        var cc = [];
+        for (var a = 0; a <= 36; a++) { var th = a / 36 * Math.PI * 2; cc.push(P(e.x[0] + e.v.r * Math.cos(th), e.y[0] + e.v.r * Math.sin(th))); }
+        lineas.push(cc);
+      } else if (t === 'ARC' && e.v.r > 0 && e.x.length) {
+        var a1 = (e.v.a1 || 0) * Math.PI / 180, a2 = (e.v.a2 == null ? 360 : e.v.a2) * Math.PI / 180;
+        if (a2 <= a1) a2 += Math.PI * 2;
+        var ar = [], pasos = Math.max(6, Math.round((a2 - a1) / (Math.PI / 18)));
+        for (var b2 = 0; b2 <= pasos; b2++) { var th2 = a1 + (a2 - a1) * b2 / pasos; ar.push(P(e.x[0] + e.v.r * Math.cos(th2), e.y[0] + e.v.r * Math.sin(th2))); }
+        lineas.push(ar);
+      } else if ((t === 'TEXT' || t === 'MTEXT') && e.v.txt && e.x.length) {
+        textos.push({ p: P(e.x[0], e.y[0]), txt: String(e.v.txt).replace(/\\P/g, ' ').replace(/\\[A-Za-z][^;]*;/g, '').trim(), h: (e.v.r || 6) * U });
+      }
+    });
+    if (vertices && vertices.pts.length >= 2) lineas.push(vertices.pts);
+    cb({ lineas: lineas, textos: textos, uds: U });
+  }
+  function meteDxf(res) {
+    if (!res.lineas.length && !res.textos.length) { uiAlert('Ese DXF no trae líneas ni textos que la app sepa leer.\n\nSe leen LINE, LWPOLYLINE, POLYLINE, CIRCLE, ARC y TEXT. Los bloques (INSERT) todavía no.'); return; }
+    pushUndo();
+    var nuevos = [];
+    res.lineas.forEach(function (pl) {
+      var a = { id: uid(), open: true, pts: pl, pattern: 'none', lineStyle: 'solid' };
+      state.areas.push(a);
+      nuevos.push({ kind: 'area', id: a.id });
+    });
+    res.textos.forEach(function (t) {
+      var e = { id: uid(), x: t.p[0], y: t.p[1], text: t.txt, size: Math.max(3, Math.round(t.h)) };
+      state.texts.push(e);
+      nuevos.push({ kind: 'text', id: e.id });
+    });
+    refresh(); zoomFit(); refreshCounts(); scheduleAutosave();
+    ponSel(nuevos.slice(0, 3000));
+    setHint('✔ DXF importado: ' + res.lineas.length + ' línea(s) y ' + res.textos.length + ' rótulo(s) — quedan SELECCIONADOS. ' +
+      'Entran como líneas, no como paredes: con "Convertir en paredes" de Propiedades decides tú cuáles lo son.');
+  }
+
+  /* Los botones del DXF viven en el panel Proyecto, con las demás opciones de
+     salida (hoja, sello, escala). Arriba no caben: la fila 1 ya estaba llena y
+     en el iPad se partía en tres, dejando el plano por debajo del 70 % de la
+     pantalla (lo midió la regresión antes de que se subiera nada). */
+  (function () {
+    var bv = $('#btnPdfVec'); if (bv) bv.addEventListener('click', exportaPdfEncima);
+    var be = $('#btnDxfExp'); if (be) be.addEventListener('click', exportaDxf);
+    var bi = $('#btnDxfImp'); if (bi) bi.addEventListener('click', function () { var f = $('#fileDxf'); if (f) { f.value = ''; f.click(); } });
+    var fd = $('#fileDxf');
+    if (fd) fd.addEventListener('change', function () {
+      var f = fd.files && fd.files[0]; if (!f) return;
+      if (f.size > 60 * 1024 * 1024) { uiAlert('Ese DXF pesa más de 60 MB: el navegador no lo va a poder con él.'); return; }
+      setHint('⏳ Leyendo el DXF…');
+      var rd = new FileReader();
+      rd.onload = function () {
+        importaDxf(rd.result, function (res) {
+          if (res.err) { uiAlert(res.err); setHint(''); return; }
+          meteDxf(res);
+        });
+      };
+      rd.onerror = function () { uiAlert('No se pudo leer el archivo.'); setHint(''); };
+      rd.readAsText(f);
+    });
+  })();
+
+
+  /* ==================================================================
+     PDF VECTORIAL ENCIMA DEL ORIGINAL (fase 5.11)
+     Hoy el PDF que sale lleva NUESTRO dibujo en vector, pero el plano del
+     ingeniero va de fondo como imagen: al acercarse se pixela y su texto deja
+     de poder buscarse. Esto es lo otro: se coge el PDF ORIGINAL tal cual y se
+     le estampan encima nuestras marcas, también en vector. El plano del
+     ingeniero sigue siendo el suyo — nítido a cualquier zoom y con su texto
+     buscable — y encima van nuestros trazos.
+
+     Se hace con una ACTUALIZACIÓN INCREMENTAL: no se reescribe el archivo, se
+     le añaden objetos al final y un xref nuevo que apunta al viejo. Es la
+     forma estándar de anotar un PDF sin tocar lo que ya tiene.
+
+     LO QUE NO SE PUEDE, DICHO: hay PDF (los de 1.5 en adelante, con xref
+     comprimido u objetos dentro de un ObjStm) donde la página no se puede
+     alcanzar sin reescribir medio archivo. Ahí NO se inventa: se avisa y se
+     usa el PDF de siempre. Un PDF corrupto entregado en un permiso es mucho
+     peor que un PDF con el fondo en imagen.
+     ================================================================== */
+  function pdfEsc(t) { return String(t).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'); }
+  function pdfNum(v) { return (Math.round(v * 100) / 100).toFixed(2); }
+  function colorPdf(c) {
+    var m = String(c || '').match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+    if (!m) return [0, 0, 0];
+    return [(+m[1]) / 255, (+m[2]) / 255, (+m[3]) / 255];
+  }
+  /* El contenido que se estampa: nuestros trazos, en el sistema de la página
+     del PDF (puntos, con la Y hacia arriba). */
+  function contenidoEncima(bg, view) {
+    var vx0 = view[0], vy0 = view[1], pw = view[2] - view[0], ph = view[3] - view[1];
+    var kx = pw / bg.w, ky = ph / bg.h;
+    function X(wx) { return vx0 + (wx - bg.x) * kx; }
+    function Y(wy) { return view[3] - (wy - bg.y) * ky; }
+    var esc = (kx + ky) / 2;               // de pulgadas de obra a puntos del papel
+    var out = ['q', '1 J 1 j'], n = 0, hayTexto = false;
+    var ultimo = null;
+    function estilo(e, relleno) {
+      var s2 = '';
+      var col = colorPdf(relleno ? e.relleno : e.trazo);
+      var clave = (relleno ? 'f' : 's') + col.join(',') + '|' + pdfNum(Math.max(e.lw * esc, 0.24)) + '|' + e.op;
+      if (clave === ultimo) return '';
+      ultimo = clave;
+      s2 += pdfNum(col[0]) + ' ' + pdfNum(col[1]) + ' ' + pdfNum(col[2]) + (relleno ? ' rg' : ' RG') + '\n';
+      if (!relleno) s2 += pdfNum(Math.max(e.lw * esc, 0.24)) + ' w\n';
+      return s2;
+    }
+    recorreDibujo(function (o) {
+      var e = o.est;
+      if (o.tipo === 'poli') {
+        if (!e.trazo && !e.relleno) return;
+        if (o.pts.length < 2) return;
+        var d = pdfNum(X(o.pts[0][0])) + ' ' + pdfNum(Y(o.pts[0][1])) + ' m\n';
+        for (var i = 1; i < o.pts.length; i++) d += pdfNum(X(o.pts[i][0])) + ' ' + pdfNum(Y(o.pts[i][1])) + ' l\n';
+        if (o.cerrado) d += 'h\n';
+        var op = e.relleno && e.trazo ? 'B' : e.relleno ? 'f' : 'S';
+        out.push(estilo(e, !!e.relleno) + (e.relleno && e.trazo ? estilo(e, false) : '') + d + op);
+        n++;
+      } else if (o.tipo === 'circ') {
+        // círculo con cuatro bézier, que es como se dibuja un círculo en PDF
+        var k = 0.5523, cx = X(o.c[0]), cy = Y(o.c[1]), r = o.r * esc;
+        var d2 = pdfNum(cx + r) + ' ' + pdfNum(cy) + ' m\n';
+        d2 += pdfNum(cx + r) + ' ' + pdfNum(cy + r * k) + ' ' + pdfNum(cx + r * k) + ' ' + pdfNum(cy + r) + ' ' + pdfNum(cx) + ' ' + pdfNum(cy + r) + ' c\n';
+        d2 += pdfNum(cx - r * k) + ' ' + pdfNum(cy + r) + ' ' + pdfNum(cx - r) + ' ' + pdfNum(cy + r * k) + ' ' + pdfNum(cx - r) + ' ' + pdfNum(cy) + ' c\n';
+        d2 += pdfNum(cx - r) + ' ' + pdfNum(cy - r * k) + ' ' + pdfNum(cx - r * k) + ' ' + pdfNum(cy - r) + ' ' + pdfNum(cx) + ' ' + pdfNum(cy - r) + ' c\n';
+        d2 += pdfNum(cx + r * k) + ' ' + pdfNum(cy - r) + ' ' + pdfNum(cx + r) + ' ' + pdfNum(cy - r * k) + ' ' + pdfNum(cx + r) + ' ' + pdfNum(cy) + ' c\n';
+        var op2 = e.relleno && e.trazo ? 'B' : e.relleno ? 'f' : 'S';
+        out.push(estilo(e, !!e.relleno) + (e.relleno && e.trazo ? estilo(e, false) : '') + d2 + op2);
+        n++;
+      } else if (o.tipo === 'texto') {
+        var t = String(o.txt || '').replace(/\s+/g, ' ').trim();
+        if (!t) return;
+        hayTexto = true;
+        var col = colorPdf(e.relleno || e.trazo || 'rgb(20,22,26)');
+        var h = o.alto * esc;
+        var rad = (o.rot || 0) * Math.PI / 180, ca = Math.cos(rad), sa = Math.sin(rad);
+        var px = X(o.p[0]), py = Y(o.p[1]);
+        // la alineación del SVG no existe en PDF: se corrige moviendo el punto
+        var an = (o.ancho || t.length * h * 0.5);
+        if (o.anchor === 'middle') { px -= an / 2 * ca; py += an / 2 * sa; }
+        else if (o.anchor === 'end') { px -= an * ca; py += an * sa; }
+        out.push('BT\n' + pdfNum(col[0]) + ' ' + pdfNum(col[1]) + ' ' + pdfNum(col[2]) + ' rg\n/MXPF ' + pdfNum(h) + ' Tf\n' +
+          pdfNum(ca) + ' ' + pdfNum(-sa) + ' ' + pdfNum(sa) + ' ' + pdfNum(ca) + ' ' + pdfNum(px) + ' ' + pdfNum(py) + ' Tm\n(' + pdfEsc(t) + ') Tj\nET');
+        ultimo = null;
+        n++;
+      }
+    });
+    out.push('Q');
+    return { txt: out.join('\n') + '\n', n: n, hayTexto: hayTexto };
+  }
+  /* Busca el objeto "num gen obj … endobj" en el archivo original. Devuelve
+     null si no está suelto (estará dentro de un ObjStm comprimido). */
+  function objRaw(str, num, gen) {
+    var re = new RegExp('(^|[^0-9])' + num + '\\s+' + gen + '\\s+obj\\b', 'g'), m, mejor = null;
+    while ((m = re.exec(str))) mejor = m.index + m[1].length;   // el último gana: es el más nuevo
+    if (mejor == null) return null;
+    var ini = str.indexOf('obj', mejor) + 3;
+    var fin = str.indexOf('endobj', ini);
+    if (fin < 0) return null;
+    return { desde: mejor, cuerpoIni: ini, cuerpoFin: fin, cuerpo: str.slice(ini, fin) };
+  }
+  function pdfEncimaDelOriginal(cb) {
+    var bg = state.bg, rec = pdfLive[state.curSheet];
+    if (!bg || !bg.pdfId || !rec || !rec.doc) { cb({ err: 'Esta hoja no tiene un PDF del ingeniero de fondo. El PDF vectorial encima solo tiene sentido si hay uno debajo.' }); return; }
+    idbGet(bg.pdfId, function (bytes) {
+      if (!bytes) { cb({ err: 'El PDF original ya no está guardado en este aparato. Vuelve a importarlo y prueba otra vez.' }); return; }
+      rec.doc.getPage(rec.page).then(function (page) {
+        if ((page.rotate || 0) % 360 !== 0) { cb({ err: 'Esa página del PDF viene girada ' + page.rotate + '°. Todavía no sé estampar encima de una página girada sin arriesgarme a dejarla torcida.' }); return; }
+        var view = page.view;                       // [x0,y0,x1,y1] en puntos
+        var ref = page.ref;
+        if (!ref || ref.num == null) { cb({ err: 'No pude localizar la página dentro del PDF.' }); return; }
+        var u8 = new Uint8Array(bytes.slice ? bytes.slice(0) : bytes);
+        var str = '';
+        for (var i = 0; i < u8.length; i += 32768) str += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + 32768, u8.length)));
+
+        // el trailer clásico: si no está, el PDF usa xref comprimido y aquí no entramos
+        var iTr = str.lastIndexOf('trailer');
+        var iSx = str.lastIndexOf('startxref');
+        if (iTr < 0 || iSx < 0) { cb({ err: 'Ese PDF usa el índice comprimido (PDF 1.5 o más nuevo). Para estamparle encima habría que reescribir medio archivo, y un PDF corrupto entregado en un permiso es mucho peor que un PDF con el fondo en imagen. Usa el botón PDF de siempre.' }); return; }
+        var mRoot = str.slice(iTr).match(/\/Root\s+(\d+)\s+(\d+)\s+R/);
+        var mSize = str.slice(iTr).match(/\/Size\s+(\d+)/);
+        var startxrefViejo = parseInt((str.slice(iSx).match(/startxref\s+(\d+)/) || [])[1], 10);
+        if (!mRoot || !mSize || !isFinite(startxrefViejo)) { cb({ err: 'El final de ese PDF no tiene la forma que sé leer. Usa el botón PDF de siempre.' }); return; }
+
+        var pg = objRaw(str, ref.num, ref.gen || 0);
+        if (!pg) { cb({ err: 'La página está comprimida dentro del PDF (ObjStm) y no la puedo reescribir sin riesgo. Usa el botón PDF de siempre.' }); return; }
+
+        var cont = contenidoEncima(bg, view);
+        if (!cont.n) { cb({ err: 'No hay nada dibujado encima del plano: no hay marcas que estampar.' }); return; }
+
+        var siguiente = parseInt(mSize[1], 10);
+        var numFont = siguiente++, numCont = siguiente++;
+        var nuevos = [];       // { num, txt }
+        var cuerpo = pg.cuerpo;
+
+        // 1) /Contents: se le añade el nuestro al final, sea uno o una lista
+        var mC = cuerpo.match(/\/Contents\s*(\[[^\]]*\]|\d+\s+\d+\s+R)/);
+        if (!mC) { cb({ err: 'Esa página no declara su contenido de una forma que sepa ampliar. Usa el botón PDF de siempre.' }); return; }
+        var nuevoContents = mC[1].charAt(0) === '['
+          ? mC[1].replace(/\]\s*$/, ' ' + numCont + ' 0 R]')
+          : '[' + mC[1] + ' ' + numCont + ' 0 R]';
+        cuerpo = cuerpo.slice(0, mC.index) + '/Contents ' + nuevoContents + cuerpo.slice(mC.index + mC[0].length);
+
+        // 2) /Resources: hace falta meter nuestra fuente. Si están en línea se
+        //    amplían aquí; si son un objeto aparte, se reescribe ese objeto.
+        var resObj = null;
+        var mR = cuerpo.match(/\/Resources\s*(\d+)\s+(\d+)\s+R/);
+        function meteFuente(dic) {
+          var mF = dic.match(/\/Font\s*<</);
+          if (mF) return dic.slice(0, mF.index + mF[0].length) + ' /MXPF ' + numFont + ' 0 R ' + dic.slice(mF.index + mF[0].length);
+          if (/\/Font\s+\d+\s+\d+\s+R/.test(dic)) return null;    // fuentes en otro objeto: no me meto
+          var i2 = dic.indexOf('<<');
+          if (i2 < 0) return null;
+          return dic.slice(0, i2 + 2) + ' /Font << /MXPF ' + numFont + ' 0 R >> ' + dic.slice(i2 + 2);
+        }
+        if (mR) {
+          var ro = objRaw(str, parseInt(mR[1], 10), parseInt(mR[2], 10));
+          if (!ro) { cb({ err: 'Los recursos de esa página están comprimidos y no los puedo ampliar sin riesgo. Usa el botón PDF de siempre.' }); return; }
+          var nd = meteFuente(ro.cuerpo);
+          if (nd == null) { cb({ err: 'Las fuentes de esa página están montadas de una forma que no sé ampliar sin arriesgarme. Usa el botón PDF de siempre.' }); return; }
+          resObj = { num: parseInt(mR[1], 10), gen: parseInt(mR[2], 10), txt: nd };
+        } else {
+          var mRi = cuerpo.match(/\/Resources\s*<</);
+          if (!mRi) {
+            cuerpo = cuerpo.replace(/<</, '<< /Resources << /Font << /MXPF ' + numFont + ' 0 R >> >> ');
+          } else {
+            // se recorta el diccionario de recursos contando << y >>
+            var j = mRi.index + mRi[0].length - 2, prof = 0, fin2 = -1;
+            for (var q = j; q < cuerpo.length - 1; q++) {
+              if (cuerpo[q] === '<' && cuerpo[q + 1] === '<') { prof++; q++; }
+              else if (cuerpo[q] === '>' && cuerpo[q + 1] === '>') { prof--; q++; if (!prof) { fin2 = q + 1; break; } }
+            }
+            if (fin2 < 0) { cb({ err: 'No pude leer los recursos de esa página. Usa el botón PDF de siempre.' }); return; }
+            var dicR = cuerpo.slice(j, fin2);
+            var nd2 = meteFuente(dicR);
+            if (nd2 == null) { cb({ err: 'Las fuentes de esa página están montadas de una forma que no sé ampliar sin arriesgarme. Usa el botón PDF de siempre.' }); return; }
+            cuerpo = cuerpo.slice(0, j) + nd2 + cuerpo.slice(fin2);
+          }
+        }
+
+        nuevos.push({ num: numFont, gen: 0, txt: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>' });
+        nuevos.push({ num: numCont, gen: 0, txt: '<< /Length ' + cont.txt.length + ' >>\nstream\n' + cont.txt + 'endstream' });
+        nuevos.push({ num: ref.num, gen: ref.gen || 0, txt: cuerpo.trim() });
+        if (resObj) nuevos.push(resObj);
+
+        // 3) se pega todo al final con su xref nuevo, apuntando al viejo
+        var salida = str;
+        if (!/\n$/.test(salida)) salida += '\n';
+        var offs = {};
+        nuevos.forEach(function (o) {
+          offs[o.num] = salida.length;
+          salida += o.num + ' ' + (o.gen || 0) + ' obj\n' + o.txt + '\nendobj\n';
+        });
+        var nums = Object.keys(offs).map(Number).sort(function (a, b) { return a - b; });
+        var xrefPos = salida.length;
+        var xref = 'xref\n';
+        var i3 = 0;
+        while (i3 < nums.length) {
+          var j3 = i3;
+          while (j3 + 1 < nums.length && nums[j3 + 1] === nums[j3] + 1) j3++;
+          xref += nums[i3] + ' ' + (j3 - i3 + 1) + '\n';
+          for (var k3 = i3; k3 <= j3; k3++) {
+            var off = String(offs[nums[k3]]);
+            while (off.length < 10) off = '0' + off;
+            xref += off + ' 00000 n \n';
+          }
+          i3 = j3 + 1;
+        }
+        salida += xref + 'trailer\n<< /Size ' + siguiente + ' /Root ' + mRoot[1] + ' ' + mRoot[2] + ' R /Prev ' + startxrefViejo + ' >>\nstartxref\n' + xrefPos + '\n%%EOF\n';
+
+        var bin = new Uint8Array(salida.length);
+        for (var b2 = 0; b2 < salida.length; b2++) bin[b2] = salida.charCodeAt(b2) & 0xff;
+        cb({ bytes: bin, n: cont.n });
+      }).catch(function (e) { cb({ err: 'No pude leer esa página del PDF: ' + (e && e.message || e) }); });
+    });
+  }
+  /* NO se entrega sin comprobarlo: el archivo hecho se vuelve a abrir con
+     pdf.js y se mira que la página siga ahí y que el texto del ingeniero se
+     siga pudiendo leer. Si algo no cuadra, no se baja nada. */
+  function exportaPdfEncima() {
+    setHint('⏳ Armando el PDF vectorial encima del original…');
+    pdfEncimaDelOriginal(function (r) {
+      if (r.err) { uiAlert(r.err); setHint(''); return; }
+      pdfjsLib.getDocument({ data: r.bytes.slice(0), isEvalSupported: false }).promise.then(function (doc2) {
+        return doc2.getPage(pdfLive[state.curSheet].page).then(function (pg2) {
+          return pg2.getTextContent().then(function (tc) {
+            var nom = (state.project.name || 'plano') + '_' + ((state.sheets[state.curSheet] || {}).no || 'H1') + '_marcado.pdf';
+            saveFile(nom, r.bytes);
+            setHint('✔ PDF vectorial encima del original: ' + r.n + ' marcas estampadas · el plano del ingeniero sigue nítido y con sus ' +
+              (tc.items || []).length + ' textos buscables');
+          });
+        });
+      }).catch(function (e) {
+        uiAlert('El archivo que salió no se pudo volver a abrir, así que NO se ha bajado nada.\n\n' +
+          'Detalle: ' + (e && e.message || e) + '\n\nUsa el botón PDF de siempre; ese sale seguro.');
+        setHint('');
+      });
+    });
+  }
+
+
+  /* ==================================================================
+     BÚSQUEDA VISUAL → COUNT (fase 5.9)
+     Contar los símbolos DEL INGENIERO. Encierras uno en un marco, la app
+     busca en el plano todos los que se ven igual y los mete en el conteo de
+     un toque. Es el Visual Search de Bluebeam.
+
+     Cómo: el plano de fondo es una imagen. Se pasa a blanco y negro (un plano
+     es tinta sobre papel), se saca el molde del marco y se recorre la hoja
+     comparando. Para que no tarde una vida hay dos trucos:
+       · una IMAGEN INTEGRAL de la tinta: antes de comparar 3.600 píxeles se
+         mira en una resta si la ventana tiene siquiera una cantidad de tinta
+         parecida. Tira más del 95 % de las ventanas en una operación.
+       · el parecido se mide como tinta en común / tinta total (Jaccard), que
+         es lo que aguanta bien un dibujo de líneas.
+     Y se hace por tandas con pausas, para que la app no se quede tiesa.
+
+     Lo que NO es: esto no lee el plano ni entiende qué es un receptáculo.
+     Compara dibujos. Si el plano tiene dos símbolos casi iguales, los va a
+     confundir — por eso los resultados se ENSEÑAN antes de contarlos y hay
+     una barra de "cuánto se tienen que parecer".
+     ================================================================== */
+  var visual = null;      // { rect, img, cv, ctx, esc, tpl, hits, umbral }
+  function visualCargaFondo(cb) {
+    var bg = state.bg;
+    if (!bg || !bg.url) { cb(null); return; }
+    var im = new Image();
+    im.onload = function () {
+      // 2600 es el punto bueno, comprobado: por encima empeora el acierto y
+    // multiplica el tiempo. No subirlo "por si acaso".
+    var MAXW = window.__visualMaxW || 2600;   // (gancho de prueba: medir con el plano real a otra resolución)
+      var esc = Math.min(1, MAXW / im.naturalWidth);
+      var cw = Math.max(1, Math.round(im.naturalWidth * esc)), ch = Math.max(1, Math.round(im.naturalHeight * esc));
+      var cv = document.createElement('canvas');
+      cv.width = cw; cv.height = ch;
+      var ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(im, 0, 0, cw, ch);
+      var d = ctx.getImageData(0, 0, cw, ch).data;
+      // tinta = oscuro. El umbral 175 deja pasar la línea fina gris de un plano
+      var tinta = new Uint8Array(cw * ch);
+      for (var i = 0, j = 0; i < d.length; i += 4, j++) {
+        tinta[j] = ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000) < 175 ? 1 : 0;
+      }
+      /* TINTA ENGORDADA 1 px. En un plano las líneas tienen 1-2 px: si la
+         ventana cae desplazada UN píxel, dos dibujos idénticos no comparten
+         casi nada y el parecido se desploma. Comparando contra la versión
+         engordada, un píxel de desajuste deja de importar. Sin esto la prueba
+         encontraba 4 de 7 símbolos iguales — medido. */
+      var gorda = new Uint8Array(cw * ch);
+      for (var gy = 0; gy < ch; gy++) {
+        for (var gx = 0; gx < cw; gx++) {
+          if (!tinta[gy * cw + gx]) continue;
+          for (var dy = -1; dy <= 1; dy++) {
+            var yy2 = gy + dy; if (yy2 < 0 || yy2 >= ch) continue;
+            for (var dx = -1; dx <= 1; dx++) {
+              var xx2 = gx + dx; if (xx2 < 0 || xx2 >= cw) continue;
+              gorda[yy2 * cw + xx2] = 1;
+            }
+          }
+        }
+      }
+      // imagen integral: suma de tinta de (0,0) a (x,y)
+      var W = cw + 1, integ = new Int32Array(W * (ch + 1));
+      for (var y = 0; y < ch; y++) {
+        var fila = 0;
+        for (var x = 0; x < cw; x++) {
+          fila += tinta[y * cw + x];
+          integ[(y + 1) * W + (x + 1)] = integ[y * W + (x + 1)] + fila;
+        }
+      }
+      cb({ w: cw, h: ch, tinta: tinta, gorda: gorda, integ: integ, W: W, esc: esc });
+    };
+    im.onerror = function () { cb(null); };
+    im.src = bg.url;
+  }
+  function integTinta(F, x0, y0, x1, y1) {
+    var W = F.W;
+    return F.integ[y1 * W + x1] - F.integ[y0 * W + x1] - F.integ[y1 * W + x0] + F.integ[y0 * W + x0];
+  }
+  /* Del rectángulo del plano (pulgadas) al de la imagen (píxeles). */
+  function rectAImagen(F, r) {
+    var bg = state.bg;
+    var kx = F.w / bg.w, ky = F.h / bg.h;
+    return {
+      x0: Math.max(0, Math.round((r.x0 - bg.x) * kx)), y0: Math.max(0, Math.round((r.y0 - bg.y) * ky)),
+      x1: Math.min(F.w, Math.round((r.x1 - bg.x) * kx)), y1: Math.min(F.h, Math.round((r.y1 - bg.y) * ky))
+    };
+  }
+  function visualArranca(rectMundo, cb) {
+    visualCargaFondo(function (F) {
+      if (!F) { cb({ err: 'Esta hoja no tiene plano de fondo donde buscar. Importa el PDF o la imagen del ingeniero.' }); return; }
+      var R2 = rectAImagen(F, rectMundo);
+      var tw = R2.x1 - R2.x0, th = R2.y1 - R2.y0;
+      if (tw < 6 || th < 6) { cb({ err: 'El marco salió muy chico para reconocer nada. Encierra el símbolo completo, con un poco de aire alrededor.' }); return; }
+      if (tw > 400 || th > 400) { cb({ err: 'El marco salió enorme. Encierra UN símbolo, no medio plano.' }); return; }
+      var tpl = new Uint8Array(tw * th), tplG = new Uint8Array(tw * th), tint = 0;
+      for (var y = 0; y < th; y++) for (var x = 0; x < tw; x++) {
+        var v = F.tinta[(R2.y0 + y) * F.w + (R2.x0 + x)];
+        tpl[y * tw + x] = v; tint += v;
+        tplG[y * tw + x] = F.gorda[(R2.y0 + y) * F.w + (R2.x0 + x)];
+      }
+      if (tint < 8) { cb({ err: 'En ese marco casi no hay dibujo: no hay nada que reconocer.' }); return; }
+      cb({ F: F, tpl: tpl, tplG: tplG, tw: tw, th: th, tint: tint, rectImg: R2 });
+    });
+  }
+  /* El barrido. Por tandas de filas, con pausa, para no congelar la app. */
+  function visualBarre(ctx0, umbral, onPaso, cb) {
+    var F = ctx0.F, tw = ctx0.tw, th = ctx0.th, tpl = ctx0.tpl, tplG = ctx0.tplG, tint = ctx0.tint;
+    // el paso tiene que ser fino: con la tinta engordada 1 px se aguanta un
+    // píxel de desajuste, no cuatro
+    var paso = Math.max(1, Math.min(4, Math.round(Math.min(tw, th) / 24)));
+    var hits = [];
+    var y = 0, filas = F.h - th;
+    var tMin = tint * 0.55, tMax = tint * 1.9;
+    function tanda() {
+      var t0 = Date.now();
+      while (y <= filas) {
+        for (var x = 0; x + tw <= F.w; x += paso) {
+          // primer filtro, de una resta: ¿hay siquiera tinta parecida aquí?
+          var s = integTinta(F, x, y, x + tw, y + th);
+          if (s < tMin || s > tMax) continue;
+          /* Parecido en los dos sentidos, contra la tinta engordada:
+             · cuánto del MOLDE aparece en la ventana (¿está el dibujo?)
+             · cuánto de la VENTANA cabe en el molde (¿o hay de más?)
+             y se juntan en una sola nota (media armónica). Así ni un símbolo
+             a medias ni un borrón lleno de tinta pasan por bueno. */
+          var enc1 = 0, enc2 = 0, tw2 = 0;
+          for (var yy = 0; yy < th; yy++) {
+            var of1 = yy * tw, of2 = (y + yy) * F.w + x;
+            for (var xx = 0; xx < tw; xx++) {
+              var a = tpl[of1 + xx], b = F.tinta[of2 + xx];
+              if (a && F.gorda[of2 + xx]) enc1++;
+              if (b) { tw2++; if (tplG[of1 + xx]) enc2++; }
+            }
+          }
+          var rec = enc1 / (tint || 1), pre = enc2 / (tw2 || 1);
+          var sc = (rec + pre) ? (2 * rec * pre / (rec + pre)) : 0;
+          if (sc >= umbral) hits.push({ x: x, y: y, sc: sc });
+        }
+        y += paso;
+        if (Date.now() - t0 > 40) break;      // se suelta el hilo cada 40 ms
+      }
+      if (onPaso) onPaso(Math.min(1, y / (filas || 1)));
+      if (y <= filas) { setTimeout(tanda, 0); return; }
+      // se quedan los mejores y se tiran los vecinos: un símbolo, un resultado
+      hits.sort(function (a, b) { return b.sc - a.sc; });
+      var dmin = Math.max(tw, th) * 0.62, buenos = [];
+      hits.forEach(function (h) {
+        for (var i = 0; i < buenos.length; i++) {
+          if (Math.abs(buenos[i].x - h.x) < dmin && Math.abs(buenos[i].y - h.y) < dmin) return;
+        }
+        buenos.push(h);
+      });
+      var bg = state.bg, kx = bg.w / F.w, ky = bg.h / F.h;
+      cb(buenos.map(function (h) {
+        return {
+          sc: h.sc,
+          x: bg.x + (h.x + tw / 2) * kx, y: bg.y + (h.y + th / 2) * ky,
+          w: tw * kx, h: th * ky
+        };
+      }));
+    }
+    setTimeout(tanda, 0);
+  }
+  /* ---- la parte que se ve ---- */
+  function pintaVisual() {
+    var g = document.getElementById('gVisual'); if (!g) return;
+    if (!visual || !visual.hits) return;
+    var s2 = '';
+    visual.hits.forEach(function (h, i) {
+      s2 += '<rect class="visual' + (i === 0 ? ' molde' : '') + (h.fuera ? ' fuera' : '') +
+        (i === visual.cur ? ' cur' : '') + '" x="' + (h.x - h.w / 2).toFixed(1) + '" y="' + (h.y - h.h / 2).toFixed(1) +
+        '" width="' + h.w.toFixed(1) + '" height="' + h.h.toFixed(1) + '"/>';
+    });
+    g.innerHTML = s2;
+  }
+  function abreVisual() {
+    var b = $('#visualBox'); if (!b) return;
+    b.classList.remove('oculto');
+    pintaPanelVisual();
+  }
+  function cierraVisual() {
+    var b = $('#visualBox'); if (b) b.classList.add('oculto');
+    visual = null;
+    var g = document.getElementById('gVisual'); if (g) g.innerHTML = '';
+    if (tool === 'vsearch') setTool('select');
+  }
+  function pintaPanelVisual(estado) {
+    var c = $('#visualCuerpo'); if (!c) return;
+    if (estado) { c.innerHTML = '<div class="bMuted">' + estado + '</div>'; return; }
+    if (!visual || !visual.hits) {
+      c.innerHTML = '<div class="bMuted">Encierra en un marco UN símbolo del plano del ingeniero — un can, un receptáculo — y te busco todos los que se ven igual.</div>';
+      return;
+    }
+    var cats = catsCount();
+    var vivos = visual.hits.filter(function (q) { return !q.fuera; });
+    var h = '<div class="vN"><b>' + vivos.length + '</b> para contar' +
+      (visual.hits.length > vivos.length ? ' <span class="muted">· ' + (visual.hits.length - vivos.length) + ' descartado(s)</span>' : '') + '</div>';
+    h += '<div class="row"><label>Se parecen</label><input id="vUmbral" type="range" min="55" max="97" step="1" value="' + Math.round(visual.umbral * 100) + '" style="flex:1"><span id="vUmbralN" class="muted small" style="width:34px;text-align:right">' + Math.round(visual.umbral * 100) + '%</span></div>';
+    h += '<div class="muted small">Bájalo si faltan; súbelo si está cogiendo cosas que no son. Sobra mejor que falte: lo que sobra lo ves y lo quitas de la lista, lo que falta no lo sabes nunca.</div>';
+    /* La lista de revisión: uno por fila, del que más se parece al que menos.
+       Tocar la fila lleva el plano hasta él; la ✗ lo saca de la cuenta. Los
+       de abajo son casi siempre los falsos, así que se repasa de abajo arriba. */
+    if (visual.hits.length) {
+      h += '<div class="vLista" id="vLista">';
+      visual.hits.forEach(function (q, i) {
+        h += '<div class="vFila' + (q.fuera ? ' fuera' : '') + (i === visual.cur ? ' cur' : '') + '" data-i="' + i + '">' +
+          '<span class="vPc">' + Math.round(q.sc * 100) + '%</span>' +
+          '<span class="vTxt">' + (q.fuera ? 'descartado' : 'nº ' + (i + 1)) + '</span>' +
+          '<button class="vX" data-x="' + i + '" title="' + (q.fuera ? 'Volver a contarlo' : 'No es: sácalo de la cuenta') + '">' + (q.fuera ? '↺' : '✗') + '</button>' +
+          '</div>';
+      });
+      h += '</div>';
+      h += '<div class="muted small">Toca uno y el plano salta hasta él. Los de abajo, los de menos parecido, son los que suelen sobrar.</div>';
+    }
+    h += '<div class="row"><label>Contar como</label><select id="vCat" style="flex:1">' +
+      cats.map(function (q) { return '<option value="' + esc(q.id) + '"' + (catActiva === q.id ? ' selected' : '') + '>' + esc(q.nom) + '</option>'; }).join('') +
+      '<option value="__nueva">＋ Categoría nueva…</option></select></div>';
+    h += '<button id="vAdd" style="width:100%;margin-top:6px"' + (vivos.length ? '' : ' disabled') + '>Añadir ' + (vivos.length === 1 ? 'el que queda' : 'los ' + vivos.length) + ' al conteo</button>';
+    h += '<div class="muted small" style="margin-top:6px">Esto compara dibujos, no lee el plano: si hay dos símbolos casi iguales los va a confundir. Por eso los ves antes de contarlos.</div>';
+    c.innerHTML = h;
+    var u = $('#vUmbral'), un = $('#vUmbralN');
+    if (u) {
+      u.addEventListener('input', function () { if (un) un.textContent = u.value + '%'; });
+      u.addEventListener('change', function () { visual.umbral = (+u.value) / 100; relanzaVisual(); });
+    }
+    var lista = $('#vLista');
+    if (lista) {
+      lista.addEventListener('click', function (ev) {
+        var bx = ev.target.closest && ev.target.closest('.vX');
+        if (bx) {
+          var k = +bx.dataset.x, q = visual.hits[k];
+          if (q) { q.fuera = !q.fuera; pintaVisual(); pintaPanelVisual(); }
+          return;
+        }
+        var fila = ev.target.closest && ev.target.closest('.vFila');
+        if (!fila) return;
+        visual.cur = +fila.dataset.i;
+        vaAlVisual(visual.cur);
+        pintaVisual(); pintaPanelVisual();
+      });
+    }
+    var ba = $('#vAdd');
+    if (ba) ba.addEventListener('click', function () {
+      var sel2 = $('#vCat');
+      var id = sel2 ? sel2.value : '';
+      if (id === '__nueva') {
+        uiPrompt('Nombre de lo que estás contando:', '', function (v) {
+          if (v == null) return;
+          pushUndo();
+          var c2 = nuevaCatCount(v); catActiva = c2.id;
+          metVisualAlConteo(c2.id, true);
+        });
+        return;
+      }
+      pushUndo();
+      metVisualAlConteo(id || catActivaSegura().id, true);
+    });
+  }
+  /* Llevar la vista hasta un resultado, sin cambiar el zoom: igual que la
+     lista de la búsqueda de texto. */
+  function vaAlVisual(i) {
+    // Centrar la marca en la pantalla. El mundo se pinta con
+    // translate(tx,ty) scale(z), así que la pantalla de un punto del mundo es
+    // tx + x*z: para dejarlo en el medio, tx = medio - x*z. (No hay view.x ni
+    // view.k: eso fue un error que dejaba el botón sin hacer nada.)
+    var q = visual && visual.hits && visual.hits[i]; if (!q) return;
+    try {
+      var w = $('#canvasWrap').getBoundingClientRect();
+      view.tx = w.width / 2 - q.x * view.z;
+      view.ty = w.height / 2 - q.y * view.z;
+      applyView();
+    } catch (e) {}
+  }
+  function metVisualAlConteo(catId, yaUndo) {
+    if (!visual || !visual.hits || !visual.hits.length) return;
+    var ponen = visual.hits.filter(function (q) { return !q.fuera; });
+    if (!ponen.length) return;
+    if (!catCount(catId)) catId = catActivaSegura().id;
+    if (!yaUndo) pushUndo();
+    ponen.forEach(function (h) {
+      state.counts.push({ id: uid(), x: Math.round(h.x), y: Math.round(h.y), cat: catId });
+    });
+    var n = ponen.length;
+    var nom = (catCount(catId) || {}).nom || '';
+    cierraVisual();
+    refresh(); refreshCounts(); scheduleAutosave();
+    setHint('✔ ' + n + ' marca(s) añadidas al conteo de ' + nom + ' · revísalas y borra las que no sean · Ctrl+Z las quita todas');
+  }
+  function relanzaVisual() {
+    if (!visual || !visual.ctx0) return;
+    pintaPanelVisual('Buscando… 0 %');
+    visualBarre(visual.ctx0, visual.umbral,
+      function (pc) { pintaPanelVisual('Buscando… ' + Math.round(pc * 100) + ' %'); },
+      function (hits) { visual.hits = hits; pintaVisual(); pintaPanelVisual(); });
+  }
+  function vsearchFin(a, b) {
+    var r = { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+    abreVisual();
+    pintaPanelVisual('Preparando el molde…');
+    visualArranca(r, function (res) {
+      if (res.err) { pintaPanelVisual(res.err); visual = null; return; }
+      // 80 %, medido contra el plano real de Epic (ED-1.3, 13 tiras LED):
+      //   66 % → las 13, pero con 219 falsos. Inservible.
+      //   80 % → las 13, con 18 falsos. En 1,9 s.
+      //   90 % → solo 8 de 13.
+      // Y ojo: MÁS resolución es PEOR, no mejor. A 4000 px encuentra 8 de 13 y
+      // tarda seis veces más, porque un desajuste de un píxel pesa el doble.
+      visual = { ctx0: res, umbral: 0.80, hits: null };
+      relanzaVisual();
+    });
+  }
+
   function buildPrintFrame(container) {
     var b = contentBBox();
     ponOrientacion(b.h > b.w * 1.02);
+    var hojaSel0 = $('#pjSheet');
+    var modo0 = hojaSel0 ? hojaSel0.value : 'limpia';
+    /* La escala gráfica va DENTRO del dibujo, así que la hoja tiene que
+       crecer para dejarle sitio ANTES de clonar (si no, se le encimaba al
+       plano por abajo). */
+    var barra = (modo0 !== 'limpia') ? escalaGrafica(b, null) : null;
+    if (barra) b = { x: b.x, y: b.y, w: b.w, h: b.h + barra.alto };
     var clone = cleanSvgClone(b);
     clone.removeAttribute('width'); clone.removeAttribute('height');
     clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
@@ -13224,29 +16417,26 @@
       clone.style.display = 'block';
       scaleText = PRINT_SCALES[scaleVal];
     }
-
-    // leyenda: solo símbolos usados
-    var used = {};
-    state.symbols.forEach(function (s) { used[s.key] = true; });
-    var legend = '';
-    Object.keys(used).forEach(function (k) {
-      var d = SYMBOLS[k]; if (!d) return;
-      legend += '<span class="it">' + symPreviewSvg(d, 26, 20) + esc(d.short || d.name) + '</span>';
-    });
+    // la barra ya se midió arriba; ahora se pinta con el texto de la escala
+    if (barra) {
+      var b0 = { x: b.x, y: b.y, w: b.w, h: b.h - barra.alto };
+      var barra2 = escalaGrafica(b0, scaleText);
+      if (barra2) clone.insertAdjacentHTML('beforeend', barra2.svg);
+    }
 
     // QUE SALE EN LA HOJA (Edgar, 08/30: "que sea como un plano de ingeniero,
     // que salga solo el plano como una hoja"). La leyenda y la caratula
     // quedan de opcion, no de obligacion: la presentacion buena se hara
     // aparte. 'limpia' = ni marco; 'marco' = la hoja con su recuadro.
-    var hojaSel = $('#pjSheet');
-    var hoja = hojaSel ? hojaSel.value : 'limpia';
+    var hoja = modo0;
     state.printSheet = hoja;
+    state.printSello = ($('#pjSello') || {}).value || '';
 
     var frame = document.createElement('div');
     frame.className = 'sheetFrame' + (hoja === 'limpia' ? ' sinMarco' : '');
-    frame.innerHTML = '  <div class="drawArea"></div>' +
+    frame.innerHTML = '  <div class="drawArea">' + (hoja !== 'limpia' ? selloHtml() : '') + '</div>' +
       (hoja === 'full'
-        ? ((legend ? '<div class="legend"><b style="font-size:8px">SYMBOL LEGEND:</b>' + legend + '</div>' : '') +
+        ? (leyendaHtml() +
            titleBlockHtml(state.project.sheetNo || 'E-1', state.project.sheetTitle || 'PLANO', scaleText))
         : '');
     frame.querySelector('.drawArea').appendChild(clone);
@@ -13402,7 +16592,7 @@
         '<td><input type="text" data-i="' + i + '" data-f="desc" value="' + esc(l.desc) + '"></td>' +
         '<td style="width:96px"><input class="num" data-i="' + i + '" data-f="va" value="' + (l.va || '') + '"></td>' +
         '<td class="cb"><label><input type="checkbox" data-i="' + i + '" data-f="hvac"' + (l.hvac ? ' checked' : '') + '> HVAC 100%</label></td>' +
-        '<td style="width:26px;text-align:center"><button class="del" data-i="' + i + '">✕</button></td>' +
+        '<td style="width:26px;text-align:center"><button class="del" data-i="' + i + '">' + ICO.svg('close') + '</button></td>' +
         '</tr>';
     });
     $('#psLoads').innerHTML = lr;
@@ -13826,8 +17016,8 @@
       document.body.appendChild(errBar);
     }
     errBar.innerHTML = '<span style="flex:1">⚠️ Algo falló: <b>' + esc(String(msg).slice(0, 160)) + '</b>. Tu trabajo sigue guardado; si la app no responde, recarga la página.</span>' +
-      '<button id="errBajar" style="padding:5px 10px;border:0;border-radius:6px;background:#fff;color:#b71c1c;font-weight:700;cursor:pointer">💾 Bajar copia del plano</button>' +
-      '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">✕</button>';
+      '<button id="errBajar" style="padding:5px 10px;border:0;border-radius:6px;background:#fff;color:#b71c1c;font-weight:700;cursor:pointer">' + ICO.svg('save') + ' Bajar copia del plano</button>' +
+      '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">' + ICO.svg('close') + '</button>';
     errBar.querySelector('#errCerrar').addEventListener('click', function () { errBar.remove(); errBar = null; });
     errBar.querySelector('#errBajar').addEventListener('click', function () {
       try { saveFile('rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json', payloadProyecto()); } catch (e) {}
@@ -13878,6 +17068,9 @@
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd') { ev.preventDefault(); copySel(); pasteClip(null, 24); return; }
     switch (ev.key) {
       case 'Escape':
+        // un desplegable de grupo o el panel Barras abiertos se cierran primero
+        var tmE = $('#toolMenu'), bpE = $('#barrasPanel');
+        if ((tmE && !tmE.hidden) || (bpE && !bpE.hidden)) { cierraToolMenu(); if (bpE) bpE.hidden = true; break; }
         // primero cierra cualquier modal abierto (Panel Schedule, Lot…)
         var askM = document.getElementById('askModal');
         if (askM && !askM.hidden) { askClose(false); break; }   // (robustez 03/09) el foco pudo salir del input
@@ -13930,6 +17123,9 @@
       case 'm': case 'M': setTool('measure'); break;
       case 'c': case 'C': setTool('dim'); break;
       case 't': case 'T': setTool('text'); break;
+      case 'o': case 'O': setTool('count'); break;
+      case 'f': case 'F': setTool('match'); break;
+      case 'g': case 'G': setTool('trim'); break;
       case 'p': case 'P': setTool('pen'); break;   // (H es la mano/pan: el resaltador va por el botón)
       case 'k': case 'K': setTool('calibrate'); break;
       case 'Enter':
@@ -13950,20 +17146,536 @@
     }
   });
 
-  $$('#toolButtons .tool').forEach(function (b) {
-    b.addEventListener('click', function (ev) {
-      // Calibrate al estilo Bluebeam: al tocarlo salen las dos vías
-      // (medir una distancia conocida, o aplicar la escala escrita en el plano)
-      if (b.dataset.tool === 'calibrate' && state.bg) {
-        setTool('calibrate');
-        showToolMenu('calibrate', b);
-        return;
-      }
-      setTool(b.dataset.tool);
-      var dd = ev.target.closest && ev.target.closest('.dd');
-      if (dd) showToolMenu(dd.dataset.menu, b);
+  /* ==================================================================
+     BARRAS MOVIBLES (v30.O) — estilo Bluebeam
+     Tres barras: "Mis herramientas" (las que más usas, a un toque),
+     "Grupos" (tocas un grupo y se despliega con todas sus opciones) y
+     "Navegar y zoom" (Select, Pan, zoom — abajo por defecto, como Revu).
+     Cada barra vive en uno de cuatro muelles: arriba, abajo, izquierda,
+     derecha. Se mueven arrastrando la agarradera ⋮⋮ o desde ⋮⋮ Barras.
+     Todo se guarda en localStorage 'mxp_barras' (es del aparato, no del
+     proyecto: cada PC / iPad puede tener su propia disposición).
+     ================================================================== */
+  var TOOL_DEFS = [
+    { id: 'select', grp: 'nav', ico: 'select', nom: 'Select', key: 'V', tip: 'Seleccionar (V)' },
+    { id: 'pan', grp: 'nav', ico: 'pan', nom: 'Pan', key: 'H', tip: 'Mover vista (H)' },
+    { id: 'wall', grp: 'build', ico: 'wall', nom: 'Wall', key: 'W', tip: 'Dibujar pared (W)', menu: 'wall', menuTip: 'Elegir tipo de pared' },
+    { id: 'door', grp: 'build', ico: 'door', nom: 'Door', key: 'D', tip: 'Colocar puerta (D)', menu: 'door', menuTip: 'Elegir tipo de puerta' },
+    { id: 'window', grp: 'build', ico: 'window', nom: 'Window', key: 'N', tip: 'Colocar ventana (N)', menu: 'window', menuTip: 'Elegir tipo de ventana' },
+    { id: 'area', grp: 'shape', ico: 'area', nom: 'Area', key: 'A', tip: 'Superficie / techo: polígono con patrón (A)', menu: 'area', menuTip: 'Elegir superficie' },
+    { id: 'rect', grp: 'shape', ico: 'rect', nom: 'Rect', tip: 'Rectángulo / polígono (2 clics, SHIFT = regular)', menu: 'rect', menuTip: 'Elegir forma: rectángulo, triángulo, pentágono, hexágono...' },
+    { id: 'ellipse', grp: 'shape', ico: 'ellipse', nom: 'Ellipse', tip: 'Elipse / círculo (2 clics, SHIFT = círculo)' },
+    { id: 'line', grp: 'shape', ico: 'line', nom: 'Line', tip: 'Línea recta: clic en el inicio y clic en el final (SHIFT = 0/45/90°)', menu: 'line', menuTip: 'Elegir tipo de línea y punta' },
+    { id: 'pline', grp: 'shape', ico: 'pline', nom: 'Polyline', tip: 'Polilínea: línea de varios tramos (doble clic o Enter termina)', menu: 'pline', menuTip: 'Elegir tipo de línea' },
+    { id: 'trim', grp: 'shape', ico: 'trim', nom: 'Trim', key: 'G', tip: 'Trim / Extend / Break (G): recorta lo que sobra de una pared, cable o línea contra lo que se cruza · alárgala hasta que toque · pártela en dos. El ▾ elige cuál de las tres.', menu: 'trim', menuTip: 'Recortar, alargar o partir' },
+    { id: 'cloud', grp: 'shape', ico: 'cloud', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
+    { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
+    { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
+    { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
+    { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
+    { id: 'match', grp: 'note', ico: 'pincel', nom: 'Match', key: 'F', tip: 'Match Properties / Copiar formato (F): coge el aspecto de una marca — color, grosor, tamaño, tipo — y pásaselo a las demás con un toque cada una. SHIFT+toque cambia el origen.', menu: 'match', menuTip: 'Qué formato está copiado, y coger otro origen' },
+    { id: 'count', grp: 'note', ico: 'count', nom: 'Count', key: 'O', tip: 'Count (O): cuenta lo que YA trae el plano del ingeniero — cada toque marca uno y el total va corriendo por hoja y por set', menu: 'count', menuTip: 'Elegir qué se está contando' },
+    { id: 'text', grp: 'note', ico: 'text', nom: 'Text', key: 'T', tip: 'Texto (T)' },
+    { id: 'leader', grp: 'note', ico: 'callout', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
+    { id: 'calibrate', grp: 'note', ico: 'calibrate', nom: 'Calibrate', key: 'K', tip: 'Calibrar plano de fondo (K)', menuTip: 'Medir una distancia conocida o aplicar la escala escrita en el plano' },
+    { id: 'pen', grp: 'ink', ico: 'pen', nom: 'Pen', key: 'P', tip: 'Lápiz a mano alzada (P) — Apple Pencil o dedo' },
+    { id: 'hi', grp: 'ink', ico: 'highlight', nom: 'Highlight', tip: 'Resaltador — resalta sin tapar' },
+    { id: 'erase', grp: 'ink', ico: 'eraser', nom: 'Eraser', tip: 'Borrador de tinta: pasa por encima de un trazo' }
+  ];
+  var GRUPOS = [
+    { id: 'nav', nom: 'Navegar', largo: 'Navegar' },
+    { id: 'build', nom: 'Construir', largo: 'Construir: paredes, puertas y ventanas' },
+    { id: 'shape', nom: 'Formas', largo: 'Superficies y formas' },
+    { id: 'elec', nom: 'Eléctrico', largo: 'Eléctrico: circuitos y cableado' },
+    { id: 'note', nom: 'Medir y anotar', corto: 'Medir', largo: 'Medir y anotar' },
+    { id: 'ink', nom: 'A mano', largo: 'A mano: lápiz, resaltador, borrador' }
+  ];
+  var BARRAS = {
+    favs: { nom: 'Mis herramientas', tip: 'Las herramientas que más usas, a un toque. Añade o quita con la ☆ de cada grupo, o en ⋮⋮ Barras.' },
+    grupos: { nom: 'Grupos', tip: 'Todas las herramientas, por grupos: toca un grupo y se despliega.' },
+    cofre: { nom: 'Mi cofre', tip: 'Tus herramientas guardadas: una marca ya configurada (color, tamaño, circuito, texto) a un solo toque. Se guardan desde Propiedades con "Guardar como herramienta".' }
+  };
+  var DOCKS = ['top', 'bottom', 'left', 'right'];
+  var DOCK_NOM = { top: 'Arriba', bottom: 'Abajo', left: 'Izquierda', right: 'Derecha' };
+  var LAYOUT_DEF = {
+    v: 1,
+    docks: { top: ['favs', 'grupos', 'cofre'], bottom: [], left: [], right: [] },
+    ocultas: ['cofre'],
+    favs: ['text', 'leader', 'wire', 'homerun', 'dim', 'measure', 'rect', 'cloud'],
+    ultima: {},
+    uso: {}
+  };
+  function defDe(id) { for (var i = 0; i < TOOL_DEFS.length; i++) if (TOOL_DEFS[i].id === id) return TOOL_DEFS[i]; return null; }
+  function grpDe(id) { var d = defDe(id); return d ? d.grp : null; }
+  function toolsDe(grp) { return TOOL_DEFS.filter(function (d) { return d.grp === grp; }); }
+  function grupoDef(id) { for (var i = 0; i < GRUPOS.length; i++) if (GRUPOS[i].id === id) return GRUPOS[i]; return null; }
+  function clonaLayoutDef() { return JSON.parse(JSON.stringify(LAYOUT_DEF)); }
+  /* Lee la disposición guardada y la SANEA: una barra que falte vuelve a su
+     sitio por defecto, una que sobre se ignora, una herramienta que ya no
+     exista se quita de favoritos. Así una versión vieja nunca rompe la barra. */
+  function cargaLayout() {
+    var L = clonaLayoutDef(), g = null;
+    try { g = JSON.parse(localStorage.getItem('mxp_barras') || 'null'); } catch (e) { g = null; }
+    if (!g || typeof g !== 'object') return L;
+    var vistas = {};
+    DOCKS.forEach(function (d) {
+      L.docks[d] = [];
+      var arr = (g.docks && Array.isArray(g.docks[d])) ? g.docks[d] : [];
+      arr.forEach(function (id) { if (BARRAS[id] && !vistas[id]) { vistas[id] = 1; L.docks[d].push(id); } });
     });
+    Object.keys(BARRAS).forEach(function (id) {
+      if (vistas[id]) return;
+      DOCKS.forEach(function (d) { if (LAYOUT_DEF.docks[d].indexOf(id) >= 0) L.docks[d].push(id); });
+    });
+    L.ocultas = (Array.isArray(g.ocultas) ? g.ocultas : []).filter(function (id) { return !!BARRAS[id]; });
+    if (Array.isArray(g.favs)) {
+      var f = [];
+      g.favs.forEach(function (id) { if (defDe(id) && f.indexOf(id) < 0) f.push(id); });
+      L.favs = f;
+    }
+    if (g.ultima && typeof g.ultima === 'object') Object.keys(g.ultima).forEach(function (k) { if (grupoDef(k) && grpDe(g.ultima[k]) === k) L.ultima[k] = g.ultima[k]; });
+    if (g.uso && typeof g.uso === 'object') Object.keys(g.uso).forEach(function (k) { var n = +g.uso[k]; if (defDe(k) && n > 0) L.uso[k] = Math.min(n, 99999); });
+    return L;
+  }
+  var layout = cargaLayout();
+  cofre = cargaCofre();      // aquí sí: TOOL_DEFS y SYMBOLS ya existen
+  var guardaLayoutT = null;
+  function guardaLayout() {
+    clearTimeout(guardaLayoutT); guardaLayoutT = null;
+    try { localStorage.setItem('mxp_barras', JSON.stringify(layout)); } catch (e) {}
+  }
+  function guardaLayoutLuego() { if (!guardaLayoutT) guardaLayoutT = setTimeout(guardaLayout, 600); }
+  function dockDe(id) { for (var i = 0; i < DOCKS.length; i++) if (layout.docks[DOCKS[i]].indexOf(id) >= 0) return DOCKS[i]; return null; }
+  function barraVisible(id) { return layout.ocultas.indexOf(id) < 0; }
+  /* Si "Navegar y zoom" está oculta, el grupo Navegar aparece en Grupos para
+     que Select y Pan nunca se pierdan. Si está visible, no se duplican. */
+  /* Select, Pan y el zoom viven fijos en la barra de abajo (#navFijo), así que
+     el grupo Navegar no hace falta en Grupos y nunca se puede perder Select. */
+  function gruposVisibles() { return GRUPOS.filter(function (g) { return g.id !== 'nav'; }); }
+
+  /* ---------- pintar ---------- */
+  function btnTool(id) {
+    var d = defDe(id); if (!d) return '';
+    var tieneDd = !!d.menu;
+    return '<button class="tool' + (tool === id ? ' active' : '') + '" data-tool="' + id + '" title="' + esc(d.tip) + '">' + ICO.svg(d.ico) + '<label>' + esc(d.nom) + '</label>' +
+      (tieneDd ? '<span class="dd" data-menu="' + d.menu + '" title="' + esc(d.menuTip) + '">▾</span>' : '') + '</button>';
+  }
+  function btnGrupo(g, vert) {
+    var ult = defDe(layout.ultima[g.id]) || toolsDe(g.id)[0];
+    var abierto = false;
+    try { abierto = !$('#toolMenu').hidden && $('#toolMenu').dataset.grp === g.id; } catch (e) {}
+    return '<button class="grpBtn' + (grpDe(tool) === g.id ? ' active' : '') + (abierto ? ' abierto' : '') + '" data-grp="' + g.id + '" title="' + esc(g.largo) + ' — toca para ver todas sus herramientas">' +
+      '<span class="gIco">' + (ult ? ICO.svg(ult.ico) : '') + '</span><label>' + esc(vert && g.corto ? g.corto : g.nom) + '</label></button>';
+  }
+  function elBarra(id, dock) {
+    var div = document.createElement('div');
+    div.className = 'barra'; div.dataset.barra = id; div.dataset.dock = dock;
+    var b = BARRAS[id];
+    var html = '<span class="grip" title="' + esc(b.nom) + ' — arrastra para mover la barra arriba, abajo o a un lado"><span>⋮⋮</span></span>' +
+      '<span class="bLbl" title="' + esc(b.tip) + '">' + esc(b.nom) + '</span><div class="bBtns">';
+    if (id === 'favs') {
+      html += layout.favs.map(btnTool).join('');
+      if (!layout.favs.length) html += '<button class="act" data-act="barras" title="Todavía no hay herramientas aquí: toca para elegir las tuyas">＋<label>Elegir</label></button>';
+    } else if (id === 'grupos') {
+      html += gruposVisibles().map(function (g) { return btnGrupo(g, dock === 'left' || dock === 'right'); }).join('');
+    } else if (id === 'cofre') {
+      html += cofre.map(btnCofre).join('');
+      if (!cofre.length) html += '<button class="act" data-act="cofre" title="Todavía no hay ninguna. Selecciona una marca ya configurada y usa &quot;Guardar como herramienta&quot; en Propiedades.">＋<label>Guardar</label></button>';
+    }
+    div.innerHTML = html + '</div>';
+    return div;
+  }
+  /* muelle vertical con más botones de los que caben: una flecha abajo lo dice */
+  function actualizaMas() {
+    $$('.dock.vert').forEach(function (d) { d.classList.toggle('mas', d.scrollTop + d.clientHeight < d.scrollHeight - 2); });
+  }
+  $$('.dock.vert').forEach(function (d) { d.addEventListener('scroll', actualizaMas); });
+  window.addEventListener('resize', function () { actualizaMas(); chatEsquiva(); });
+  /* el chat flotante y su burbuja no se ponen encima de una barra: si el muelle
+     de abajo o el de la derecha los pisan, se corren (solo cuando se pisan) */
+  function chatEsquiva() {
+    var ch = document.getElementById('chatFlot');
+    var db = $('#dockBottom'), dr = $('#dockRight');
+    var rb = db && getComputedStyle(db).display !== 'none' ? db.getBoundingClientRect() : null;
+    var rr = dr && getComputedStyle(dr).display !== 'none' ? dr.getBoundingClientRect() : null;
+    // la burbuja sube hasta quedar por encima del muelle (y de la barra de estado que hay debajo)
+    if (!ch || ch.classList.contains('oculto')) return;
+    var r = ch.getBoundingClientRect(); if (!r.width) return;
+    var x = r.left, y = r.top, mov = false;
+    if (rb && rb.height && r.bottom > rb.top && r.top < rb.bottom) { y = rb.top - r.height - 8; mov = true; }
+    if (rr && rr.width && r.right > rr.left && r.left < rr.right && r.bottom > rr.top && r.top < rr.bottom) { x = rr.left - r.width - 8; mov = true; }
+    if (mov) { ch.style.left = Math.max(4, x) + 'px'; ch.style.top = Math.max(4, y) + 'px'; ch.style.right = 'auto'; ch.style.bottom = 'auto'; }
+  }
+  function pintaBarras() {
+    DOCKS.forEach(function (d) {
+      var el = $('#dock' + d.charAt(0).toUpperCase() + d.slice(1));
+      if (!el) return;
+      el.innerHTML = '';
+      layout.docks[d].forEach(function (id) { if (barraVisible(id)) el.appendChild(elBarra(id, d)); });
+    });
+    marcaBarras(tool);
+    actualizaMas();
+    chatEsquiva();
+  }
+  /* setTool llama aquí: enciende el botón de la herramienta, el grupo al que
+     pertenece, y recuerda la última usada de cada grupo (es el icono que
+     enseña el botón del grupo, como el "último usado" de Revu). */
+  function marcaBarras(t) {
+    if (!layout) return;
+    $$('.dock .tool, #navFijo .tool').forEach(function (b) { b.classList.toggle('active', b.dataset.tool === t); });
+    var g = grpDe(t);
+    if (g && layout.ultima[g] !== t) { layout.ultima[g] = t; guardaLayoutLuego(); }
+    $$('.dock .grpBtn').forEach(function (b) {
+      var d = defDe(layout.ultima[b.dataset.grp]) || toolsDe(b.dataset.grp)[0];
+      var ic = b.querySelector('.gIco'); if (ic && d) ic.innerHTML = ICO.svg(d.ico);
+      b.classList.toggle('active', b.dataset.grp === g);
+    });
+    $$('#toolMenu .tmTool').forEach(function (it) { it.classList.toggle('cur', it.dataset.tool === t); });
+  }
+  function cuentaUso(id) { if (!defDe(id)) return; layout.uso[id] = (layout.uso[id] || 0) + 1; guardaLayoutLuego(); }
+  /* Elegir una herramienta desde una barra o un desplegable. Devuelve true si
+     dejó un menú abierto (Calibrate con plano de fondo saca sus dos vías). */
+  function eligeTool(id, anchor) {
+    cuentaUso(id);
+    if (id === 'calibrate' && state.bg) {
+      var tmC = $('#toolMenu');
+      if (!tmC.hidden && tmC.dataset.kind === 'calibrate' && tool === 'calibrate') { cierraToolMenu(); return true; }
+      setTool('calibrate'); showToolMenu('calibrate', anchor); return true;
+    }
+    setTool(id);
+    return false;
+  }
+
+  /* ---------- menú desplegable de un grupo ---------- */
+  function cierraToolMenu() {
+    var tm = $('#toolMenu');
+    tm.hidden = true; tm.dataset.grp = '';
+    $$('.dock .grpBtn.abierto').forEach(function (b) { b.classList.remove('abierto'); });
+  }
+  /* Coloca #toolMenu pegado a su botón, del lado que tenga sitio: debajo si
+     la barra está arriba, encima si está abajo, al lado si es vertical. */
+  function colocaMenu(tm, anchor, grp) {
+    tm.hidden = false;
+    var r = anchor.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
+    var dock = anchor.closest ? anchor.closest('.dock') : null;
+    var abajo = anchor.closest && anchor.closest('#statusbar');
+    var lado = abajo ? 'up' : !dock ? 'down' : dock.id === 'dockLeft' ? 'right' : dock.id === 'dockRight' ? 'left' : dock.id === 'dockBottom' ? 'up' : 'down';
+    var mw = tm.offsetWidth, mh = tm.offsetHeight, x, y;
+    if (lado === 'right') { x = r.right + 6; y = r.top; }
+    else if (lado === 'left') { x = r.left - mw - 6; y = r.top; }
+    else if (lado === 'up') { x = r.left; y = r.top - mh - 6; }
+    else { x = r.left; y = r.bottom + 4; }
+    x = Math.max(4, Math.min(x, W - mw - 4));
+    y = Math.max(4, Math.min(y, H - mh - 4));
+    tm.style.left = x + 'px'; tm.style.top = y + 'px';
+    tm.dataset.grp = grp || '';
+    $$('.dock .grpBtn').forEach(function (b) { b.classList.toggle('abierto', !!grp && b === anchor); });
+  }
+  function itemTool(d) {
+    var esFav = layout.favs.indexOf(d.id) >= 0;
+    var conSub = !!d.menu || (d.id === 'calibrate' && !!state.bg);
+    return '<div class="tmItem tmTool' + (tool === d.id ? ' cur' : '') + '" data-tool="' + d.id + '" title="' + esc(d.tip) + '">' +
+      '<span class="tIco">' + ICO.svg(d.ico) + '</span><span class="tNom">' + esc(d.nom) + '</span>' +
+      (d.key ? '<span class="tKey">' + d.key + '</span>' : '') +
+      (conSub ? '<span class="tSub" title="' + esc(d.menuTip || '') + '">▸</span>' : '') +
+      '<span class="tPin' + (esFav ? ' on' : '') + '" title="' + (esFav ? 'Quitar de Mis herramientas' : 'Poner en Mis herramientas') + '">' + (esFav ? '★' : '☆') + '</span></div>';
+  }
+  function menuGrupo(grp, anchor) {
+    var tm = $('#toolMenu'), g = grupoDef(grp);
+    if (!g) return;
+    var html = '<div class="tmHead">' + esc(g.largo) + '</div>';
+    toolsDe(grp).forEach(function (d) { html += itemTool(d); });
+    html += '<div class="tmPie">☆ la pone en Mis herramientas · ▸ abre sus tipos</div>';
+    tm.innerHTML = html;
+    tm.dataset.kind = 'grupo';
+    colocaMenu(tm, anchor, grp);
+    $$('#toolMenu .tmTool').forEach(function (it) {
+      it.addEventListener('click', function (ev) {
+        var id = it.dataset.tool, d = defDe(id);
+        if (!d) return;
+        if (ev.target.closest && ev.target.closest('.tPin')) {
+          togglePin(id);
+          var nuevo = document.createElement('div');
+          nuevo.innerHTML = itemTool(d);
+          var pin = it.querySelector('.tPin'), pin2 = nuevo.querySelector('.tPin');
+          pin.className = pin2.className; pin.textContent = pin2.textContent; pin.title = pin2.title;
+          // la barra de favoritos cambió de ancho: el botón del grupo pudo moverse
+          var a2 = $('.dock .grpBtn[data-grp="' + grp + '"]');
+          if (a2) colocaMenu(tm, a2, grp);
+          return;
+        }
+        var sub = ev.target.closest && ev.target.closest('.tSub');
+        var a = $('.dock .grpBtn[data-grp="' + grp + '"]') || anchor;
+        if (sub) {
+          cuentaUso(id);
+          setTool(id);
+          showToolMenu(d.menu || 'calibrate', a);
+          return;
+        }
+        if (!eligeTool(id, a)) cierraToolMenu();
+      });
+    });
+  }
+  function toggleGrupo(b) {
+    var tm = $('#toolMenu');
+    if (!tm.hidden && tm.dataset.grp === b.dataset.grp) { cierraToolMenu(); return; }
+    menuGrupo(b.dataset.grp, b);
+  }
+  function togglePin(id) {
+    var i = layout.favs.indexOf(id), msg;
+    if (i >= 0) { layout.favs.splice(i, 1); msg = defDe(id).nom + ' quitada de Mis herramientas'; }
+    else {
+      layout.favs.push(id); msg = defDe(id).nom + ' puesta en Mis herramientas';
+      var k = layout.ocultas.indexOf('favs');
+      if (k >= 0) { layout.ocultas.splice(k, 1); msg += ' — la barra estaba oculta y se volvió a mostrar'; }
+      else if (layout.favs.length > 12) msg += ' · ya son ' + layout.favs.length + ': la barra se hace de dos filas';
+    }
+    guardaLayout(); pintaBarras();
+    setHint(msg);
+  }
+
+  /* ---------- clics en cualquier muelle (una sola escucha) ---------- */
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('.dock button, #navFijo button');
+    if (!b) return;
+    if (b.dataset.cofre) {
+      var ddC = ev.target.closest && ev.target.closest('.dd');
+      if (ddC) { showToolMenu('cofreItem', b, ddC.dataset.cofmenu); return; }
+      usaCofre(b.dataset.cofre);
+    } else if (b.classList.contains('tool')) {
+      var dd = ev.target.closest && ev.target.closest('.dd');
+      if (eligeTool(b.dataset.tool, b)) return;
+      if (dd) showToolMenu(dd.dataset.menu, b);
+    } else if (b.classList.contains('grpBtn')) {
+      toggleGrupo(b);
+    } else if (b.dataset.act) {
+      accionBarra(b.dataset.act, b);
+    }
   });
+  /* El modo "ir sumando" del iPad: mientras está encendido, cada toque marca o
+     desmarca y NO mueve nada. Se apaga solo al cambiar de herramienta, para que
+     nadie se quede atascado sin saber por qué no puede arrastrar. */
+  function ponSumando(v) {
+    sumandoSel = !!v;
+    var b = $('#btnSumar');
+    if (b) b.classList.toggle('active', sumandoSel);
+    document.body.classList.toggle('sumandoSel', sumandoSel);
+    if (sumandoSel) setHint('Sumando a la selección: toca los que quieras (otra vez para quitarlos) · vuelve a tocar ＋ cuando termines');
+    else if (v === false) setHint(selRefs().length ? selRefs().length + ' elemento(s) seleccionados' : '');
+  }
+  (function () { var b = document.getElementById('btnSumar'); if (b) b.addEventListener('click', function () { ponSumando(!sumandoSel); }); })();
+  function accionBarra(act, b) {
+    if (act === 'zoomIn') zoomBy(1.25);
+    else if (act === 'zoomOut') zoomBy(0.8);
+    else if (act === 'zoomFit') zoomFit();
+    else if (act === 'barras') abrePanelBarras();
+    else if (act === 'cofre') setHint('Mi cofre: selecciona en el plano una marca ya configurada y pulsa "Guardar como herramienta" en Propiedades');
+  }
+
+  /* ---------- arrastrar una barra por su agarradera ---------- */
+  var dragBarra = null;
+  function dockBajo(x, y) {
+    var el = document.elementFromPoint(x, y);
+    var d = el && el.closest ? el.closest('.dock:not(.fantasma)') : null;
+    if (d) return d;
+    // tolerancia: cerca del borde de un muelle cuenta como soltarla ahí
+    for (var i = 0; i < DOCKS.length; i++) {
+      var k = $('#dock' + DOCKS[i].charAt(0).toUpperCase() + DOCKS[i].slice(1));
+      if (!k) continue;
+      var r = k.getBoundingClientRect();
+      if (x >= r.left - 28 && x <= r.right + 28 && y >= r.top - 28 && y <= r.bottom + 28) return k;
+    }
+    return null;
+  }
+  function idDock(el) { return el.id.replace('dock', '').toLowerCase(); }
+  function mueveBarra(id, dock, idx) {
+    DOCKS.forEach(function (d) { layout.docks[d] = layout.docks[d].filter(function (b) { return b !== id; }); });
+    var arr = layout.docks[dock];
+    if (idx == null || idx < 0 || idx > arr.length) idx = arr.length;
+    arr.splice(idx, 0, id);
+    guardaLayout(); pintaBarras();
+    if (!$('#barrasPanel').hidden) pintaPanelBarras();
+  }
+  function sueltaDrag() {
+    if (!dragBarra) return;
+    var db = dragBarra; dragBarra = null;
+    document.body.classList.remove('moviendoBarra');
+    if (db.ghost) db.ghost.remove();
+    $$('.dock.fantasma').forEach(function (f) { f.remove(); });
+    $$('.dock.drop').forEach(function (k) { k.classList.remove('drop'); });
+    return db;
+  }
+  document.addEventListener('pointerdown', function (ev) {
+    var g = ev.target.closest && ev.target.closest('.barra .grip, .barra .bLbl');
+    if (!g) return;
+    // un solo arrastre a la vez, solo con el puntero principal y sin botón derecho
+    if (dragBarra || ev.isPrimary === false || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+    var barra = g.closest('.barra');
+    dragBarra = { id: barra.dataset.barra, pid: ev.pointerId, sx: ev.clientX, sy: ev.clientY, on: false, ghost: null, dx: 0, dy: 0 };
+    try { g.setPointerCapture(ev.pointerId); } catch (e) {}
+    ev.preventDefault();
+  });
+  document.addEventListener('pointermove', function (ev) {
+    if (!dragBarra || ev.pointerId !== dragBarra.pid) return;
+    if (!dragBarra.on) {
+      if (Math.hypot(ev.clientX - dragBarra.sx, ev.clientY - dragBarra.sy) < 6) return;
+      var src = $('.barra[data-barra="' + dragBarra.id + '"]');
+      if (!src) { dragBarra = null; return; }
+      dragBarra.on = true;
+      document.body.classList.add('moviendoBarra');
+      cierraToolMenu();
+      var r = src.getBoundingClientRect(), dockSrc = src.closest('.dock');
+      var gh = document.createElement('div');
+      gh.className = (dockSrc ? dockSrc.className : 'dock horiz') + ' fantasma';
+      gh.appendChild(src.cloneNode(true));
+      gh.style.width = r.width + 'px'; gh.style.height = r.height + 'px';
+      document.body.appendChild(gh);
+      dragBarra.ghost = gh; dragBarra.dx = ev.clientX - r.left; dragBarra.dy = ev.clientY - r.top;
+      setHint('Suelta la barra arriba, abajo o a un lado del plano');
+    }
+    dragBarra.ghost.style.left = (ev.clientX - dragBarra.dx) + 'px';
+    dragBarra.ghost.style.top = (ev.clientY - dragBarra.dy) + 'px';
+    var d = dockBajo(ev.clientX, ev.clientY);
+    $$('.dock').forEach(function (k) { k.classList.toggle('drop', k === d); });
+  });
+  document.addEventListener('pointerup', function (ev) {
+    if (!dragBarra || ev.pointerId !== dragBarra.pid) return;
+    // el muelle destino se mira ANTES de limpiar: un muelle vacío solo es
+    // visible (y medible) mientras dura el arrastre
+    var d = dragBarra.on ? dockBajo(ev.clientX, ev.clientY) : null;
+    var db = sueltaDrag();
+    if (!db.on) return;
+    if (!d) { setHint('La barra se queda donde estaba'); return; }
+    var dock = idDock(d), vert = d.classList.contains('vert');
+    var otros = layout.docks[dock].filter(function (b) { return b !== db.id; });
+    var idx = otros.length;
+    var els = Array.from(d.querySelectorAll('.barra')).filter(function (e) { return e.dataset.barra !== db.id; });
+    for (var i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect(), antes;
+      if (vert) antes = ev.clientY < (r.top + r.bottom) / 2;
+      // muelle horizontal partido en filas: primero la fila, después la X
+      else if (ev.clientY < r.top) antes = true;
+      else if (ev.clientY > r.bottom) antes = false;
+      else antes = ev.clientX < (r.left + r.right) / 2;
+      if (antes) { idx = otros.indexOf(els[i].dataset.barra); break; }
+    }
+    mueveBarra(db.id, dock, idx);
+    var aviso = BARRAS[db.id].nom + ' → ' + DOCK_NOM[dock].toLowerCase();
+    if (d.scrollHeight > d.clientHeight + 2) aviso += ' · no cabe todo de un vistazo: desliza la barra hacia arriba para ver el resto';
+    setHint(aviso);
+  });
+  document.addEventListener('pointercancel', function (ev) { if (dragBarra && ev.pointerId === dragBarra.pid) sueltaDrag(); });
+  document.addEventListener('contextmenu', function (ev) { if (ev.target.closest && ev.target.closest('.barra .grip, .barra .bLbl')) ev.preventDefault(); });
+
+  /* ---------- panel ⋮⋮ Barras: organizar sin arrastrar (cómodo en iPad) ---------- */
+  function ordenBarras() {
+    var out = [];
+    DOCKS.forEach(function (d) { layout.docks[d].forEach(function (id) { out.push({ id: id, dock: d }); }); });
+    return out;
+  }
+  function masUsadas(n) {
+    return Object.keys(layout.uso)
+      .filter(function (k) { return defDe(k) && grpDe(k) !== 'nav'; })
+      .sort(function (a, b) { return layout.uso[b] - layout.uso[a]; })
+      .slice(0, n);
+  }
+  function pintaPanelBarras() {
+    var p = $('#barrasPanel'), st = p.scrollTop;
+    var html = '<h4>Organizar barras <button class="x" data-bp="cerrar" title="Cerrar">' + ICO.svg('close') + '</button></h4>';
+    html += '<div class="bpSec">Barras — cuáles ves y dónde van</div>';
+    ordenBarras().forEach(function (o) {
+      var arr = layout.docks[o.dock], i = arr.indexOf(o.id), vis = barraVisible(o.id);
+      html += '<div class="bpRow" data-barra="' + o.id + '">' +
+        '<label class="nm" title="' + esc(BARRAS[o.id].tip) + '"><input type="checkbox" data-bp="ver"' + (vis ? ' checked' : '') + ' title="Ver u ocultar esta barra">' + esc(BARRAS[o.id].nom) + '</label>' +
+        '<select data-bp="dock" title="Dónde va la barra">' + DOCKS.map(function (d) { return '<option value="' + d + '"' + (d === o.dock ? ' selected' : '') + '>' + DOCK_NOM[d] + '</option>'; }).join('') + '</select>' +
+        '<button data-bp="mv" data-n="-1" title="Antes"' + (i <= 0 ? ' disabled' : '') + '>' + ICO.svg('flechaIzq') + '</button>' +
+        '<button data-bp="mv" data-n="1" title="Después"' + (i >= arr.length - 1 ? ' disabled' : '') + '>▶</button></div>';
+    });
+    html += '<p class="bpNota">También puedes agarrar la ⋮⋮ de cualquier barra y soltarla arriba, abajo o a un lado del plano.</p>';
+    html += '<div class="bpSec">Mis herramientas — las que quieres a un toque</div>';
+    if (!layout.favs.length) html += '<p class="bpNota">Ninguna todavía. Añade abajo, o toca la ☆ de una herramienta dentro de cualquier grupo.</p>';
+    layout.favs.forEach(function (id, i) {
+      var d = defDe(id);
+      html += '<div class="bpRow" data-fav="' + id + '"><span class="ico">' + ICO.svg(d.ico) + '</span><span class="nm">' + esc(d.nom) + '</span>' +
+        '<button data-bp="fmv" data-n="-1" title="Subir"' + (i === 0 ? ' disabled' : '') + '>' + ICO.svg('flechaArriba') + '</button>' +
+        '<button data-bp="fmv" data-n="1" title="Bajar"' + (i === layout.favs.length - 1 ? ' disabled' : '') + '>' + ICO.svg('flechaAbajo') + '</button>' +
+        '<button class="quitar" data-bp="fdel" title="Quitar de Mis herramientas">' + ICO.svg('close') + '</button></div>';
+    });
+    var libres = TOOL_DEFS.filter(function (d) { return layout.favs.indexOf(d.id) < 0; });
+    if (libres.length) {
+      html += '<div class="bpRow"><select data-bp="fadd" style="flex:1"><option value="">＋ Añadir herramienta…</option>' +
+        libres.map(function (d) { return '<option value="' + d.id + '">' + esc(d.nom) + ' — ' + esc(grupoDef(d.grp).nom) + '</option>'; }).join('') + '</select></div>';
+    }
+    var top = masUsadas(8);
+    if (top.length >= 5) {
+      var iguales = top.every(function (id, i) { return layout.favs[i] === id; });
+      html += '<div class="bpSug">Las que más has usado: <b>' + top.map(function (id) { return esc(defDe(id).nom); }).join(', ') + '</b>' +
+        (iguales ? '<span style="opacity:.6">— ya van primero</span>' : '<button data-bp="usarTop" title="Las más usadas pasan al principio de Mis herramientas; las demás se quedan detrás (hasta ocho en total)">Ponerlas primero</button>') + '</div>';
+    }
+    html += '<div class="bpBtns"><button data-bp="reset" title="Volver a la disposición de fábrica">Restablecer todo</button><button class="pri" data-bp="cerrar">Listo</button></div>';
+    p.innerHTML = html;
+    p.scrollTop = st;
+  }
+  function abrePanelBarras() {
+    var p = $('#barrasPanel');
+    if (!p.hidden) { p.hidden = true; return; }
+    pintaPanelBarras();
+    p.hidden = false;
+    var b = $('#btnBarras'), r = b ? b.getBoundingClientRect() : null;
+    var W = window.innerWidth;
+    if (r) {
+      p.style.top = Math.min(r.bottom + 6, window.innerHeight - 80) + 'px';
+      p.style.left = Math.max(6, Math.min(r.right - p.offsetWidth, W - p.offsetWidth - 6)) + 'px';
+    } else { p.style.top = '60px'; p.style.left = Math.max(6, W - p.offsetWidth - 12) + 'px'; }
+  }
+  $('#btnBarras').addEventListener('click', abrePanelBarras);
+  $('#barrasPanel').addEventListener('click', function (ev) {
+    var t = ev.target.closest && ev.target.closest('[data-bp]');
+    if (!t) return;
+    var bp = t.dataset.bp, fila = t.closest('.bpRow');
+    if (bp === 'cerrar') { $('#barrasPanel').hidden = true; return; }
+    if (bp === 'reset') {
+      var uso = layout.uso;
+      layout = clonaLayoutDef(); layout.uso = uso;
+      guardaLayout(); pintaBarras(); pintaPanelBarras();
+      setHint('Barras como de fábrica');
+      return;
+    }
+    if (bp === 'usarTop') {
+      var top8 = masUsadas(8);
+      layout.favs = top8.concat(layout.favs.filter(function (id) { return top8.indexOf(id) < 0; })).slice(0, 8);
+      guardaLayout(); pintaBarras(); pintaPanelBarras();
+      setHint('Mis herramientas: las más usadas van primero');
+      return;
+    }
+    if (bp === 'mv' && fila) {
+      var id = fila.dataset.barra, dk = dockDe(id), arr = layout.docks[dk], i = arr.indexOf(id), j = i + (+t.dataset.n);
+      if (j < 0 || j >= arr.length) return;
+      arr.splice(i, 1); arr.splice(j, 0, id);
+      guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
+    }
+    if (bp === 'fmv' && fila) {
+      var fid = fila.dataset.fav, fi = layout.favs.indexOf(fid), fj = fi + (+t.dataset.n);
+      if (fi < 0 || fj < 0 || fj >= layout.favs.length) return;
+      layout.favs.splice(fi, 1); layout.favs.splice(fj, 0, fid);
+      guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
+    }
+    if (bp === 'fdel' && fila) { togglePin(fila.dataset.fav); pintaPanelBarras(); return; }
+  });
+  $('#barrasPanel').addEventListener('change', function (ev) {
+    var t = ev.target.closest && ev.target.closest('[data-bp]');
+    if (!t) return;
+    var bp = t.dataset.bp, fila = t.closest('.bpRow');
+    if (bp === 'ver' && fila) {
+      var id = fila.dataset.barra, k = layout.ocultas.indexOf(id);
+      if (t.checked && k >= 0) layout.ocultas.splice(k, 1);
+      else if (!t.checked && k < 0) layout.ocultas.push(id);
+      guardaLayout(); pintaBarras(); pintaPanelBarras(); return;
+    }
+    if (bp === 'dock' && fila) { mueveBarra(fila.dataset.barra, t.value, null); return; }
+    if (bp === 'fadd' && t.value) { togglePin(t.value); pintaPanelBarras(); return; }
+  });
+  pintaBarras();
 
   /* --- flyout: elegir tipo de pared / superficie desde el botón de la herramienta --- */
   function patternSwatch(k) {
@@ -14016,9 +17728,35 @@
     renderBg(); zoomFit(); refresh();
     setHint('✔ Plano a escala ' + bgScaleName(f) + ' — ya puedes medir directo (M) sin calibrar.');
   }
-  function showToolMenu(kind, anchor) {
+  function showToolMenu(kind, anchor, extra) {
     var tm = $('#toolMenu');
     var html = '';
+    if (kind === 'cofreItem') {
+      var itC = cofreDe(extra);
+      if (!itC) return;
+      var iC = cofre.findIndex(function (q) { return q.id === extra; });
+      html += '<div class="tmHead">' + esc(itC.nom) + '</div>';
+      html += '<div class="tmItem" data-k="usa"><span>Usarla ahora</span></div>';
+      html += '<div class="tmItem" data-k="ren"><span>Renombrar…</span></div>';
+      html += '<div class="tmItem' + (iC <= 0 ? ' k-off' : '') + '" data-k="izq"><span>Moverla antes</span></div>';
+      html += '<div class="tmItem' + (iC >= cofre.length - 1 ? ' k-off' : '') + '" data-k="der"><span>Moverla después</span></div>';
+      html += '<div class="tmItem" data-k="del"><span>Quitarla del cofre…</span></div>';
+      tm.innerHTML = html;
+      tm.dataset.kind = 'cofreItem';
+      colocaMenu(tm, anchor, '');
+      $$('#toolMenu .tmItem').forEach(function (itm) {
+        itm.addEventListener('click', function () {
+          var k = itm.dataset.k;
+          tm.hidden = true;
+          if (k === 'usa') usaCofre(extra);
+          else if (k === 'ren') renombraEnCofre(extra);
+          else if (k === 'izq') mueveEnCofre(extra, -1);
+          else if (k === 'der') mueveEnCofre(extra, 1);
+          else if (k === 'del') borraDeCofre(extra);
+        });
+      });
+      return;
+    }
     if (kind === 'wall') {
       html += '<div class="tmHead">Tipo de pared</div>';
       var cur = $('#wallType').value;
@@ -14093,6 +17831,67 @@
       html += '<div class="tmItem" data-k="length"><span>📏 Length — distancia entre 2 puntos</span></div>';
       html += '<div class="tmItem" data-k="marea"><span>▦ Area — polígono con sq ft en el plano</span></div>';
       html += '<div class="tmItem" data-k="mperim"><span>⌐ Perimeter — longitud total de una línea</span></div>';
+    } else if (kind === 'match') {
+      html += '<div class="tmHead">Copiar formato</div>';
+      if (formatoClip) {
+        html += '<div class="tmItem" data-k="__nada"><span>En memoria: <b>' + esc(formatoClip.nom) + '</b></span></div>';
+        html += '<div class="tmItem" data-k="__origen"><span>Coger otro origen — el próximo toque</span></div>';
+        html += '<div class="tmItem" data-k="__olvida"><span>Olvidar el formato copiado</span></div>';
+      } else {
+        html += '<div class="tmItem" data-k="__nada"><span>Todavía no hay formato copiado</span></div>';
+        html += '<div class="tmItem" data-k="__origen"><span>El próximo toque coge el origen</span></div>';
+      }
+      html += '<div class="tmPie">Viaja el ASPECTO — color, grosor, tamaño, tipo. No viaja ni la posición, ni el giro, ni el texto escrito.</div>';
+    } else if (kind === 'trim') {
+      html += '<div class="tmHead">¿Qué le hago a la línea?</div>';
+      html += '<div class="tmItem' + (trimModo === 'trim' ? ' cur' : '') + '" data-k="trim"><span><b>Recortar</b> — toca el pedazo que sobra y se va</span></div>';
+      html += '<div class="tmItem' + (trimModo === 'extend' ? ' cur' : '') + '" data-k="extend"><span><b>Alargar</b> — toca cerca de la punta y llega hasta lo que la para</span></div>';
+      html += '<div class="tmItem' + (trimModo === 'break' ? ' cur' : '') + '" data-k="break"><span><b>Partir</b> — toca el punto y queda en dos</span></div>';
+      html += '<div class="tmPie">Vale para paredes, cables y líneas o polilíneas abiertas. Una superficie cerrada no se recorta, pero sí sirve de borde.</div>';
+    } else if (kind === 'count') {
+      html += '<div class="tmHead">¿Qué estás contando?</div>';
+      var catsM = catsCount();
+      if (!catsM.length) html += '<div class="tmItem" data-k="__nueva"><span>Empezar a contar (crea la primera categoría)</span></div>';
+      catsM.forEach(function (c) {
+        var nH = 0;
+        state.counts.forEach(function (q) { if (q.cat === c.id) nH++; });
+        html += '<div class="tmItem' + (catActiva === c.id ? ' cur' : '') + '" data-k="' + esc(c.id) + '">' +
+          '<span class="cntChip" style="background:' + esc(c.color) + '"></span><span>' + esc(c.nom) +
+          ' <span class="muted">· ' + nH + ' en esta hoja</span></span></div>';
+      });
+      html += '<div class="tmHead">Contar lo que ya trae el plano</div>';
+      html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
+      html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
+      if (catsM.length) {
+        html += '<div class="tmHead">Categorías</div>';
+        html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
+        html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
+        html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
+        html += '<div class="tmItem" data-k="__codigo"><span>Código de partida de la activa… <span class="muted">· ' + esc(codigoDeCat(catCount(catActiva) || catsM[0])) + '</span></span></div>';
+        html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
+        html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
+      }
+    } else if (kind === 'countcodigo') {
+      var cCod = catCount(catActiva), codAct = codigoDeCat(cCod);
+      html += '<div class="tmHead">Código de partida de "' + esc(cCod ? cCod.nom : '') + '"</div>';
+      codigosPartida().forEach(function (cp) {
+        html += '<div class="tmItem' + (codAct === cp[0] ? ' cur' : '') + '" data-k="' + esc(cp[0]) + '"><span><b>' + esc(cp[0]) + '</b> ' + esc(cp[1]) + '</span></div>';
+      });
+      html += '<div class="tmPie">Con este código llega cada renglón al estimador y con él se compara después contra el gasto real de la obra.</div>';
+    } else if (kind === 'countestilo') {
+      html += '<div class="tmHead">Color</div>';
+      var cAct = catCount(catActiva);
+      COUNT_COLORES.forEach(function (cc) {
+        html += '<div class="tmItem' + (cAct && cAct.color === cc[0] ? ' cur' : '') + '" data-k="col:' + cc[0] + '">' +
+          '<span class="cntChip" style="background:' + cc[0] + '"></span><span>' + cc[1] + '</span></div>';
+      });
+      html += '<div class="tmHead">Forma</div>';
+      COUNT_FORMA_ORDEN.forEach(function (f) {
+        html += '<div class="tmItem' + (cAct && cAct.forma === f ? ' cur' : '') + '" data-k="frm:' + f + '"><span>' + COUNT_FORMAS[f] + '</span></div>';
+      });
+      html += '<div class="tmHead">Número dentro de la marca</div>';
+      html += '<div class="tmItem' + (cAct && cAct.num !== false ? ' cur' : '') + '" data-k="num:1"><span>Sí — se ve 1, 2, 3… (deja verificar que no falta ninguno)</span></div>';
+      html += '<div class="tmItem' + (cAct && cAct.num === false ? ' cur' : '') + '" data-k="num:0"><span>No — solo la marca</span></div>';
     } else if (kind === 'bgscale' || kind === 'calibrate') {
       if (kind === 'calibrate') {
         html += '<div class="tmHead">Poner el plano a escala</div>';
@@ -14109,10 +17908,8 @@
       });
     }
     tm.innerHTML = html;
-    var r = anchor.getBoundingClientRect();
-    tm.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 240)) + 'px';
-    tm.style.top = (r.bottom + 4) + 'px';
-    tm.hidden = false;
+    tm.dataset.kind = kind;
+    colocaMenu(tm, anchor, '');
     $$('#toolMenu .tmItem').forEach(function (it) {
       it.addEventListener('click', function () {
         var k = it.dataset.k;
@@ -14178,6 +17975,40 @@
             setTool('pline'); pendingAreaLabel = true;
             setHint('MEDIR PERÍMETRO: marca los puntos de la línea (doble clic o Enter termina) — la longitud total queda escrita en el plano');
           }
+        } else if (kind === 'trim') {
+          if (TRIM_NOM[k]) trimModo = k;
+          setTool('trim');
+          setHint(TRIM_NOM[trimModo] + ': ' + (trimModo === 'trim' ? 'toca el pedazo que sobra' : trimModo === 'extend' ? 'toca cerca de la punta que quieres alargar' : 'toca el punto donde quieres partirla') + ' · Esc para salir');
+        } else if (kind === 'match') {
+          if (k === '__origen') { pincelCogeOrigen = true; setTool('match'); setHint('El próximo toque coge el formato de esa marca'); }
+          else if (k === '__olvida') { formatoClip = null; pincelPuestos = 0; setTool('match'); setHint('Formato olvidado — toca la marca cuyo aspecto quieres copiar'); showProps(); }
+        } else if (kind === 'count') {
+          if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
+          if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
+          if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
+          if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
+          if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
+          if (k === '__codigo') { tm.hidden = true; catActivaSegura(); showToolMenu('countcodigo', anchor); return; }
+          if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
+          if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
+          catActiva = k;
+          setTool('count');
+          var cSel = catCount(k);
+          refreshCounts();
+          setHint('Contando ' + (cSel ? cSel.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+        } else if (kind === 'countcodigo') {
+          var cK = catCount(catActiva);
+          if (cK && esCodigo(k)) { pushUndo(); cK.codigo = k; refreshCounts(); setHint(cK.nom + ' → ' + k + ' ' + nombreCodigo(k)); }
+        } else if (kind === 'countestilo') {
+          var cE = catCount(catActiva);
+          if (cE) {
+            pushUndo();
+            if (k.indexOf('col:') === 0) cE.color = k.slice(4);
+            else if (k.indexOf('frm:') === 0) cE.forma = k.slice(4);
+            else if (k.indexOf('num:') === 0) cE.num = k === 'num:1';
+            refresh(); refreshCounts();
+            setHint('Marca de ' + cE.nom + ' actualizada');
+          }
         } else if (kind === 'bgscale' || kind === 'calibrate') {
           if (k === '__measure') {
             setTool('calibrate');
@@ -14208,9 +18039,10 @@
     });
   }
   document.addEventListener('pointerdown', function (ev) {
-    var tm = $('#toolMenu');
-    if (!tm.hidden && !tm.contains(ev.target) && !(ev.target.closest && ev.target.closest('.dd'))
-      && !(ev.target.closest && ev.target.closest('[data-tool="calibrate"]'))) tm.hidden = true;
+    var tm = $('#toolMenu'), c = ev.target.closest ? function (s) { return ev.target.closest(s); } : function () { return null; };
+    if (!tm.hidden && !tm.contains(ev.target) && !c('.dd') && !c('[data-tool="calibrate"]') && !c('.grpBtn')) cierraToolMenu();
+    var bp = $('#barrasPanel');
+    if (bp && !bp.hidden && !bp.contains(ev.target) && !c('#btnBarras') && !c('[data-act="barras"]')) bp.hidden = true;
   });
 
   /* ---------------- modo iPad / táctil (estilo Bluebeam Revu iPad) ---------------- */
@@ -14222,31 +18054,22 @@
     // (línea pegada al dedo), aparece este botón para cancelarlo
     var cbtn = document.createElement('button');
     cbtn.id = 'cancelDraw';
-    cbtn.textContent = '✕ Cancelar trazo';
-    cbtn.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
+    cbtn.innerHTML = ICO.svg('close', 17) + ' Cancelar trazo';
+    cbtn.style.cssText = 'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
       'padding:12px 22px;border-radius:24px;border:0;background:#c62828;color:#fff;' +
-      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
-    document.body.appendChild(cbtn);
+      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none;align-items:center;gap:7px';
+    $('#canvasWrap').appendChild(cbtn);
     cbtn.addEventListener('click', function () {
       drawing = null; G.prev.innerHTML = '';
       drag = null; pinch = null; ptrs.clear();
       setHint('Trazo cancelado');
     });
-    // 🗑 flotante: en iPad no hay tecla Delete — aparece al seleccionar algo
-    var dbtn = document.createElement('button');
-    dbtn.id = 'touchDel';
-    dbtn.textContent = '🗑 Borrar';
-    dbtn.style.cssText = 'position:fixed;bottom:64px;left:50%;transform:translateX(-50%);z-index:60;' +
-      'padding:12px 22px;border-radius:24px;border:0;background:#14161a;color:#fff;' +
-      'font-size:15px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none';
-    document.body.appendChild(dbtn);
-    dbtn.addEventListener('click', function () {
-      if (selGroup) deleteGroup();
-      else if (sel) deleteSelected();
-    });
+    /* El antiguo botón flotante "🗑 Borrar" ya no hace falta: lo sustituye la
+       BARRA FLOTANTE DE PROPIEDADES (4.5), que trae borrar y seis cosas más
+       pegadas a la marca. Y de paso se va el emoji, contra la guía de la casa. */
+    creaFlot(); pintaFlot();
     setInterval(function () {
-      cbtn.style.display = drawing ? 'block' : 'none';
-      dbtn.style.display = !drawing && (sel || selGroup) ? 'block' : 'none';
+      cbtn.style.display = drawing ? 'flex' : 'none';
     }, 400);
     // iOS muestra los PDF "en gris" en la app de Archivos cuando el selector trae
     // filtro de tipos — se lo quitamos y la app valida el archivo por dentro
@@ -14281,7 +18104,7 @@
       return true;
     };
     setTimeout(function () {
-      setHint('📱 Modo iPad: 🧰 abre los símbolos · ⚙ abre propiedades · pellizca para zoom · un dedo dibuja');
+      setHint('Modo iPad: el botón de la caja de herramientas abre los símbolos · el engranaje abre propiedades · pellizca para zoom · un dedo dibuja');
     }, 400);
   }
 
@@ -14305,6 +18128,7 @@
       if (bl) { bl.src = window.MAXPOWER_LOGO; bl.hidden = false; }
     }
   } catch (e) {}
+  try { ICO.pinta(); } catch (e) {}
   renderGrid();
   buildPalette();
   applyView();
@@ -14400,8 +18224,8 @@
     renderSheetTabs();
     updateOvUI();
     if (sinLectura) {
-      uiAlert('No se pudo leer lo guardado en este aparato: el almacenamiento no respondió.\n\nPara no pisar nada, en esta sesión NO se guarda automáticamente. Usa 💾 Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.');
-      setHint('⚠️ Sin guardado automático en esta sesión (el almacenamiento no respondió) — usa 💾 Guardar');
+      uiAlert('No se pudo leer lo guardado en este aparato: el almacenamiento no respondió.\n\nPara no pisar nada, en esta sesión NO se guarda automáticamente. Usa Guardar para bajar tu trabajo y recarga la página para intentar de nuevo.');
+      setHint('⚠️ Sin guardado automático en esta sesión (el almacenamiento no respondió) — usa Guardar');
     } else setHint(restored
       ? '🔄 Tu trabajo se restauró automáticamente — todo se guarda solo mientras dibujas (💾 Guardar para tener el archivo)'
       : 'Bienvenido a MXP Planos — dibuja paredes (W), coloca símbolos desde la paleta, o importa un plano con "Fondo" y calíbralo (K)');
