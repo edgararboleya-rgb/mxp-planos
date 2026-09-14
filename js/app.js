@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.P';
+  var APP_VERSION = 'v32.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -420,6 +420,8 @@
     return JSON.stringify({ app: 'mxp-planos', version: 1, state: st, view: view });
   }
   window.__payloadDbg = function () { return payloadProyecto(); };
+  // abrir lo que payloadProyecto escribió: es el viaje completo guardar → abrir
+  window.__abreDbg = function (txt) { try { restoreProject(JSON.parse(txt)); return 1; } catch (e) { return 'EXC ' + e.message; } };
   /* FASE 7.1 — BIBLIOTECA LOCAL DE PROYECTOS. Hasta aquí había UNA ranura
      ('autosave') por navegador: abrir otro plano pisaba el anterior, y para
      volver a Caroline había que ir a buscar el .mxp.json a Downloads. Ahora:
@@ -1359,7 +1361,7 @@
     state.dims.forEach(function (d) { cand(d.x1, d.y1, 'end'); cand(d.x2, d.y2, 'end'); });
     return best;
   }
-  var SNAP_TOOLS = { measure: 1, dim: 1, calibrate: 1, wire: 1, leader: 1, pline: 1, line: 1, homerun: 1, area: 1, rect: 1, ellipse: 1, cloud: 1 };
+  var SNAP_TOOLS = { measure: 1, dim: 1, calibrate: 1, wire: 1, leader: 1, pline: 1, line: 1, homerun: 1, ruta: 1, area: 1, rect: 1, ellipse: 1, cloud: 1 };
   function osnapMarker(sn) {
     if (!sn) return '';
     var r = 4.5 / view.z + 1;
@@ -2065,6 +2067,15 @@
 
     /* -- el circuito del panel al cuarto (herramienta ⚡ Homerun) -- */
     homerun:   { name: '⚡ HOMERUN — circuito del panel al cuarto', dash: '', lw: 1.1, homerun: 1 },
+
+    /* -- RUTAS DE CONDUIT (E5) -- Cuatro FAMILIAS, no un estilo por tipo: el
+       color distingue los 23 tipos (lo trae la tabla RUTA_TIPOS, como en
+       CircuitOps), y el trazo distingue la familia para que el plano se siga
+       leyendo impreso en blanco y negro o fotocopiado. -- */
+    rutaRig:  { name: '▬ RUTA — tubo rígido visto (EMT · GRS)', dash: '', lw: 1.3, ruta: 1 },
+    rutaEmb:  { name: '▭ RUTA — embebido / enterrado (PVC · ENT)', dash: '11 5', lw: 1.3, ruta: 1 },
+    rutaFlex: { name: '≈ RUTA — flexible / cable (MC · FMC · LFMC · Romex)', dash: '4.5 3', lw: 1.3, ruta: 1 },
+    rutaLV:   { name: '· RUTA — low voltage (CAT5E · RG6 · T-Stat)', dash: '1 3', lw: 1.0, ruta: 1 },
 
     /* -- cercas y control de erosión -- */
     cerca:     { site: 1, name: 'FENCE — cerca (—x—x—)', dash: '', glifo: 'x', paso: 96, lw: 0.6 },
@@ -3539,6 +3550,7 @@
       if (est.glifo) out += glifosLinea(a, est, col, lw);
       if (est.ticks) out += ticksFeeder(a, col, lw);
       if (a.open && a.circ) out += rotuloHomerun(a, col);
+      if (esRuta(a)) out += rotuloRuta(a, col);
       if (a.open) out += plineCaps(a);
       if (a.showLabel) {
         // medida escrita en el plano, estilo Bluebeam: sq ft en áreas, longitud en polilíneas
@@ -4878,6 +4890,7 @@
     rect: 'RECTÁNGULO: clic en una esquina y clic en la opuesta · SHIFT = cuadrado · el patrón (tile, madera…) se elige en Propiedades',
     ellipse: 'ELIPSE: clic y clic en las esquinas del cuadro · SHIFT = círculo · el patrón se elige en Propiedades',
     pline: 'POLILÍNEA: clic en cada punto · doble clic o Enter para terminar · SHIFT = tramos rectos',
+    ruta: 'RUTA DE CONDUIT: clic en cada quiebre del recorrido · doble clic o Enter para terminar · el ▾ elige el tipo de tubo',
     line: 'LÍNEA: clic en el inicio y clic en el final · SHIFT = recta a 0/45/90 · el tipo de línea y la punta se eligen en el ▾ o en Propiedades',
     homerun: 'HOMERUN: clic en el PANEL y sigue marcando por donde va el cable hasta el cuarto · doble clic o Enter termina · después llenas circuito, cable, breaker y drop en Propiedades',
     cloud: 'NUBE DE REVISIÓN: clic en una esquina y clic en la opuesta · combínala con Callout para la nota',
@@ -5166,6 +5179,7 @@
       case 'cloud': return shapeDown(p, 'cloud', ev);
       case 'pline': return areaDown(p);
       case 'homerun': return areaDown(p);
+      case 'ruta': return areaDown(p);
       case 'line': return twoPointDown(p, 'line');
       case 'door': return openingDown(p, curDoorType);
       case 'window': return openingDown(p, curWinType);
@@ -5237,14 +5251,14 @@
       var d2 = drawing.kind === 'cloud' ? cloudPath(spts, true, cloudR({ arco: curCloudArc }))
         : 'M' + spts.map(function (q) { return q[0] + ',' + q[1]; }).join(' L') + ' Z';
       G.prev.innerHTML = '<g class="preview"><path d="' + d2 + '" fill="none" stroke="#0b84ff" stroke-width="1.2"' + (drawing.kind === 'cloud' ? '' : ' stroke-dasharray="5 4"') + '/></g>';
-    } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun') && !drawing) {
+    } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun' || tool === 'ruta') && !drawing) {
       // AÚN NO HAY LÍNEA: las guías ya trabajan, para que veas DÓNDE empezar.
       // Es lo del refrigerador: el gabinete sigue al otro lado y la guía verde
       // te dice exactamente a qué altura arrancar para que quede parejo.
       var np0 = guiaAjusta(snapWallPt(p), null, ev);
       puntoGuiado = np0;
       G.prev.innerHTML = guiasVivas ? '<g class="preview">' + guiasVivas + '</g>' : '';
-    } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun') && drawing && drawing.mode === 'areachain') {
+    } else if ((tool === 'area' || tool === 'pline' || tool === 'homerun' || tool === 'ruta') && drawing && drawing.mode === 'areachain') {
       var ult = drawing.pts[drawing.pts.length - 1];
       var np = guiaAjusta(snapWallPt(p), ult, ev, ejeLadoPrevio(drawing.pts));
       drawing.cursor = np;                                  // el clic usa el punto YA guiado
@@ -6190,7 +6204,7 @@
     // apagados — cerrar exacto no puede depender de la puntería.
     // (un homerun es una línea del panel al cuarto: tocar el primer punto no
     // lo cierra, agrega el vértice como cualquier otro)
-    if (drawing && drawing.pts && drawing.pts.length >= 2 && tool !== 'homerun') {
+    if (drawing && drawing.pts && drawing.pts.length >= 2 && tool !== 'homerun' && tool !== 'ruta') {
       var p0 = drawing.pts[0];
       if (Math.hypot(p[0] - p0[0], p[1] - p0[1]) < 14 / (view.z || 1)) {
         finishAreaChain(true);           // true = cerrado en el primer punto
@@ -6272,7 +6286,8 @@
     if (!drawing || drawing.mode !== 'areachain') return;
     var pts = drawing.pts;
     var esHomerun = tool === 'homerun';
-    var esPl = tool === 'pline' || esHomerun;
+    var esRutaT = tool === 'ruta';
+    var esPl = tool === 'pline' || esHomerun || esRutaT;
     var isLine = esPl && !cerrado;   // cerrar en el 1er punto = polígono
     drawing = null; G.prev.innerHTML = '';
     // quita los puntos duplicados del final: el doble clic mete DOS pointerdown
@@ -6300,9 +6315,26 @@
       e.circ = nuevoCirc();
       recuerdaCirc(e.circ);
     }
+    if (esRutaT) {
+      // la RUTA sale con el tipo activo: su familia de trazo, su color y su
+      // zona (la última que se escribió, que es como se traza piso por piso)
+      var tR = rutaActivaSegura();
+      if (tR) {
+        e.ruta = { tipo: tR.k, zona: rutaZonaUlt, drop: rutaDropUlt, mult: 1 };
+        e.lineStyle = tR.estilo; e.color = tR.color; e.lw = 1.3;
+      } else {
+        e.ruta = { tipo: '', zona: rutaZonaUlt, drop: rutaDropUlt, mult: 1 };
+      }
+    }
     if (pendingAreaLabel) e.showLabel = true;
     estampaCofre('area', e);
     if (esHomerun) { e.lineStyle = 'homerun'; e.capS = 'arrow'; }   // el homerun manda sobre lo del cofre
+    if (esRutaT && e.ruta && e.ruta.tipo) {
+      // y la ruta manda sobre lo del cofre igual que el homerun: si no, una
+      // herramienta guardada le cambiaba el color y ya no se sabía qué tubo era
+      var tR2 = rutaTipo(e.ruta.tipo);
+      if (tR2) { e.lineStyle = tR2.estilo; e.color = tR2.color; }
+    }
     state.areas.push(e);
     sel = { kind: 'area', id: e.id };
     refresh();
@@ -6317,6 +6349,15 @@
       if (fd) { fd.classList.add('pideDato'); setTimeout(function () { fd.classList.remove('pideDato'); }, 2600); }
       setHint('⚡ Circuito #' + e.circ.num + ' trazado: ' + fmtFtIn(perimDe(e)) + ' + ' + e.circ.drop + '\' de drop = ' + fmtFtIn(largoHomerun(e)) +
         ' de ' + e.circ.cable + ' · escribe el cuarto y ajusta cable/breaker/drop en Propiedades');
+      return;
+    }
+    if (esRutaT) {
+      var tR3 = e.ruta && rutaTipo(e.ruta.tipo);
+      refreshCounts();
+      setHint('Ruta de ' + (tR3 ? tR3.nom : 'tipo sin elegir') + ': ' + fmtFtIn(perimDe(e)) +
+        ((+e.ruta.drop) > 0 ? " + " + (+e.ruta.drop) + "' de drop = " + fmtFtIn(largoRuta(e)) : '') +
+        ' · la zona, el drop y las unidades se ponen en Propiedades' +
+        (state.bg && !state.bg.cal ? ' · OJO: este plano no está calibrado' : ''));
       return;
     }
     setHint(isLine
@@ -6432,6 +6473,10 @@
         state.bg.w *= f; state.bg.h *= f;
         state.bg.x = a[0] + (state.bg.x - a[0]) * f;
         state.bg.y = a[1] + (state.bg.y - a[1]) * f;
+        // queda constancia de que ESTA hoja está a escala: el takeoff lineal
+        // (Rutas, E5) no vale nada sobre un plano sin calibrar, y hasta ahora
+        // no había forma de saber si lo estaba
+        state.bg.cal = 1;
         renderBg();
         setHint('✔ Plano calibrado: esa distancia ahora mide ' + fmtFtIn(real) + '. Todo el plano quedó a escala.');
         setTool('measure');
@@ -7799,9 +7844,30 @@
           html += '<div class="row"><label>Hilos (sin tierra)</label><input id="prCircHilos" type="number" min="1" max="6" step="1" value="' + hilosDe(c) + '" title="Conductores de fase/neutro dentro del tubo; la tierra se suma sola"></div>';
         }
         html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo. Cambia el color o el grosor abajo para distinguir circuitos.</div>';
+      } else if (esRuta(e) || (e.open && e.ruta)) {
+        var r = e.ruta, tR = rutaTipo(r.tipo);
+        html += '<div><b>Ruta' + (tR ? ' · ' + esc(tR.nom) : ' sin tipo') + '</b> · trazo ' + fmtFtIn(perimDe(e)) +
+          ((+r.drop) > 0 ? ' + drop ' + (+r.drop) + '\'' : '') +
+          ((+r.mult) > 1 ? ' × ' + (+r.mult) : '') +
+          ' = <b>' + Math.ceil(largoRuta(e) / 12) + ' ft</b>' + (tR ? ' <span class="muted small">' + esc(tR.codigo) + '</span>' : '') + '</div>';
+        html += '<div class="row"><label>Tipo</label><select id="prRutaTipo" style="flex:1">' +
+          '<option value=""' + (r.tipo ? '' : ' selected') + '>— sin tipo (no entra al total) —</option>' +
+          ['feeder', 'branch', 'otro'].map(function (g) {
+            var deG = rutaTipos().filter(function (t) { return t.grupo === g; });
+            if (!deG.length) return '';
+            return '<optgroup label="' + esc(RUTA_GRUPO_NOM[g]) + '">' + deG.map(function (t) {
+              return '<option value="' + esc(t.k) + '"' + (r.tipo === t.k ? ' selected' : '') + '>' + esc(t.mat || t.subj) + '</option>';
+            }).join('') + '</optgroup>';
+          }).join('') + '</select></div>';
+        html += '<div class="row"><label>Zona / piso</label><input id="prRutaZona" value="' + esc(r.zona || '') + '" placeholder="Piso 1, Ala Este, Mech Room…" title="Con esto la tabla de feeders se puede comprar piso por piso"></div>';
+        html += '<div class="row"><label>Drop (ft)</label><input id="prRutaDrop" type="number" min="0" step="1" value="' + (+r.drop || 0) + '" title="Lo que baja del techo o sube a la caja, en pies. Se suma al trazo: (largo + drop) × unidades, igual que tu Excel"></div>';
+        html += '<div class="row"><label>× Unidades</label><input id="prRutaMult" type="number" min="1" step="1" value="' + Math.max(1, (+r.mult) || 1) + '" title="El mismo recorrido repetido: 3 pisos iguales = 3. Como el # of Units del Excel"></div>';
+        html += '<div class="muted small">' + (tR ? 'Va al takeoff como <b>' + esc(tR.nom) + '</b>, ' + Math.ceil(largoRuta(e) / 12) + ' ft, partida ' + esc(tR.codigo) + '.' : 'Sin tipo no entra al takeoff: elígelo arriba.') +
+          (state.bg && !state.bg.cal ? ' <b>Este plano no está calibrado</b>: los pies son los del dibujo, no los de la obra.' : '') + '</div>';
       } else if (e.open) {
         html += '<div><b>Length: ' + fmtFtIn(perimDe(e)) + '</b></div>';
         html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">' + ICO.svg('homerun') + ' Convertir en circuito (homerun)</button>';
+        html += '<button id="prToRuta" style="width:100%;margin:0 0 6px" title="Esta línea es una corrida de conduit: le pone tipo de tubo, zona, drop y unidades, y su largo entra al takeoff lineal por tipo">' + ICO.svg('ruta') + ' Convertir en ruta de conduit</button>';
       } else {
         html += '<div><b>Area: ' + (areaDe(e) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(perimDe(e)) + '</div>';
       }
@@ -8240,6 +8306,45 @@
     on('prCircDrop', 'change', function (n) { circSet('drop', n.value, true); });
     on('prCircMult', 'change', function (n) { circSet('mult', Math.max(1, parseInt(n.value, 10) || 1), true); });
     on('prCircHilos', 'change', function (n) { circSet('hilos', Math.max(1, parseInt(n.value, 10) || 2), true); });
+    on('prRutaTipo', 'change', function (n) {
+      var et = findSel(); if (!et || !et.ruta) return;
+      pushUndo();
+      et.ruta.tipo = n.value || '';
+      var t2 = rutaTipo(et.ruta.tipo);
+      if (t2) { et.lineStyle = t2.estilo; et.color = t2.color; rutaActiva = t2.k; }
+      refresh(); refreshCounts(); showProps();
+    });
+    on('prRutaZona', 'change', function (n) {
+      var et = findSel(); if (!et || !et.ruta) return;
+      pushUndo();
+      et.ruta.zona = String(n.value || '').trim().slice(0, 40);
+      rutaZonaUlt = et.ruta.zona;
+      refresh(); refreshCounts();
+    });
+    on('prRutaDrop', 'change', function (n) {
+      var et = findSel(); if (!et || !et.ruta) return;
+      var d = parseFloat(String(n.value).replace(',', '.'));
+      pushUndo();
+      et.ruta.drop = (isFinite(d) && d >= 0) ? Math.min(200, d) : 0;
+      rutaDropUlt = et.ruta.drop;
+      refresh(); refreshCounts(); showProps();
+    });
+    on('prRutaMult', 'change', function (n) {
+      var et = findSel(); if (!et || !et.ruta) return;
+      var m = parseInt(n.value, 10);
+      pushUndo();
+      et.ruta.mult = (isFinite(m) && m > 0) ? Math.min(999, m) : 1;
+      refresh(); refreshCounts(); showProps();
+    });
+    on('prToRuta', 'click', function () {
+      var et = findSel(); if (!et || !et.open) return;
+      var t3 = rutaActivaSegura();
+      pushUndo();
+      et.ruta = { tipo: t3 ? t3.k : '', zona: rutaZonaUlt, drop: rutaDropUlt, mult: 1 };
+      if (t3) { et.lineStyle = t3.estilo; et.color = t3.color; et.lw = et.lw || 1.3; }
+      refresh(); refreshCounts(); showProps();
+      setHint('Convertida en ruta de ' + (t3 ? t3.nom : 'tipo sin elegir') + ' — ' + Math.ceil(largoRuta(et) / 12) + ' ft al takeoff');
+    });
     on('prToCirc', 'click', function () {
       var et = findSel(); if (!et || !et.open) return;
       pushUndo(); et.circ = nuevoCirc(); et.lineStyle = 'homerun'; et.lw = et.lw || 1.1; if (!et.capS || et.capS === 'none') et.capS = 'arrow';
@@ -8597,11 +8702,12 @@
       if (!vis.length) return;
       var abierto = q ? true : !!tlibAbiertos[st.nom];
       var nYa = 0, nLargo = 0, nCat = 0;
-      st.items.forEach(function (it) { if (it.tipo === 'largo' || it.descartado) nLargo++; else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
+      var nRuta = 0;
+      st.items.forEach(function (it) { if (it.tipo === 'largo' || it.descartado) { nLargo++; if (esRutaTlib(st.nom, it)) nRuta++; } else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
       var nCont = st.items.length - nLargo;
       h += '<div class="tlSet' + (abierto ? ' on' : '') + '" data-set="' + esc(st.nom) + '">' +
         '<span class="tlFlecha"></span><span class="tlNom">' + esc(st.nom) + '</span>' +
-        '<span class="tlN">' + (nCont ? nCont + ' ' + (nCont === 1 ? 'tool' : 'tools') : '') + (nLargo ? (nCont ? ' · ' : '') + nLargo + ' de largo' : '') +
+        '<span class="tlN">' + (nCont ? nCont + ' ' + (nCont === 1 ? 'tool' : 'tools') : '') + (nRuta ? (nCont ? ' · ' : '') + nRuta + ' ruta(s)' : nLargo ? (nCont ? ' · ' : '') + nLargo + ' de largo' : '') +
         (nYa ? ' · <b>' + nYa + ' en el proyecto</b>' : '') + '</span>' +
         (nCont && nYa < nCont ? '<button class="tlTodo" data-set="' + esc(st.nom) + '" title="Añadir al proyecto todos los tools de conteo de este set que aún no estén">Todo el set</button>' : '') +
         '</div>';
@@ -8613,10 +8719,19 @@
         var marc = !ya && it.tipo !== 'largo' && !it.descartado && tlibMarcados[k]; if (marc) nMarc++;
         var det;
         if (it.descartado) det = 'descartado — equipo que ya no se usa (Edgar, 14/09)';
-        else if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
+        else if (it.tipo === 'largo') det = esRutaTlib(st.nom, it) ? 'ruta de conduit — toca la fila y trázala sobre el plano' : 'largo · sin material — no se cotiza por tipo';
         else if (ya) det = 'ya en el proyecto';
         else if (it.item) det = (it.item.replace(/\s+/g, ' ').toUpperCase() === it.subj.replace(/\s+/g, ' ').toUpperCase() ? 'en el catálogo' : 'catálogo: ' + esc(it.item.replace(/\s+/g, ' '))) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.via === 'propuesto' ? ' · propuesto' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
+        var tRt = it.tipo === 'largo' ? rutaTipoDeTlib(st.nom, it) : null;
+        if (tRt) {
+          // una fila de RUTA no es una casilla: es un botón. Se toca y se traza.
+          h += '<div class="tlFila tlRuta" data-rt="' + esc(tRt.k) + '" title="Trazar esta ruta sobre el plano">' +
+            '<span class="tlRtIco">' + ICO.svg('ruta', 15) + '</span>' +
+            '<span class="cntChip" style="background:' + esc(tRt.color) + '"></span>' +
+            '<span class="tlTxt"><span class="tlSubj">' + esc(tRt.nom) + '</span><span class="tlDet">' + det + ' · ' + esc(tRt.codigo) + '</span></span></div>';
+          return;
+        }
         h += '<label class="tlFila' + (ya ? ' ya' : '') + ((it.tipo === 'largo' || it.descartado) ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
           '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo' || it.descartado) ? ' disabled' : '') + '>' +
           '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
@@ -8698,6 +8813,17 @@
       L.addEventListener('click', function (ev) {
         var bt = ev.target.closest && ev.target.closest('.tlTodo');
         if (bt) { ev.preventDefault(); ev.stopPropagation(); tlibAnadirSet(bt.dataset.set); return; }
+        var fr = ev.target.closest && ev.target.closest('.tlRuta');
+        if (fr) {
+          ev.preventDefault();
+          rutaActiva = fr.dataset.rt;
+          var tSel2 = rutaTipo(rutaActiva);
+          setTool('ruta');
+          cierraTlib();
+          setHint('Trazando ' + (tSel2 ? tSel2.nom : '') + ' — clic en cada quiebre del recorrido, doble clic o Enter para terminar' +
+            (state.bg && !state.bg.cal ? ' · OJO: este plano no está calibrado' : ''));
+          return;
+        }
         var cab = ev.target.closest && ev.target.closest('.tlSet');
         if (cab) { tlibAbiertos[cab.dataset.set] = !tlibAbiertos[cab.dataset.set]; pintaTlib(); return; }
       });
@@ -8713,6 +8839,298 @@
   }
   enganchaTlib();
   window.__tlibDbg = { abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
+
+  /* ==================================================================
+     RUTAS DE CONDUIT (punto E5) — el takeoff LINEAL por tipo de material
+
+     Cómo trabaja Edgar (sus palabras, 14/09): "en el plano mido las
+     distancias de los ckts o de toma a toma con el drop... con el plano
+     escalado cojo la herramienta de CircuitOps de Bluebeam, y esas
+     herramientas están organizadas por distintos tipos de conduit, y cuando
+     lo corro me da un total que va a las tablas que después exporto para
+     Excel y me da el total del proyecto."
+
+     Eso es esto. Una RUTA es una polilínea sobre el plano YA CALIBRADO, con
+     un TIPO de la biblioteca de Bluebeam (Feeder EMT, Branch Circuit PVC,
+     CAT5E CABLE...). El largo se suma por tipo, se separa Feeders de Branch
+     Circuits — las dos hojas 'Feeder's Description' y 'Branch Circuits
+     Description' de su Excel — y sale a CSV y al estimador con su código de
+     partida (06-FEED los feeders, 08-ROUGH el branch, 13-LV el low voltage).
+
+     Esto NO adivina nada: el largo es el que él traza. Lo único calculado es
+     el drop (lo que baja del techo o sube a la caja) y las unidades, con la
+     misma fórmula que su Excel: Total = (Length + Drop) × # of Units.
+
+     Una ruta se guarda como POLILÍNEA ABIERTA (state.areas con open:true) y
+     un objeto `ruta`, igual que el homerun guarda su `circ`. Así hereda
+     gratis todo lo que ya funciona: dibujar, mover vértices, Trim, deshacer,
+     copiar formato, guardar, DXF y el paso de hoja a hoja.
+     ================================================================== */
+  /* Familia de trazo por material. Decide CÓMO se ve, no cuánto mide. */
+  var RUTA_FAM = {
+    EMT: 'rutaRig', GRS: 'rutaRig',
+    PVC: 'rutaEmb', ENT: 'rutaEmb',
+    MC: 'rutaFlex', FMC: 'rutaFlex', LFMC: 'rutaFlex', Romex: 'rutaFlex',
+    CAT5E: 'rutaLV', CAT5: 'rutaLV', RG6: 'rutaLV', 'T-Stat': 'rutaLV', Cable: 'rutaLV'
+  };
+  /* Color por material. Los .btx de Bluebeam traen los 25 tools de largo
+     TODOS en rojo (#ff0000), que sobre un plano es inservible: no se sabe
+     cuál es cuál. Así que el color lo pone la app, uno por material, y el
+     feeder sale más oscuro que su branch del mismo material. */
+  var RUTA_COLOR = {
+    EMT: '#0b84ff', GRS: '#14161a', PVC: '#f08c00', ENT: '#c2255c',
+    MC: '#0a8f3c', FMC: '#8b3dbe', LFMC: '#0b7285', Romex: '#d62828',
+    CAT5E: '#7048e8', CAT5: '#7048e8', RG6: '#e8590c', 'T-Stat': '#2b8a3e', Cable: '#495057'
+  };
+  /* Fuera de las rutas, con motivo:
+     · 'Line' del Electrical Tool Set de fábrica no tiene material ninguno —
+       es la línea genérica de Bluebeam, no un tipo de tubo.
+     · 'LED STRIP' ya tiene su propio camino: es un TIPO DE LÍNEA (ledstrip)
+       que cuenta en FT a 11-LIGHT desde antes. Meterlo aquí lo contaría dos
+       veces. */
+  var RUTA_FUERA = { 'Electrical Tool Set|Line': 1, 'Lights|LED STRIP': 1 };
+  function rutaOscuro(hex) {
+    // el feeder, más oscuro que su branch: mismo material, se distinguen
+    var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+    if (!m) return hex;
+    return '#' + [1, 2, 3].map(function (i) {
+      return Math.round(parseInt(m[i], 16) * 0.62).toString(16).padStart(2, '0');
+    }).join('');
+  }
+  var _rutaTipos = null;
+  /* La tabla de tipos sale de la MISMA biblioteca que el conteo
+     (js/takeoff-lib.js, los 25 tools de largo de sus .btx). Se arma una vez
+     y se memoriza; si la biblioteca no cargó, se queda vacía y la app sigue
+     funcionando sin rutas (no se cae). */
+  function rutaTipos() {
+    if (_rutaTipos) return _rutaTipos;
+    var out = [];
+    try {
+      tlibSets().forEach(function (st) {
+        st.items.forEach(function (it) {
+          if (it.tipo !== 'largo' || it.descartado) return;
+          var k = st.nom + '|' + it.subj + '|' + (it.label || '');
+          if (RUTA_FUERA[st.nom + '|' + it.subj]) return;
+          var mat = it.label || it.material || '';
+          var grupo = st.nom === 'Feeders' ? 'feeder' : st.nom === 'Branch Circuits' ? 'branch' : 'otro';
+          var col = RUTA_COLOR[mat] || '#d62828';
+          out.push({
+            k: k, set: st.nom, subj: it.subj, mat: mat, grupo: grupo,
+            nom: mat ? (it.subj + ' ' + mat) : it.subj,
+            estilo: RUTA_FAM[mat] || 'rutaRig',
+            color: grupo === 'feeder' ? rutaOscuro(col) : col,
+            codigo: esCodigo(it.codigo) ? it.codigo : CODIGO_DEFECTO
+          });
+        });
+      });
+    } catch (e) { out = []; }
+    _rutaTipos = out;
+    return out;
+  }
+  function rutaTipo(k) { var a = rutaTipos(); for (var i = 0; i < a.length; i++) if (a[i].k === k) return a[i]; return null; }
+  /* De una fila de la biblioteca de takeoff al tipo de ruta, si lo es. */
+  function rutaTipoDeTlib(setNom, it) {
+    if (!it || it.tipo !== 'largo' || it.descartado) return null;
+    return rutaTipo(setNom + '|' + it.subj + '|' + (it.label || ''));
+  }
+  function esRutaTlib(setNom, it) { return !!rutaTipoDeTlib(setNom, it); }
+  var RUTA_GRUPO_NOM = { feeder: "Feeder's Description", branch: 'Branch Circuits Description', otro: 'Otras corridas' };
+  var rutaActiva = null;            // el tipo con el que se está trazando
+  /* La zona y el drop se PEGAN de una ruta a la siguiente: se traza piso por
+     piso y zona por zona, y volver a escribir "Piso 2" en cada tirada es lo
+     que hace que la gente deje de ponerlo. Viven en memoria, no en el
+     proyecto: al abrirlo de nuevo se empieza limpio. */
+  var rutaZonaUlt = '';
+  var rutaDropUlt = 0;
+  function rutaActivaSegura() {
+    var t = rutaActiva ? rutaTipo(rutaActiva) : null;
+    if (!t) { t = rutaTipo('Branch Circuits|Branch Circuit|EMT') || rutaTipos()[0] || null; }
+    rutaActiva = t ? t.k : null;
+    return t;
+  }
+  /* Lo que se COMPRA de una ruta, con la fórmula de su Excel:
+     Total = (largo trazado + drop) × unidades. El drop viene en PIES (es lo
+     que él escribe), el mundo mide en pulgadas. */
+  function largoRuta(a) {
+    var r = (a && a.ruta) || {};
+    return (perimDe(a) + ((+r.drop) || 0) * 12) * Math.max(1, (+r.mult) || 1);
+  }
+  function esRuta(a) { return !!(a && a.open && a.ruta && a.ruta.tipo); }
+  /* El rótulo que se ve en el plano: el material y el largo comprado. Sin el
+     material no sirve de nada ver el número. */
+  function rotuloRuta(a, col) {
+    var t = rutaTipo(a.ruta.tipo);
+    var tr = largoTramos(a.pts, false);
+    if (!tr.segs.length) return '';
+    var P = puntoEn(tr, tr.tot / 2); if (!P) return '';
+    var an = P.ang; if (an > 90 || an < -90) an += 180;
+    var r = a.ruta, extra = '';
+    if ((+r.drop) > 0) extra += ' +' + (+r.drop) + "' drop";
+    if ((+r.mult) > 1) extra += ' ×' + (+r.mult);
+    var txt = (t ? (t.mat || t.subj) : '?') + ' ' + fmtFtIn(largoRuta(a)) + extra;
+    return '<text x="0" y="' + (-(a.lw || 1.3) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
+      ') rotate(' + an.toFixed(1) + ')" font-size="' + (8 * glifoK(a)).toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' +
+      (col || '#14161a') + '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(txt) + '</text>';
+  }
+
+  /* --- totales por tipo --- */
+  /* Devuelve { tipos: {k: {ft, n, zonas:{zona:ft}}}, sinTipo: n, rotas: n }.
+     `ft` en PULGADAS de mundo: quien la imprime divide por 12. Se separa por
+     ZONA porque una hoja de feeders sin piso no se puede comprar. */
+  function rutasTotales(soloHoja) {
+    var res = { tipos: {}, sinTipo: 0, rotas: 0 };
+    function mete(as) {
+      (as || []).forEach(function (a) {
+        if (!a || !a.open || !a.ruta) return;
+        if (!a.ruta.tipo) { res.sinTipo++; return; }
+        var L = largoRuta(a);
+        if (!(L > 0)) return;
+        var t = res.tipos[a.ruta.tipo] || (res.tipos[a.ruta.tipo] = { ft: 0, n: 0, zonas: {} });
+        t.ft += L; t.n++;
+        var z = String(a.ruta.zona || '').trim() || '—';
+        t.zonas[z] = (t.zonas[z] || 0) + L;
+      });
+    }
+    if (soloHoja) { mete(state.areas); return res; }
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet) { mete(state.areas); return; }
+      if (!sh || typeof sh.data !== 'string') return;
+      var o = null;
+      try { o = JSON.parse(sh.data); } catch (e) { res.rotas++; return; }
+      if (o) mete(o.areas);
+    });
+    return res;
+  }
+  /* Las rutas de una hoja concreta, para las columnas del CSV. */
+  function rutasDeHoja(i) {
+    if (i === state.curSheet) return rutasTotales(true).tipos;
+    var sh = (state.sheets || [])[i];
+    if (!sh || typeof sh.data !== 'string') return {};
+    var o = null;
+    try { o = JSON.parse(sh.data); } catch (e) { return {}; }
+    var m = {};
+    (o && o.areas || []).forEach(function (a) {
+      if (!a || !a.open || !a.ruta || !a.ruta.tipo) return;
+      var L = largoRuta(a); if (!(L > 0)) return;
+      var t = m[a.ruta.tipo] || (m[a.ruta.tipo] = { ft: 0, n: 0, zonas: {} });
+      t.ft += L; t.n++;
+      var z = String(a.ruta.zona || '').trim() || '—';
+      t.zonas[z] = (t.zonas[z] || 0) + L;
+    });
+    return m;
+  }
+
+  /* --- el bloque de rutas dentro del panel Materiales --- */
+  function rutasBloqueHtml() {
+    var hoja = rutasTotales(true), set = rutasTotales(false);
+    var varias = (state.sheets || []).length > 1;
+    var usados = rutaTipos().filter(function (t) { return set.tipos[t.k] || hoja.tipos[t.k]; });
+    var h = '<tr class="cat"><td colspan="2">Rutas de conduit (LF)' + (varias ? ' — esta hoja / todo el set' : '') + '</td></tr>';
+    if (!usados.length) {
+      h += '<tr><td colspan="2" class="muted small">Sin rutas todavía — coge Ruta en la barra, elige el tipo de tubo en el ▾ y traza el recorrido sobre el plano calibrado</td></tr>';
+    } else {
+      ['feeder', 'branch', 'otro'].forEach(function (g) {
+        var deG = usados.filter(function (t) { return t.grupo === g; });
+        if (!deG.length) return;
+        var totH = 0, totS = 0;
+        h += '<tr class="subcat"><td colspan="2">' + RUTA_GRUPO_NOM[g] + '</td></tr>';
+        deG.forEach(function (t) {
+          var fh = (hoja.tipos[t.k] || {}).ft || 0, fs = (set.tipos[t.k] || {}).ft || 0;
+          totH += fh; totS += fs;
+          var zs = Object.keys((set.tipos[t.k] || {}).zonas || {}).filter(function (z) { return z !== '—'; });
+          h += '<tr class="rtFila" data-k="' + esc(t.k) + '">' +
+            '<td><span class="cntChip" style="background:' + esc(t.color) + '"></span>' + esc(t.nom) +
+            ' <span class="cntCod">' + esc(t.codigo) + '</span>' +
+            (zs.length ? ' <span class="muted small">· ' + esc(zs.slice(0, 3).join(', ')) + (zs.length > 3 ? '…' : '') + '</span>' : '') +
+            (rutaActiva === t.k ? ' <span class="muted small">· activo</span>' : '') + '</td>' +
+            '<td class="n">' + Math.ceil(fh / 12) + (varias ? ' <span class="muted">/ ' + Math.ceil(fs / 12) + '</span>' : '') + '</td></tr>';
+        });
+        h += '<tr><td><b>Total ' + (g === 'feeder' ? 'feeders' : g === 'branch' ? 'branch' : 'otras') + '</b></td><td class="n"><b>' +
+          Math.ceil(totH / 12) + (varias ? ' <span class="muted">/ ' + Math.ceil(totS / 12) + '</span>' : '') + ' ft</b></td></tr>';
+      });
+      if (set.sinTipo) h += '<tr><td colspan="2" style="color:#a33">' + set.sinTipo + ' ruta(s) sin tipo: no entran al total. Selecciónalas y elige el tipo en Propiedades.</td></tr>';
+      if (set.rotas) h += '<tr><td colspan="2" style="color:#a33">' + set.rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
+      if (!state.bg || !state.bg.cal) h += '<tr><td colspan="2" class="muted small">Ojo: este plano no está calibrado, así que los pies son los del dibujo, no los de la obra. Calíbralo con la herramienta Calibrate.</td></tr>';
+    }
+    h += '<tr><td colspan="2" style="padding-top:6px">' +
+      '<button id="rtNueva" style="width:100%;margin-bottom:4px" title="Elegir el tipo de tubo o cable y empezar a trazar">Trazar una ruta</button>' +
+      '<button id="rtCsv" style="width:100%" title="Exportar las rutas a CSV: una fila por tipo y zona, una columna por hoja y el total del set — igual que las hojas Feeder\'s / Branch Circuits Description del Excel">Rutas a CSV</button></td></tr>';
+    return h;
+  }
+  function enganchaRutasPanel() {
+    var bN = $('#rtNueva');
+    if (bN) bN.addEventListener('click', function () { showToolMenu('ruta', bN); });
+    var bC = $('#rtCsv'); if (bC) bC.addEventListener('click', rutasCsv);
+    $$('#countsBody tr.rtFila').forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        rutaActiva = tr.dataset.k;
+        setTool('ruta');
+        var t = rutaTipo(rutaActiva);
+        refreshCounts();
+        setHint('Trazando ' + (t ? t.nom : '') + ' — clic en cada quiebre, doble clic o Enter para terminar');
+      });
+    });
+  }
+  /* Cuántas corridas de ese tipo hay en esa zona, en todo el set. */
+  function rutasCorridasDe(k, zona) {
+    var n = 0;
+    function mete(as) {
+      (as || []).forEach(function (a) {
+        if (!a || !a.open || !a.ruta || a.ruta.tipo !== k) return;
+        if ((String(a.ruta.zona || '').trim() || '—') !== zona) return;
+        if (largoRuta(a) > 0) n += Math.max(1, (+a.ruta.mult) || 1);
+      });
+    }
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet) { mete(state.areas); return; }
+      if (!sh || typeof sh.data !== 'string') return;
+      try { mete(JSON.parse(sh.data).areas); } catch (e) {}
+    });
+    return n;
+  }
+  /* El CSV: una fila por TIPO y por ZONA, una columna por hoja. Es la tabla
+     que él ya exporta de Bluebeam a Excel, con el código de partida añadido
+     para que el estimado cuadre contra el gasto real después. */
+  function rutasCsvTexto() {
+    var hojas = state.sheets || [];
+    var porHoja = hojas.map(function (sh, i) { return rutasDeHoja(i); });
+    var set = rutasTotales(false).tipos;
+    var rows = [['Grupo', 'Tipo', 'Material', 'Código de partida', 'Zona / piso', 'Corridas']
+      .concat(hojas.map(function (sh, i) { return (sh.no || ('Hoja ' + (i + 1))) + ' (ft)'; }))
+      .concat(['Total (ft)'])];
+    rutaTipos().forEach(function (t) {
+      var st = set[t.k]; if (!st) return;
+      var zonas = Object.keys(st.zonas).sort();
+      zonas.forEach(function (z) {
+        var fila = [RUTA_GRUPO_NOM[t.grupo], t.nom, t.mat || '', t.codigo, z, ''], tot = 0;
+        porHoja.forEach(function (m) {
+          var ft = ((m[t.k] || {}).zonas || {})[z] || 0;
+          tot += ft;
+          fila.push(Math.ceil(ft / 12));
+        });
+        // cuántas CORRIDAS son, no solo cuántos pies: tres tiradas de 20 ft
+        // no se compran igual que una de 60 (cambian codos, coupling y cajas)
+        fila[5] = rutasCorridasDe(t.k, z);
+        fila.push(Math.ceil(tot / 12));
+        rows.push(fila);
+      });
+    });
+    if (rows.length === 1) return null;
+    return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
+  }
+  function rutasCsv() {
+    var csv = rutasCsvTexto();
+    if (!csv) { uiAlert('Todavía no hay ninguna ruta trazada.'); return; }
+    saveFile((state.project.name || 'proyecto') + '_rutas.csv', csv);
+    setHint('Rutas exportadas a CSV — una fila por tipo y zona, una columna por hoja');
+  }
+  window.__rutasDbg = {
+    tipos: rutaTipos,
+    activa: function (k) { if (k) rutaActiva = k; return rutaActiva; },
+    totales: rutasTotales,
+    csv: rutasCsvTexto,
+    largo: largoRuta
+  };
 
 
   /* ==================================================================
@@ -8752,7 +9170,17 @@
      se la vuelva a cambiar). */
   var FORMATO_TRAS = {
     wall: function (e, k) { if (k === 'type' && WALL_TYPES[e.type]) { e.t = WALL_TYPES[e.type].t; e.manual = 1; } },
-    opening: function (e, k) { if (k === 'type' && OPEN_DEFAULT[e.type] && e.w == null) e.w = OPEN_DEFAULT[e.type]; }
+    opening: function (e, k) { if (k === 'type' && OPEN_DEFAULT[e.type] && e.w == null) e.w = OPEN_DEFAULT[e.type]; },
+    /* En una RUTA el color y el trazo NO son adorno: son su tipo de tubo. Si
+       el pincel le pega el formato de otra línea, se vería EMT azul y contaría
+       como PVC. Así que se le devuelven los de su tipo: el aspecto de una ruta
+       lo manda su tipo, siempre. */
+    area: function (e, k) {
+      if (!e.ruta || !e.ruta.tipo) return;
+      if (k !== 'color' && k !== 'lineStyle') return;
+      var t = rutaTipo(e.ruta.tipo);
+      if (t) { e.color = t.color; e.lineStyle = t.estilo; }
+    }
   };
   var formatoClip = null;     // { kind, nom, props }
   var pincelPuestos = 0;      // cuántas van en esta pasada del pincel
@@ -9086,6 +9514,7 @@
     if (ref.kind === 'count') return 'count';
     if (ref.kind === 'area') {
       if (e.circ) return 'homerun';
+      if (e.ruta) return 'ruta';
       if (e.arco) return 'cloud';
       if (e.open) return (e.pts && e.pts.length === 2) ? 'line' : 'pline';
       return 'area';
@@ -9495,8 +9924,10 @@
     // el Count va al final: es conteo de lo que YA está en el plano del
     // ingeniero, no de lo que dibujamos nosotros
     if (catsCount().length || state.counts.length) rows += conteoBloqueHtml();
+    rows += rutasBloqueHtml();
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
     enganchaConteoPanel();
+    enganchaRutasPanel();
     var bcp = $('#btnCircPanel');
     if (bcp) bcp.addEventListener('click', function () {
       pushUndo();
@@ -10029,7 +10460,7 @@
     syncSheet();
     var out = [];
     function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {};   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {};   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -10044,6 +10475,14 @@
       });
       // homeruns: el cable sale con el nombre que el estimador ya entiende
       // ('12/2' → '12/2   ROMEX' via alias_takeoff) y con el drop sumado
+      // RUTAS DE CONDUIT (E5): el largo trazado sobre el plano calibrado, por
+      // TIPO de tubo. Una ruta sin tipo no se cotiza (no se sabe de qué es);
+      // sale avisado en el panel Materiales, no en silencio.
+      (d.areas || []).forEach(function (ar) {
+        if (!ar || !ar.open || !ar.ruta || !ar.ruta.tipo) return;
+        var Lr = largoRuta(ar); if (!(Lr > 0)) return;
+        rt[ar.ruta.tipo] = (rt[ar.ruta.tipo] || 0) + Lr;
+      });
       (d.areas || []).forEach(function (ar) {
         if (!ar.open || !ar.circ) return;
         partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; });
@@ -10074,6 +10513,12 @@
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT', CODIGO_DEFECTO); });
     Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF', CODIGO_DEFECTO); });
     Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', '11-LIGHT'); });
+    // cada tipo de ruta con SU código: los feeders a 06-FEED, el branch a
+    // 08-ROUGH, el low voltage a 13-LV — lo que dice la biblioteca
+    Object.keys(rt).forEach(function (k) {
+      var tR = rutaTipo(k); if (!tR) return;
+      add(tR.nom, Math.ceil(rt[k] / 12), 'FT', tR.codigo);
+    });
     var cntNom = {};
     Object.keys(cnt).forEach(function (id) { var c = catCount(id); var nm = c ? (c.alias || c.nom) : null; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
     Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
@@ -17115,6 +17560,7 @@
         else if (sel) { pushUndo(); rotateRefs([sel], 45); refresh(); renderSel(); }
         else if (selGroup) { rotateGroup(90); }
         break;
+      case 'u': case 'U': setTool('ruta'); break;
       case 'v': case 'V': setTool('select'); break;
       case 'h': case 'H': setTool('pan'); break;
       case 'w': case 'W': setTool('wall'); break;
@@ -17169,6 +17615,7 @@
     { id: 'pline', grp: 'shape', ico: 'pline', nom: 'Polyline', tip: 'Polilínea: línea de varios tramos (doble clic o Enter termina)', menu: 'pline', menuTip: 'Elegir tipo de línea' },
     { id: 'trim', grp: 'shape', ico: 'trim', nom: 'Trim', key: 'G', tip: 'Trim / Extend / Break (G): recorta lo que sobra de una pared, cable o línea contra lo que se cruza · alárgala hasta que toque · pártela en dos. El ▾ elige cuál de las tres.', menu: 'trim', menuTip: 'Recortar, alargar o partir' },
     { id: 'cloud', grp: 'shape', ico: 'cloud', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
+    { id: 'ruta', grp: 'elec', ico: 'ruta', nom: 'Ruta', key: 'U', tip: 'RUTA DE CONDUIT (U): traza el recorrido sobre el plano YA CALIBRADO y el largo se suma por TIPO de tubo — EMT, PVC, MC, GRS, ENT, Romex…— separando Feeders de Branch Circuits. Es el takeoff lineal que sale a CSV para Excel y al estimador.', menu: 'ruta', menuTip: 'Elegir el tipo de tubo o cable' },
     { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
     { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
     { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
@@ -17725,6 +18172,7 @@
     b.scaleFactor = f;
     b.w = b.paperW * f;
     b.h = b.paperH * f;
+    b.cal = 1;                                   // a escala por la escala escrita, igual de bueno
     renderBg(); zoomFit(); refresh();
     setHint('✔ Plano a escala ' + bgScaleName(f) + ' — ya puedes medir directo (M) sin calibrar.');
   }
@@ -17871,6 +18319,29 @@
         html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
       }
+    } else if (kind === 'ruta') {
+      var tipos = rutaTipos();
+      if (!tipos.length) {
+        html += '<div class="tmHead">Rutas de conduit</div>';
+        html += '<div class="tmPie">La biblioteca de takeoff no cargó (js/takeoff-lib.js). Recarga la app.</div>';
+      } else {
+        var hojaR = rutasTotales(true).tipos;
+        ['feeder', 'branch', 'otro'].forEach(function (g) {
+          var deG = tipos.filter(function (t) { return t.grupo === g; });
+          if (!deG.length) return;
+          html += '<div class="tmHead">' + RUTA_GRUPO_NOM[g] + '</div>';
+          deG.forEach(function (t) {
+            var ftG = (hojaR[t.k] || {}).ft || 0;
+            html += '<div class="tmItem' + (rutaActiva === t.k ? ' cur' : '') + '" data-k="' + esc(t.k) + '">' +
+              '<span class="cntChip" style="background:' + esc(t.color) + '"></span><span>' + esc(t.mat || t.subj) +
+              (ftG ? ' <span class="muted">· ' + Math.ceil(ftG / 12) + ' ft en esta hoja</span>' : '') + '</span></div>';
+          });
+        });
+        html += '<div class="tmHead">De la tirada</div>';
+        html += '<div class="tmItem" data-k="__zona"><span>Zona / piso…' + (rutaZonaUlt ? ' <span class="muted">· ' + esc(rutaZonaUlt) + '</span>' : '') + '</span></div>';
+        html += '<div class="tmItem" data-k="__drop"><span>Drop (pies que bajan o suben)…' + (rutaDropUlt ? ' <span class="muted">· ' + rutaDropUlt + "'</span>" : '') + '</span></div>';
+        html += '<div class="tmPie">El largo es el que tú traces sobre el plano calibrado; esto no adivina recorridos. El drop y las unidades se suman con la misma cuenta de tu Excel: (largo + drop) × unidades.</div>';
+      }
     } else if (kind === 'countcodigo') {
       var cCod = catCount(catActiva), codAct = codigoDeCat(cCod);
       html += '<div class="tmHead">Código de partida de "' + esc(cCod ? cCod.nom : '') + '"</div>';
@@ -17996,6 +18467,34 @@
           var cSel = catCount(k);
           refreshCounts();
           setHint('Contando ' + (cSel ? cSel.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+        } else if (kind === 'ruta') {
+          if (k === '__zona') {
+            tm.hidden = true;
+            uiPrompt('Zona o piso de las próximas rutas\n(ejemplos:  Piso 1  ·  Ala Este  ·  Mech Room)', rutaZonaUlt, function (v) {
+              if (v === null) return;
+              rutaZonaUlt = String(v).trim().slice(0, 40);
+              setTool('ruta');
+              setHint(rutaZonaUlt ? 'Las próximas rutas quedan en "' + rutaZonaUlt + '"' : 'Las próximas rutas salen sin zona');
+            });
+            return;
+          }
+          if (k === '__drop') {
+            tm.hidden = true;
+            uiPrompt('Drop de las próximas rutas, en PIES\n(lo que baja del techo o sube a la caja; 0 si no hay)', String(rutaDropUlt || ''), function (v) {
+              if (v === null) return;
+              var d = parseFloat(String(v).replace(',', '.'));
+              rutaDropUlt = (isFinite(d) && d >= 0) ? Math.min(200, d) : 0;
+              setTool('ruta');
+              setHint("Las próximas rutas salen con " + rutaDropUlt + "' de drop");
+            });
+            return;
+          }
+          rutaActiva = k;
+          setTool('ruta');
+          var tSel = rutaTipo(k);
+          refreshCounts();
+          setHint('Trazando ' + (tSel ? tSel.nom : '') + ' — clic en cada quiebre, doble clic o Enter para terminar' +
+            (rutaZonaUlt ? ' · zona ' + rutaZonaUlt : '') + (rutaDropUlt ? " · drop " + rutaDropUlt + "'" : ''));
         } else if (kind === 'countcodigo') {
           var cK = catCount(catActiva);
           if (cK && esCodigo(k)) { pushUndo(); cK.codigo = k; refreshCounts(); setHint(cK.nom + ' → ' + k + ' ' + nombreCodigo(k)); }

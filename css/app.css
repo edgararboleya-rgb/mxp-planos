@@ -448,6 +448,13 @@ body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 .cntChip { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .25); margin-right: 6px; vertical-align: -1px; flex: none; }
 #countsBody tr.cntFila { cursor: pointer; }
 #countsBody tr.cntFila:hover td { background: var(--mp-sky-2); }
+
+/* Rutas de conduit (E5): el takeoff lineal por tipo, dentro de Materiales.
+   La subcabecera separa Feeder's Description de Branch Circuits Description,
+   que es como vienen las dos hojas del Excel de Edgar. */
+#countsBody tr.subcat td { background: var(--mp-sky-2, #EDF6FB); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--mp-ink-2); padding-left: 8px; }
+#countsBody tr.rtFila { cursor: pointer; }
+#countsBody tr.rtFila:hover td { background: var(--mp-sky-2); }
 #toolMenu .tmItem .cntChip { width: 13px; height: 13px; margin-right: 2px; }
 body.touch .cntChip { width: 15px; height: 15px; }
 /* la marca del conteo no estorba: el toque lo resuelve hitTest, como todo */
@@ -998,6 +1005,10 @@ svg.tool-vsearch { cursor: crosshair; }
 #tlibLista .tlFila:hover { background: var(--mp-sky-2); }
 #tlibLista .tlFila input { flex: none; margin: 0; }
 #tlibLista .tlFila.ya, #tlibLista .tlFila.largo { color: var(--mp-ink-2); cursor: default; }
+/* la fila de una RUTA sí se toca: es un botón, no una casilla (E5) */
+#tlibLista .tlFila.tlRuta { cursor: pointer; color: inherit; }
+#tlibLista .tlFila.tlRuta .tlRtIco { flex: none; width: 15px; height: 15px; color: var(--mp-teal-text, #0b7285); display: inline-flex; }
+#tlibLista .tlFila.tlRuta:hover { background: var(--mp-sky-3); }
 #tlibLista .tlFila.ya .cntChip, #tlibLista .tlFila.largo .cntChip { opacity: .45; }
 #tlibLista .tlTxt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 #tlibLista .tlSubj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

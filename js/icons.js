@@ -23,6 +23,9 @@
     line: '<circle cx="5.5" cy="18.5" r="1.6"/><circle cx="18.5" cy="5.5" r="1.6"/><path d="M7.2 16.8 16.8 7.2"/>',
     pline: '<path d="M4.6 17.2 9.6 9.8 14.4 16 19.4 7.8"/><circle cx="4.6" cy="17.2" r="1.3" fill="currentColor"/><circle cx="9.6" cy="9.8" r="1.3" fill="currentColor"/><circle cx="14.4" cy="16" r="1.3" fill="currentColor"/><circle cx="19.4" cy="7.8" r="1.3" fill="currentColor"/>',
     cloud: '<path d="M12 5.7A3.4 3.4 0 0 1 17.46 8.85A3.4 3.4 0 0 1 17.46 15.15A3.4 3.4 0 0 1 12 18.3A3.4 3.4 0 0 1 6.54 15.15A3.4 3.4 0 0 1 6.54 8.85A3.4 3.4 0 0 1 12 5.7Z"/>',
+    /* RUTA DE CONDUIT: el recorrido quebrado con las rayitas de los
+       conductores en la mitad, que es como se lee en el plano. */
+    ruta: '<path d="M3.4 18.6 8.8 12.4 15.2 15.8 20.6 6.4"/><path d="M10.3 16.1 12.9 10.8M12.6 17.4 15.2 12.1"/>',
     homerun: '<path d="M4.6 19.4 17.4 6.6"/><path d="M12.7 7.1 18 5.4 16.3 10.7"/><path d="M5.6 15.6 9.2 19.2M9.2 12 12.8 15.6"/>',
     wire: '<circle cx="4.2" cy="17.4" r="1.5"/><circle cx="19.8" cy="6.6" r="1.5"/><path d="M6 16.4c3.6 0 2.4-5.2 6-5.2s2.4-5.2 6-5.2"/>',
     dim: '<path d="M5 8v8.5M19 8v8.5"/><path d="M5 12h14"/><path d="M7.6 10.6 5 12l2.6 1.4"/><path d="M16.4 10.6 19 12l-2.6 1.4"/>',
