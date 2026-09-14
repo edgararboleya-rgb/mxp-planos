@@ -442,6 +442,9 @@ body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 #countsBody tr.cat td { background: var(--mp-sky-3); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .11em; color: var(--mp-teal-text); }
 
 /* Count (fase 5.5): el conteo manual dentro del panel Materiales */
+.cntCod { display: inline-block; font-size: 9.5px; font-weight: 600; letter-spacing: .03em; color: var(--mp-teal-text, #0b7285); background: var(--mp-sky-3, #DCEEF7); border-radius: 4px; padding: 0 4px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
+.cntCod.def { color: var(--mp-ink-2); background: transparent; border: 1px dashed var(--mp-line); }
+#toolMenu .tmPie { font-size: 11px; color: var(--mp-ink-2); padding: 6px 8px 2px; max-width: 320px; white-space: normal; line-height: 1.35; }
 .cntChip { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .25); margin-right: 6px; vertical-align: -1px; flex: none; }
 #countsBody tr.cntFila { cursor: pointer; }
 #countsBody tr.cntFila:hover td { background: var(--mp-sky-2); }

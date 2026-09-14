@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v31.N';
+  var APP_VERSION = 'v31.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -8318,6 +8318,7 @@
       if (extra.set) c.set = String(extra.set).slice(0, 40);
       if (extra.item) c.item = String(extra.item).slice(0, 80);
       if (extra.unidad) c.unidad = String(extra.unidad).slice(0, 8);
+      if (extra.codigo && esCodigo(extra.codigo)) c.codigo = extra.codigo;
       if (extra.color && /^#[0-9a-f]{6}$/i.test(extra.color)) c.color = extra.color;
     }
     a.push(c);
@@ -8493,10 +8494,10 @@
       }
       return m;
     });
-    var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
+    var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set', 'Código de partida'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
     cats.forEach(function (c) {
       var tot = 0;
-      var fila = [c.nom, c.alias || c.nom, c.item || '', c.set || ''].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
+      var fila = [c.nom, c.alias || c.nom, c.item || '', c.set || '', codigoDeCat(c)].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
       fila.push(tot);
       rows.push(fila);
     });
@@ -8520,6 +8521,7 @@
       h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
         '<td><span class="cntChip" style="background:' + esc(c.color) + '"></span>' + esc(c.nom) +
         (c.item ? ' <span class="muted small" title="Item del catálogo del estimador">· catálogo</span>' : (c.alias ? ' <span class="muted small" title="Tool de Bluebeam sin item en el catálogo: al estimador llega por alias">· sin item</span>' : '')) +
+        ' <span class="cntCod' + (c.codigo ? '' : ' def') + '" title="' + (c.codigo ? 'Código de partida' : 'Sin código propio: sale como ' + CODIGO_DEFECTO + '. Cámbialo en Count ▾ → Código de partida') + '">' + esc(codigoDeCat(c)) + '</span>' +
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
         '<td class="n">' + nh + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     });
@@ -8604,8 +8606,8 @@
         var det;
         if (it.tipo === 'largo') det = 'largo · ' + esc(it.material || '') + ' — va por Medir / Cable (E5)';
         else if (ya) det = 'ya en el proyecto';
-        else if (it.item) det = (it.item === it.subj ? 'en el catálogo' : 'catálogo: ' + esc(it.item)) + (it.unidad ? ' · ' + esc(it.unidad) : '');
-        else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '');
+        else if (it.item) det = (it.item === it.subj ? 'en el catálogo' : 'catálogo: ' + esc(it.item)) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
+        else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         h += '<label class="tlFila' + (ya ? ' ya' : '') + (it.tipo === 'largo' ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
           '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo') ? ' disabled' : '') + '>' +
           '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
@@ -8633,7 +8635,7 @@
       if (!pr || !pr.it || pr.it.tipo === 'largo') return;
       var k = pr.it.subj.toUpperCase();
       if (enP[k]) return;
-      var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color });
+      var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color, codigo: pr.it.codigo });
       enP[k] = c; nuevas.push(c);
     });
     return nuevas;
@@ -9953,6 +9955,63 @@
     riser_panel_480_400: 'Panel / Load Center', riser_panel_480_600: 'Panel / Load Center'
   };
   function nombreEst(k) { return EST_NOMBRE[k] || (SYMBOLS[k] ? SYMBOLS[k].name : k); }
+
+  /* ==================================================================
+     CÓDIGOS DE PARTIDA (cost codes) — contrato de datos §4 (punto E2)
+     Todo renglón que sale hacia el estimador lleva uno. La lista viva es la
+     tabla codigos_partida del estimador; esta es la copia inicial y se
+     refresca cada vez que se manda un takeoff (localStorage mxp_codigos).
+     ================================================================== */
+  var CODIGOS_PARTIDA_BASE = [
+    ['01-DEMO', 'Demolición'], ['02-TEMP', 'Servicio temporal'], ['03-UG', 'Subterráneo'], ['04-SERV', 'Servicio y meter'],
+    ['05-PANEL', 'Paneles y switchgear'], ['06-FEED', 'Feeders'], ['07-GND', 'Tierra'], ['08-ROUGH', 'Rough de circuitos'],
+    ['09-COND', 'Tubería expuesta'], ['10-DEV', 'Piezas (devices)'], ['11-LIGHT', 'Luminarias'], ['12-TRIM', 'Trim'],
+    ['13-LV', 'Low voltage / data / F.A.'], ['14-EV', 'Cargadores EV'], ['15-GEN', 'Generadores / ATS'], ['16-SMART', 'Smart panel'],
+    ['17-INSP', 'Inspecciones'], ['18-PERM', 'Permisos'], ['19-EQUIP', 'Renta de equipos'], ['20-MISC', 'Misceláneas']];
+  var CODIGO_DEFECTO = '20-MISC';
+  function codigosPartida() {
+    var g = null;
+    try { g = JSON.parse(localStorage.getItem('mxp_codigos') || 'null'); } catch (e) { g = null; }
+    var arr = (g && Array.isArray(g.items) && g.items.length) ? g.items : CODIGOS_PARTIDA_BASE;
+    return arr.filter(function (c) { return Array.isArray(c) && c[0]; });
+  }
+  function guardaCodigos(rows) {
+    if (!Array.isArray(rows) || !rows.length) return;
+    var items = rows.map(function (r) { return [String(r.codigo || r.code || '').trim(), String(r.nombre || r.descripcion || r.name || '').trim()]; }).filter(function (c) { return c[0]; });
+    if (items.length) { try { localStorage.setItem('mxp_codigos', JSON.stringify({ v: 1, items: items })); } catch (e) {} }
+  }
+  function nombreCodigo(c) { var a = codigosPartida(); for (var i = 0; i < a.length; i++) if (a[i][0] === c) return a[i][1]; return ''; }
+  function esCodigo(c) { return codigosPartida().some(function (x) { return x[0] === c; }); }
+  /* El código de un símbolo del catálogo de Planos: por clave y, si no, por
+     categoría. Es el que hereda el renglón del takeoff; en el estimador se
+     puede cambiar renglón a renglón. */
+  var CODIGO_SYM_RE = [
+    [/^riser_(meter|mast|ct|wh|gutter)/, '04-SERV'],
+    [/^riser_(ats|gen|bat|pv)/, '15-GEN'],
+    [/^riser_ev$|^site_evped$/, '14-EV'],
+    [/^riser_(ground|gnd)|^ol_(gec|mbj|sbj|ground_bar)$/, '07-GND'],
+    [/^riser_|^ol_|^panel$|^subpanel$|^disconnect$/, '05-PANEL'],
+    [/^(tv_outlet|data_outlet)$/, '13-LV'],
+    [/^(jbox|homerun)$/, '08-ROUGH'],
+    [/^site_(pole|service_pt|handhole|pullbox|trench|lp_bur|lp)/, '03-UG'],
+    [/^site_(lightpole|bollard|wallpack)/, '11-LIGHT'],
+    [/^site_ac$/, '10-DEV']
+  ];
+  var CODIGO_CAT = { electrical: '10-DEV', lighting: '11-LIGHT', lutron: '11-LIGHT', outdoor: '10-DEV', oneline: '05-PANEL', riser: '05-PANEL' };
+  function codigoDeSimbolo(k) {
+    for (var i = 0; i < CODIGO_SYM_RE.length; i++) if (CODIGO_SYM_RE[i][0].test(k)) return CODIGO_SYM_RE[i][1];
+    var d = SYMBOLS[k];
+    return (d && CODIGO_CAT[d.cat]) || CODIGO_DEFECTO;
+  }
+  function codigoDeCat(c) { return (c && esCodigo(c.codigo)) ? c.codigo : CODIGO_DEFECTO; }
+  /* Resumen por partida de una lista de renglones: lo que se enseña al
+     confirmar el envío y lo que sale en el CSV. */
+  function resumenPorPartida(entries) {
+    var m = {};
+    (entries || []).forEach(function (e) { var c = e.codigo || CODIGO_DEFECTO; if (!m[c]) m[c] = { codigo: c, renglones: 0, qty: 0 }; m[c].renglones++; m[c].qty += (+e.qty || 0); });
+    return Object.keys(m).sort().map(function (k) { return m[k]; });
+  }
+  window.__partidasDbg = { lista: codigosPartida, deSimbolo: codigoDeSimbolo, resumen: function () { return resumenPorPartida(buildTakeoffEntries(true)); }, menu: function (k) { showToolMenu(k || 'count', $('#navFijo') || document.body); } };
   // lo que NO se cotiza como material eléctrico: muebles, plomería, alzados,
   // paisajismo (engordaban la lista SIN MAPEAR del estimador)
   function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing' && d.cat !== 'notas'; }
@@ -9960,10 +10019,10 @@
   function buildTakeoffEntries(soloHoja) {
     syncSheet();
     var out = [];
-    function add(name, qty, unit) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit }); }
+    function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
     var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {};   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría
     var fuentes = soloHoja
-      ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls }]
+      ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
     fuentes.forEach(function (d) {
       (d.symbols || []).forEach(function (s) { if (SYMBOLS[s.key] && vaAlEstimador(SYMBOLS[s.key])) byKey[s.key] = (byKey[s.key] || 0) + 1; });
@@ -9997,15 +10056,18 @@
         areaSumE[nomA] = (areaSumE[nomA] || 0) + areaDe(a);   // se agrupa y se redondea la SUMA
       });
     });
-    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA'); else if (SYMBOLS[k]) add(nombreEst(k), byKey[k], 'EA'); });
-    Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA'); });
-    Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT'); });
-    Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT'); });
-    Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF'); });
-    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT'); });
+    // cada renglón sale con su código de partida (contrato §4): breakers y
+    // equipo → 05-PANEL, cable → 08-ROUGH, luz por pie → 11-LIGHT, lo demás
+    // hereda del símbolo o de la categoría de conteo; paredes y superficies → 20-MISC
+    Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA', '05-PANEL'); else if (SYMBOLS[k]) add(nombreEst(k), byKey[k], 'EA', codigoDeSimbolo(k)); });
+    Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA', CODIGO_DEFECTO); });
+    Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT', '08-ROUGH'); });
+    Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT', CODIGO_DEFECTO); });
+    Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF', CODIGO_DEFECTO); });
+    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', '11-LIGHT'); });
     var cntNom = {};
     Object.keys(cnt).forEach(function (id) { var c = catCount(id); var nm = c ? (c.alias || c.nom) : null; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
-    Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA'); });
+    Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
     return out;
   }
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
@@ -10026,10 +10088,13 @@
     entries = buildTakeoffEntries(true);
     if (!entries.length) { uiAlert('El plano no tiene nada que contar todavía — coloca símbolos, paredes o cableado primero.'); return; }
     function go() {
+      var sinColumnaCodigo = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
         sbFetch('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad'),
-        sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor')
+        sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor'),
+        // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
+        sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; })
       ]).then(function (res) {
         var cat = res[0] || [], alias = res[1] || [];
         if (!cat.length) {
@@ -10046,11 +10111,13 @@
           if (al) { target = catByNorm[normTxt2(al.item)]; factor = Number(al.factor) || 1; }
           if (!target) target = catByNorm[n];
           if (!target) { unmapped.push(e.name + ' (' + e.qty + ' ' + e.unit + ')'); return; }
-          var k = target.item;
-          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: target.precio || 0, horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff' };
+          // el mismo item en dos partidas (jbox en rough y en feeders) son dos renglones
+          var cod = esCodigo(e.codigo) ? e.codigo : CODIGO_DEFECTO;
+          var k = target.item + '|' + cod;
+          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: target.precio || 0, horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff', codigo: cod };
           mapped[k].cantidad += e.qty * factor;
         });
-        var items = Object.keys(mapped).map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
+        var items = Object.keys(mapped).sort().map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
         if (!items.length) {
           uiAlert('Ninguna pieza del plano coincide todavía con el catálogo del estimador.\n\nSIN MAPEAR:\n• ' + unmapped.join('\n• ') + '\n\nAgrega esos nombres en la tabla de alias del estimador (alias_takeoff) y vuelve a intentar.');
           setHint(''); return;
@@ -10072,12 +10139,21 @@
           var est = rows && rows[0];
           if (!est) throw new Error('no se recibió el estimado creado');
           items.forEach(function (it) { it.estimado_id = est.id; });
-          return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }).then(function () { return est; });
+          return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }).then(function () { return est; }, function (err) {
+            // el estimador todavía no tiene la columna codigo (SQL en docs/takeoff/sql): se manda sin ella y se avisa
+            if (!/codigo/i.test(String(err && err.message || err))) throw err;
+            sinColumnaCodigo = true;
+            var sinCod = items.map(function (it) { var o = {}; Object.keys(it).forEach(function (q) { if (q !== 'codigo') o[q] = it[q]; }); return o; });
+            return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: sinCod }).then(function () { return est; });
+          });
         }).then(function (est) {
           localStorage.setItem('mxp_est_seq_' + year, String(seq));
           state.project.estimateId = estId;
           scheduleAutosave();
+          var porCod = resumenPorPartida(items.map(function (it) { return { codigo: it.codigo, qty: it.cantidad }; }));
           uiAlert('✔ Takeoff enviado al estimador de Max Power.\n\nEstimado: "' + est.nombre + '" — BORRADOR\nRenglones enviados: ' + items.length +
+            '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
+            (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
             '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
           setHint('✔ Estimado ' + estId + ' creado como borrador en el estimador');
@@ -12290,7 +12366,7 @@
       o.color = colorSeguro(o.color, '#d62828');
       if (!COUNT_FORMAS[o.forma]) o.forma = 'circ';
       o.num = o.num === false ? false : true;
-      ['alias', 'set', 'item', 'unidad'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
+      ['alias', 'set', 'item', 'unidad', 'codigo'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
     });
     ['bg', 'bg2'].forEach(function (k) {
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
@@ -17723,9 +17799,17 @@
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
         html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
         html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
+        html += '<div class="tmItem" data-k="__codigo"><span>Código de partida de la activa… <span class="muted">· ' + esc(codigoDeCat(catCount(catActiva) || catsM[0])) + '</span></span></div>';
         html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
       }
+    } else if (kind === 'countcodigo') {
+      var cCod = catCount(catActiva), codAct = codigoDeCat(cCod);
+      html += '<div class="tmHead">Código de partida de "' + esc(cCod ? cCod.nom : '') + '"</div>';
+      codigosPartida().forEach(function (cp) {
+        html += '<div class="tmItem' + (codAct === cp[0] ? ' cur' : '') + '" data-k="' + esc(cp[0]) + '"><span><b>' + esc(cp[0]) + '</b> ' + esc(cp[1]) + '</span></div>';
+      });
+      html += '<div class="tmPie">Con este código llega cada renglón al estimador y con él se compara después contra el gasto real de la obra.</div>';
     } else if (kind === 'countestilo') {
       html += '<div class="tmHead">Color</div>';
       var cAct = catCount(catActiva);
@@ -17836,6 +17920,7 @@
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
           if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
+          if (k === '__codigo') { tm.hidden = true; catActivaSegura(); showToolMenu('countcodigo', anchor); return; }
           if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
           if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
           catActiva = k;
@@ -17843,6 +17928,9 @@
           var cSel = catCount(k);
           refreshCounts();
           setHint('Contando ' + (cSel ? cSel.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+        } else if (kind === 'countcodigo') {
+          var cK = catCount(catActiva);
+          if (cK && esCodigo(k)) { pushUndo(); cK.codigo = k; refreshCounts(); setHint(cK.nom + ' → ' + k + ' ' + nombreCodigo(k)); }
         } else if (kind === 'countestilo') {
           var cE = catCount(catActiva);
           if (cE) {
