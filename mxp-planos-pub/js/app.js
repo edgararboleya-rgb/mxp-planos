@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.U';
+  var APP_VERSION = 'v32.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11129,8 +11129,26 @@
       var totalCkt = nomPan.reduce(function (a, pan) { return a + porPan[pan].length; }, 0);
       var conMult = nomPan.some(function (pan) { return porPan[pan].some(function (q) { return q.mult > 1; }); });
       rows += '<tr><td colspan="2" class="muted small">Cada botón es un breaker' + (conMult ? ' (los de × unidades cuentan tantas veces como diga)' : '') + '. Tócalo para ver sus tramos en el plano. Si sobra un número, ahí está el breaker de más.</td></tr>';
-      if (nomPan.length > 1) {
-        rows += '<tr><td colspan="2" class="small" style="color:#a33">⚠ Hay tramos en <b>' + nomPan.length + ' paneles distintos</b>. El mismo número de ckt en dos paneles son dos breakers. Si es el mismo panel con dos nombres, toca ✎ y ponle el mismo a todos.</td></tr>';
+      /* Dos paneles es lo normal (CHI + NHI, emergencia y normal): eso no se
+         avisa. Lo que SÍ huele a error y se dice en rojo:
+         (a) un panel raquítico (≤ 3 tramos) al lado de otro con 5 veces más
+             — el MSP que quedó de antes de escribir NHI;
+         (b) un ckt de UN solo tramo en un panel donde los demás tienen 8 o más
+             — el 19 y el 20 de la E-2.2 de Edgar, números inventados. */
+      var totPan = {}; nomPan.forEach(function (pan) { totPan[pan] = porPan[pan].reduce(function (a, q) { return a + q.tramos; }, 0); });
+      var mayor = Math.max.apply(null, nomPan.map(function (pan) { return totPan[pan]; }).concat([0]));
+      var chico = nomPan.filter(function (pan) { return totPan[pan] <= 3 && mayor >= totPan[pan] * 5; });
+      if (chico.length) {
+        rows += '<tr><td colspan="2" class="small" style="color:#a33">⚠ El panel <b>' + esc(chico.join(', ')) + '</b> tiene muy pocos tramos: si es el mismo panel que otro con el nombre cambiado, toca ✎ panel y ponle el mismo.</td></tr>';
+      }
+      var sueltos = [];
+      nomPan.forEach(function (pan) {
+        var maxT = Math.max.apply(null, porPan[pan].map(function (q) { return q.tramos; }));
+        if (maxT < 8) return;
+        porPan[pan].forEach(function (q) { if (q.tramos === 1) sueltos.push('ckt ' + q.num + ' de ' + pan); });
+      });
+      if (sueltos.length) {
+        rows += '<tr><td colspan="2" class="small" style="color:#a33">⚠ <b>' + esc(sueltos.join(', ')) + '</b>: un solo tramo al lado de circuitos de 20. ¿Sobra? Tócalo, míralo en el plano y ponle su número de verdad o bórralo.</td></tr>';
       }
     }
     // cableado: agrupado por etiqueta (o por estilo si no tiene)
