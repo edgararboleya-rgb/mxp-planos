@@ -134,9 +134,15 @@ body.touch #grpAjustes select { max-width: 108px; }
   line-height: 1.15; white-space: nowrap;
   transition: background .15s ease, border-color .15s ease, transform .12s ease, box-shadow .15s ease;
 }
+/* TAMAÑO DE LAS BARRAS (E7b, Edgar 15/09: "hacerlas más grandes para que
+   quepa todo bien"). Una sola perilla, --tb, escala cajitas, iconos y letra:
+   0.85 chicas · 1 normales · 1.25 grandes. Se elige en Organizar barras. */
+body { --tb: 1; }
+body[data-barras="chicas"] { --tb: 0.85; }
+body[data-barras="grandes"] { --tb: 1.25; }
 /* cada herramienta es una cajita pareja, con relieve y con aire */
 .barra button.tool, .barra button.grpBtn, .barra button.act {
-  min-width: 52px; height: 46px;
+  min-width: calc(52px * var(--tb)); height: calc(46px * var(--tb));
   background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
   border-color: rgba(255,255,255,.13);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 1px 3px rgba(0,0,0,.3);
@@ -172,6 +178,7 @@ body.touch #grpAjustes select { max-width: 108px; }
 }
 #toolbar label.tbtn:hover { background-position: 60% 0; }
 #toolbar button label, .dock button label { font-size: 9.5px; cursor: pointer; opacity: .8; margin-top: 3px; letter-spacing: .3px; }
+.dock button label { font-size: calc(9.5px * var(--tb)); }
 
 #toolbar button.active, .dock button.active, #toolbar .tgroup button:not(.tool).active {
   background: rgba(34,232,224,.14); color: var(--mp-cyan);
@@ -202,16 +209,18 @@ body.touch #grpAjustes select { max-width: 108px; }
    se notaba en las barras de lado/abajo, donde no manda la regla de #toolbar
    (Edgar, 05/09: "las palabras de unos botones están en el medio y las otras
    no"). */
-.barra button.tool:has(.dd) { padding-left: 8px; padding-right: 8px; min-width: 66px; }
-.dock.vert .barra button.tool:has(.dd) { padding: 3px 4px; min-width: 52px; height: 54px; }
+.barra button.tool:has(.dd) { padding-left: 8px; padding-right: 8px; min-width: calc(66px * var(--tb)); }
+.dock.vert .barra button.tool:has(.dd) { padding: 3px 4px; min-width: calc(52px * var(--tb)); height: calc(54px * var(--tb)); }
 /* botón de GRUPO: icono de la última herramienta usada + nombre del grupo */
-.barra button.grpBtn { min-width: 64px; height: 46px; padding: 3px 8px; overflow: hidden; }
+.barra button.grpBtn { min-width: calc(64px * var(--tb)); height: calc(46px * var(--tb)); padding: 3px 8px; overflow: hidden; }
 .barra button.grpBtn .gIco { display: flex; align-items: center; justify-content: center; line-height: 1; }
-.barra button.grpBtn label { font-size: 9px; opacity: .85; letter-spacing: .02em; text-transform: none; }
+.barra button.grpBtn label { font-size: calc(9px * var(--tb)); opacity: .85; letter-spacing: .02em; text-transform: none; }
 .barra button.grpBtn.abierto { background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.35); }
-.dock.vert .barra button.grpBtn { min-width: 52px; width: 52px; height: 54px; padding: 3px 2px; }
-.dock.vert .barra button.grpBtn label, .dock.vert .barra button.tool label, .dock.vert .barra button.act label { font-size: 8.5px; margin-top: 1px; max-width: 50px; overflow: hidden; text-overflow: ellipsis; line-height: 1.1; }
-.dock.vert .barra button.tool, .dock.vert .barra button.act { min-width: 52px; width: 52px; height: 54px; padding: 3px 4px; overflow: hidden; }
+.dock.vert .barra button.grpBtn { min-width: calc(52px * var(--tb)); width: calc(52px * var(--tb)); height: calc(54px * var(--tb)); padding: 3px 2px; }
+.dock.vert .barra button.grpBtn label, .dock.vert .barra button.tool label, .dock.vert .barra button.act label { font-size: calc(8.5px * var(--tb)); margin-top: 1px; max-width: calc(50px * var(--tb)); overflow: hidden; text-overflow: ellipsis; line-height: 1.1; }
+.dock.vert .barra button.tool, .dock.vert .barra button.act { min-width: calc(52px * var(--tb)); width: calc(52px * var(--tb)); height: calc(54px * var(--tb)); padding: 3px 4px; overflow: hidden; }
+.dock.vert { width: calc(68px * var(--tb)); }
+.dock.vert .barra .grip { width: calc(52px * var(--tb)); }
 .dock.vert .barra button.act.zo { height: 40px; }
 /* botones de acción dentro de una barra (zoom) */
 .barra button.act { min-width: 50px; height: 46px; font-size: 15px; padding: 4px 8px; }
@@ -276,6 +285,10 @@ body.touch #grpAjustes select { max-width: 108px; }
   box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 2px 5px rgba(7,26,46,.08);
 }
 #barrasPanel .bpRow button:disabled { opacity: .3; cursor: default; }
+/* tamaño de las barras (E7b): tres botones, el elegido en azul */
+#barrasPanel .bpRow.bpTam button { flex: 1; }
+#barrasPanel .bpRow.bpTam button.cur { background: var(--mp-blue); color: #fff; border-color: var(--mp-blue); }
+#barrasPanel .bpRow input[type=range] { accent-color: var(--mp-blue); }
 #barrasPanel .bpRow button.quitar { color: var(--mp-danger); }
 #barrasPanel .bpBtns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 #barrasPanel .bpBtns button.pri { background: linear-gradient(180deg, #2E62E0 0%, var(--mp-navy) 100%); color: #F4FBFF; border-color: rgba(27,60,140,.55); }
@@ -387,8 +400,23 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 /* ===== Right panel ===== */
 #rightPanel {
   width: 258px; flex: none; background: var(--mp-sky-1); border-left: 1px solid var(--mp-line);
-  overflow-y: auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden; min-height: 0;
 }
+/* EL ASA DEL PANEL (E7b): se agarra el borde izquierdo y se ensancha o
+   estrecha (200-460 px). Se guarda con las barras. En el iPad el panel es
+   una gaveta y no lleva asa. */
+#rpGrip { flex: none; width: 7px; cursor: col-resize; background: transparent; position: relative; z-index: 3; margin-right: -7px; touch-action: none; }
+#rpGrip:hover, #rpGrip.on { background: linear-gradient(90deg, transparent, rgba(11,132,255,.35)); }
+body.touch #rpGrip { display: none; }
+body.rpResize { cursor: col-resize; user-select: none; }
+body.rpResize #canvasWrap { pointer-events: none; }
+/* lo que va en una fila del panel se ENCOGE antes que salirse: los botones
+   recortan su texto con puntos, nunca se cortan por el borde (medido 15/09:
+   el "Importar" de DXF se salía 19 px hasta en pantalla de 1290) */
+.pbody .row > * { min-width: 0; }
+.pbody .row button { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbody .row label.corto { width: auto; min-width: 30px; }
+.pbody .row input[type=text], .pbody .row input:not([type]), .pbody .row select { min-width: 0; }
 .panel { border-bottom: 1px solid var(--mp-line); }
 /* (auditoría takeoff 03/09) con float:right el 3er botón caía sobre la tabla y no se podía pulsar */
 .panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; padding: 8px 10px 4px; color: var(--mp-teal-text); font-weight: 650; border-left: 3px solid var(--mp-blue); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -494,8 +522,8 @@ svg.tool-trim { cursor: crosshair; }
 /* ===== iconos de línea (js/icons.js) ===== */
 svg.ico { width: 18px; height: 18px; flex: none; display: block; pointer-events: none; }
 #toolbar svg.ico, .dock svg.ico { width: 19px; height: 19px; }
-.barra button.tool svg.ico { width: 21px; height: 21px; }
-.barra .gIco svg.ico { width: 19px; height: 19px; }
+.barra button.tool svg.ico { width: calc(21px * var(--tb)); height: calc(21px * var(--tb)); }
+.barra .gIco svg.ico { width: calc(19px * var(--tb)); height: calc(19px * var(--tb)); }
 #navFijo svg.ico { width: 17px; height: 17px; }
 #catTabs .cat svg.ico { width: 15px; height: 15px; }
 #toolMenu .tIco svg.ico { width: 19px; height: 19px; margin: 0 auto; }

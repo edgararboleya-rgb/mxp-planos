@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.E';
+  var APP_VERSION = 'v32.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9136,6 +9136,13 @@
     saveFile((state.project.name || 'proyecto') + '_rutas.csv', csv);
     setHint('Rutas exportadas a CSV — una fila por tipo y zona, una columna por hoja');
   }
+  window.__barrasDbg = {
+    layout: function () { return JSON.parse(JSON.stringify(layout)); },
+    tam: function (t) { layout.tam = t; aplicaTamYPanel(); guardaLayout(); },
+    panelW: function (w) { layout.panelW = w; aplicaTamYPanel(); guardaLayout(); },
+    dock: function (id, d) { DOCKS.forEach(function (k) { layout.docks[k] = layout.docks[k].filter(function (x) { return x !== id; }); }); layout.docks[d].push(id); guardaLayout(); pintaBarras(); },
+    abre: abrePanelBarras
+  };
   window.__rutasDbg = {
     tipos: rutaTipos,
     activa: function (k) { if (k) rutaActiva = k; return rutaActiva; },
@@ -18209,8 +18216,13 @@
     ocultas: ['cofre'],
     favs: ['text', 'leader', 'wire', 'homerun', 'dim', 'measure', 'rect', 'cloud'],
     ultima: {},
-    uso: {}
+    uso: {},
+    tam: 'normales',    // chicas · normales · grandes (E7b)
+    panelW: null        // ancho del panel derecho en px (200-460); null = el de la hoja de estilos
   };
+  var TAM_BARRAS = ['chicas', 'normales', 'grandes'];
+  var TAM_NOM = { chicas: 'Chicas', normales: 'Normales', grandes: 'Grandes' };
+  var PANEL_W_MIN = 200, PANEL_W_MAX = 460;
   function defDe(id) { for (var i = 0; i < TOOL_DEFS.length; i++) if (TOOL_DEFS[i].id === id) return TOOL_DEFS[i]; return null; }
   function grpDe(id) { var d = defDe(id); return d ? d.grp : null; }
   function toolsDe(grp) { return TOOL_DEFS.filter(function (d) { return d.grp === grp; }); }
@@ -18241,9 +18253,20 @@
     }
     if (g.ultima && typeof g.ultima === 'object') Object.keys(g.ultima).forEach(function (k) { if (grupoDef(k) && grpDe(g.ultima[k]) === k) L.ultima[k] = g.ultima[k]; });
     if (g.uso && typeof g.uso === 'object') Object.keys(g.uso).forEach(function (k) { var n = +g.uso[k]; if (defDe(k) && n > 0) L.uso[k] = Math.min(n, 99999); });
+    if (TAM_BARRAS.indexOf(g.tam) >= 0) L.tam = g.tam;
+    var pw = +g.panelW; L.panelW = (isFinite(pw) && pw >= PANEL_W_MIN && pw <= PANEL_W_MAX) ? Math.round(pw) : null;
     return L;
   }
+  /* Aplicar lo que no son barras: el tamaño de las cajitas (variable CSS en
+     el body) y el ancho del panel derecho (estilo en línea; null = el CSS). */
+  function aplicaTamYPanel() {
+    document.body.dataset.barras = layout.tam || 'normales';
+    var rp = $('#rightPanel');
+    if (rp) rp.style.width = layout.panelW ? layout.panelW + 'px' : '';
+    if (typeof actualizaMas === 'function') actualizaMas();
+  }
   var layout = cargaLayout();
+  aplicaTamYPanel();
   cofre = cargaCofre();      // aquí sí: TOOL_DEFS y SYMBOLS ya existen
   var guardaLayoutT = null;
   function guardaLayout() {
@@ -18251,6 +18274,35 @@
     try { localStorage.setItem('mxp_barras', JSON.stringify(layout)); } catch (e) {}
   }
   function guardaLayoutLuego() { if (!guardaLayoutT) guardaLayoutT = setTimeout(guardaLayout, 600); }
+  /* EL ASA: agarrar el borde izquierdo del panel y arrastrar. Con el ratón y
+     con el dedo (pointer events), sin que el plano de debajo reciba el gesto. */
+  (function () {
+    var g = $('#rpGrip'), rp = $('#rightPanel'); if (!g || !rp) return;
+    var x0 = 0, w0 = 0, activo = false;
+    g.addEventListener('pointerdown', function (ev) {
+      activo = true; x0 = ev.clientX; w0 = rp.getBoundingClientRect().width;
+      g.classList.add('on'); document.body.classList.add('rpResize');
+      try { g.setPointerCapture(ev.pointerId); } catch (e) {}
+      ev.preventDefault();
+    });
+    g.addEventListener('pointermove', function (ev) {
+      if (!activo) return;
+      // el panel está a la derecha: mover a la izquierda lo ENSANCHA
+      var w = Math.round(Math.max(PANEL_W_MIN, Math.min(PANEL_W_MAX, w0 + (x0 - ev.clientX))));
+      rp.style.width = w + 'px';
+    });
+    function suelta() {
+      if (!activo) return;
+      activo = false; g.classList.remove('on'); document.body.classList.remove('rpResize');
+      var w = Math.round(rp.getBoundingClientRect().width);
+      layout.panelW = (w >= PANEL_W_MIN && w <= PANEL_W_MAX) ? w : null;
+      guardaLayout(); actualizaMas();
+      var bp = $('#barrasPanel'); if (bp && !bp.hidden) pintaPanelBarras();
+    }
+    g.addEventListener('pointerup', suelta); g.addEventListener('pointercancel', suelta);
+    // doble toque en el asa: vuelve al ancho de fábrica
+    g.addEventListener('dblclick', function () { layout.panelW = null; aplicaTamYPanel(); guardaLayout(); setHint('Panel al ancho de fábrica'); });
+  })();
   function dockDe(id) { for (var i = 0; i < DOCKS.length; i++) if (layout.docks[DOCKS[i]].indexOf(id) >= 0) return DOCKS[i]; return null; }
   function barraVisible(id) { return layout.ocultas.indexOf(id) < 0; }
   /* Si "Navegar y zoom" está oculta, el grupo Navegar aparece en Grupos para
@@ -18598,6 +18650,14 @@
         '<button data-bp="mv" data-n="1" title="Después"' + (i >= arr.length - 1 ? ' disabled' : '') + '>▶</button></div>';
     });
     html += '<p class="bpNota">También puedes agarrar la ⋮⋮ de cualquier barra y soltarla arriba, abajo o a un lado del plano.</p>';
+    html += '<div class="bpSec">Tamaño de las barras</div>';
+    html += '<div class="bpRow bpTam">' + TAM_BARRAS.map(function (t) {
+      return '<button data-bp="tam" data-t="' + t + '"' + ((layout.tam || 'normales') === t ? ' class="cur"' : '') + ' title="Cajitas, iconos y letra al ' + (t === 'chicas' ? '85' : t === 'grandes' ? '125' : '100') + ' %">' + TAM_NOM[t] + '</button>';
+    }).join('') + '</div>';
+    html += '<div class="bpSec">Panel derecho — ancho</div>';
+    var pwAct = layout.panelW || Math.round(($('#rightPanel') || { getBoundingClientRect: function () { return { width: 258 }; } }).getBoundingClientRect().width) || 258;
+    html += '<div class="bpRow"><input type="range" data-bp="pw" min="' + PANEL_W_MIN + '" max="' + PANEL_W_MAX + '" step="10" value="' + pwAct + '" style="flex:1" title="Ancho del panel de la derecha. También se arrastra por su borde izquierdo."><span class="nm" style="flex:none;width:44px;text-align:right">' + pwAct + ' px</span></div>';
+    html += '<p class="bpNota">Si algo del panel se corta (el «Importar» del DXF, el nombre de la nube…), ensánchalo aquí o arrastra su borde izquierdo. Doble clic en el borde: ancho de fábrica.</p>';
     html += '<div class="bpSec">Mis herramientas — las que quieres a un toque</div>';
     if (!layout.favs.length) html += '<p class="bpNota">Ninguna todavía. Añade abajo, o toca la ☆ de una herramienta dentro de cualquier grupo.</p>';
     layout.favs.forEach(function (id, i) {
@@ -18635,6 +18695,13 @@
     } else { p.style.top = '60px'; p.style.left = Math.max(6, W - p.offsetWidth - 12) + 'px'; }
   }
   $('#btnBarras').addEventListener('click', abrePanelBarras);
+  $('#barrasPanel').addEventListener('input', function (ev) {
+    var t = ev.target;
+    if (!t || t.dataset.bp !== 'pw') return;
+    var w = Math.round(Math.max(PANEL_W_MIN, Math.min(PANEL_W_MAX, +t.value || 258)));
+    layout.panelW = w; aplicaTamYPanel(); guardaLayoutLuego();
+    var sp = t.parentNode && t.parentNode.querySelector('.nm'); if (sp) sp.textContent = w + ' px';
+  });
   $('#barrasPanel').addEventListener('click', function (ev) {
     var t = ev.target.closest && ev.target.closest('[data-bp]');
     if (!t) return;
@@ -18643,8 +18710,15 @@
     if (bp === 'reset') {
       var uso = layout.uso;
       layout = clonaLayoutDef(); layout.uso = uso;
+      aplicaTamYPanel();
       guardaLayout(); pintaBarras(); pintaPanelBarras();
       setHint('Barras como de fábrica');
+      return;
+    }
+    if (bp === 'tam') {
+      layout.tam = TAM_BARRAS.indexOf(t.dataset.t) >= 0 ? t.dataset.t : 'normales';
+      aplicaTamYPanel(); guardaLayout(); pintaPanelBarras();
+      setHint('Barras ' + TAM_NOM[layout.tam].toLowerCase());
       return;
     }
     if (bp === 'usarTop') {
