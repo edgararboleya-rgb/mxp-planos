@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.V';
+  var APP_VERSION = 'v32.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2151,6 +2151,16 @@
     if (c === 'MLF' && (u === 'FT' || u === 'LF' || u === 'PIES')) return 0.001;
     if ((c === 'FT' || c === 'LF') && u === 'MLF') return 1000;
     return 1;
+  }
+  /* El factor de una fila que entra por ALIAS: si el alias trae el suyo (0,001,
+     2, lo que sea) ese manda tal cual; si trae 1 —que es «no dice nada»— se
+     aplica la conversión de unidad. Así el 14/4 FPL medido en pies contra su
+     fila MLF se divide, y un alias que YA dividía no divide dos veces. */
+  function factorAlias(factorAl, unidadMedida, unidadCatalogo) {
+    if (window.NEC && window.NEC.factorAlias) return window.NEC.factorAlias(factorAl, unidadMedida, unidadCatalogo);
+    var f = Number(factorAl);
+    if (isFinite(f) && f > 0 && f !== 1) return f;
+    return factorUnidad(unidadMedida, unidadCatalogo);
   }
   /* Los hilos de un circuito en tubo: hot/neutro/tierra, portadores y ajuste. */
   function hilosTubo(c) {
@@ -9798,7 +9808,7 @@
   window.__saneaDbg = function () { return saneaState(); };            // gancho de pruebas
   window.__homerunDbg = {
     defaults: circDefaults, cambia: aplicaCambioNEC, nuevo: nuevoCirc, partidas: partidasHomerun,
-    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad,
+    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad, factorAlias: factorAlias,
     // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
     tipo: tipoCorrida, nums: numsCirc, sincroniza: sincronizaNums, proximo: proximoCircLibre,
     porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc, marcaCkt: marcaCktEnHoja,
@@ -11862,7 +11872,11 @@
         entries.forEach(function (e) {
           var n = normTxt2(e.name), target = null, factor = 1;
           var al = aliasByNorm[n];
-          if (al) { target = catByNorm[normTxt2(al.item)]; factor = Number(al.factor) || 1; }
+          // por ALIAS. La auditoría del catálogo (16/09) pilló que esta ruta no
+          // dividía pies entre mil: 500 ft de 14/4 FPL medidos en el plano entraban
+          // como 500 MLF ($92.000). Regla: si el alias trae su propio factor (≠ 1),
+          // ese manda tal cual; si trae 1 (los 311 de hoy), se aplica la unidad.
+          if (al) { target = catByNorm[normTxt2(al.item)]; if (target) factor = factorAlias(al.factor, e.unit, target.unidad); }
           // por NOMBRE (sin alias): si se midió en pies y el catálogo vende por mil pies
           // (los THHN están en MLF), se divide por 1000 — 500 ft de 4/0 no son 500 MLF (15/09)
           if (!target) { target = catByNorm[n]; if (target) factor = factorUnidad(e.unit, target.unidad); }

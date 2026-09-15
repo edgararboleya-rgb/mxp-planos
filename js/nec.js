@@ -242,6 +242,16 @@
     if ((c === 'FT' || c === 'LF') && u === 'MLF') return 1000;
     return 1;
   }
+  /* El factor de una fila que entra por ALIAS (auditoría 16/09): si el alias
+     trae el suyo (0,001, 2…) ese manda tal cual; si trae 1 —«no dice nada»,
+     como los 311 de hoy— se aplica la conversión de unidad. Así 500 ft de
+     14/4 FPL contra su fila MLF se dividen, y un alias que ya dividía no
+     divide dos veces. */
+  function factorAlias(factorAl, unidadMedida, unidadCatalogo) {
+    var f = Number(factorAl);
+    if (isFinite(f) && f > 0 && f !== 1) return f;
+    return factorUnidad(unidadMedida, unidadCatalogo);
+  }
 
   var NEC = {
     CONDUCTOR: CONDUCTOR, CALIBRES: CALIBRES, CONDUCTOR_AL: CONDUCTOR_AL, CALIBRES_AL: CALIBRES_AL,
@@ -252,7 +262,7 @@
     ajuste: ajuste, hilos: hilos, maxCkts: maxCkts,
     tierraPorAmps: tierraPorAmps, tierraPorFase: tierraPorFase, ampacidad: ampacidad, TIERRA_250_122: TIERRA_250_122,
     llenadoMixto: llenadoMixto, tamanoMinimoMixto: tamanoMinimoMixto, tamanosQueCabenMixto: tamanosQueCabenMixto,
-    itemTubo: itemTubo, itemHilo: itemHilo, factorUnidad: factorUnidad
+    itemTubo: itemTubo, itemHilo: itemHilo, factorUnidad: factorUnidad, factorAlias: factorAlias
   };
   raiz.NEC = NEC;
   if (typeof module !== 'undefined' && module.exports) module.exports = NEC;
