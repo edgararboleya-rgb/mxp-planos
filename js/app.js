@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.N';
+  var APP_VERSION = 'v32.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11307,6 +11307,25 @@
         });
       });
   }
+  /* TODAS LAS FILAS (16/09, con captura de Edgar): PostgREST corta cada
+     respuesta a 1.000 filas y el catálogo tiene 1.084 — el «BREAKER 1P 20A»
+     (fila 1.042) salía «sin pareja» aunque existe. Se pide por páginas con la
+     cabecera Range hasta que una llegue corta. Vale para el catálogo, los
+     alias (619 hoy, crecen) y lo que sea que pase de mil. */
+  function sbFetchTodo(path, opts) {
+    var POR = 1000, todo = [];
+    function pagina(desde) {
+      var o = Object.assign({}, opts || {});
+      o.headers = Object.assign({}, o.headers || {}, { 'Range-Unit': 'items', 'Range': desde + '-' + (desde + POR - 1) });
+      return sbFetch(path, o).then(function (rows) {
+        if (!Array.isArray(rows)) return todo.length ? todo : rows;
+        todo = todo.concat(rows);
+        if (rows.length < POR || todo.length > 50000) return todo;
+        return pagina(desde + POR);
+      });
+    }
+    return pagina(0);
+  }
   function sbLogin(email, pass) {
     return fetch(SB.url + '/auth/v1/token?grant_type=password', {
       method: 'POST',
@@ -11318,7 +11337,7 @@
       return d;
     });
   }
-  window.__sbDbg = { auth: sbAuth, uid: sbUid, guarda: sbGuardaAuth, refresh: sbRefresh, fetch: sbFetch, olvida: sbOlvida };
+  window.__sbDbg = { auth: sbAuth, uid: sbUid, guarda: sbGuardaAuth, refresh: sbRefresh, fetch: sbFetch, todo: sbFetchTodo, olvida: sbOlvida };
   function askLogin(done) {
     uiPrompt('Entra con tu usuario del panel de Max Power — email:', (sbAuth() && sbAuth().email) || '', function (em) {
       if (!em) return;
@@ -11517,8 +11536,8 @@
       var sinColumnaCodigo = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
-        sbFetch('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad'),
-        sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor'),
+        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad&order=orden'),
+        sbFetchTodo('/rest/v1/alias_takeoff?select=alias,item,factor&order=alias'),
         // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
         sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; })
       ]).then(function (res) {
@@ -11751,10 +11770,10 @@
     if (!sbAuth()) { askLogin(scopePide); return; }
     pintaScope('Leyendo tus recetas y tu catálogo…');
     Promise.all([
-      sbFetch('/rest/v1/ensambles?select=id,nombre,modo,pies_editable,orden&order=orden'),
-      sbFetch('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad'),
-      sbFetch('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad,codigo,seccion&order=orden'),
-      sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor').then(null, function () { return []; })
+      sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo,pies_editable,orden&order=orden'),
+      sbFetchTodo('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad&order=id'),
+      sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad,codigo,seccion&order=orden'),
+      sbFetchTodo('/rest/v1/alias_takeoff?select=alias,item,factor&order=alias').then(null, function () { return []; })
     ]).then(function (res) {
       var ens = res[0] || [], ei = res[1] || [], cat = res[2] || [], alias = res[3] || [];
       if (!cat.length) throw new Error('el catálogo llegó vacío: entra con el usuario dueño del panel');
