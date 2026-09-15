@@ -29,42 +29,60 @@
 (function (raiz) {
   'use strict';
 
-  /* Tabla 5 — área aproximada del conductor con aislamiento, in². THHN/THWN. */
+  /* Tabla 5 — área aproximada del conductor con aislamiento, in². COBRE, tal
+     como lo compra Edgar (su catálogo, 15/09): THHN/THWN del #14 al 4/0 y
+     **THW** del 250 al 600 MCM (el THW es más gordo que el THHN: 250 MCM THW
+     0,4877 contra 0,3970 — se usa el que se compra, no el más cómodo). */
   var CONDUCTOR = {
     '#14': 0.0097, '#12': 0.0133, '#10': 0.0211, '#8': 0.0366, '#6': 0.0507,
     '#4': 0.0824, '#3': 0.0973, '#2': 0.1158, '#1': 0.1562,
     '1/0': 0.1855, '2/0': 0.2223, '3/0': 0.2679, '4/0': 0.3237,
-    '250': 0.3970, '300': 0.4608, '350': 0.5242, '400': 0.5863, '500': 0.7073
+    '250': 0.4877, '300': 0.5581, '350': 0.6291, '400': 0.6969, '500': 0.8316, '600': 0.9729
   };
-  var CALIBRES = Object.keys(CONDUCTOR);
+  // en orden de calibre (Object.keys pondría los MCM delante por ser números)
+  var CALIBRES = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0', '250', '300', '350', '400', '500', '600'];
+  /* Tabla 5A — ALUMINIO COMPACTO XHHW, in² (lo que Edgar compra para feeders
+     grandes: «# 1/0 XHHW STRANDED ALUMINUM COMPACT»). Solo del 1/0 al 600. */
+  var CONDUCTOR_AL = {
+    '1/0': 0.1590, '2/0': 0.1885, '3/0': 0.2290, '4/0': 0.2780,
+    '250': 0.3525, '300': 0.4071, '350': 0.4656, '400': 0.5216, '500': 0.6151, '600': 0.7620
+  };
+  var CALIBRES_AL = ['1/0', '2/0', '3/0', '4/0', '250', '300', '350', '400', '500', '600'];
+  function areaConductor(calibre, mat) { return (mat === 'AL' ? CONDUCTOR_AL : CONDUCTOR)[calibre]; }
 
   /* Tabla 4 — área interior TOTAL del tubo, in². Por tipo y tamaño. */
+  /* Los tipos y tamaños son LOS QUE EDGAR COMPRA (su catálogo, 15/09): EMT
+     ½–4, PVC Sch 40 ½–6, PVC Sch 80 ½–5, GRS ½–6, ENT ½–1½, flex metálico
+     ⅜–3. El IMC lo pidió igual «con las mismas medidas», ½–4. */
   var TUBO = {
     EMT:   { '1/2"': 0.304, '3/4"': 0.533, '1"': 0.864, '1-1/4"': 1.496, '1-1/2"': 2.036, '2"': 3.356, '2-1/2"': 5.858, '3"': 8.846, '3-1/2"': 11.545, '4"': 14.753 },
     PVC40: { '1/2"': 0.285, '3/4"': 0.508, '1"': 0.832, '1-1/4"': 1.453, '1-1/2"': 1.986, '2"': 3.291, '2-1/2"': 4.695, '3"': 7.268, '3-1/2"': 9.737, '4"': 12.554, '5"': 19.761, '6"': 28.567 },
-    PVC80: { '1/2"': 0.217, '3/4"': 0.409, '1"': 0.688, '1-1/4"': 1.237, '1-1/2"': 1.711, '2"': 2.874, '2-1/2"': 4.119, '3"': 6.442, '3-1/2"': 8.688, '4"': 11.258, '5"': 17.855, '6"': 25.598 },
+    PVC80: { '1/2"': 0.217, '3/4"': 0.409, '1"': 0.688, '1-1/4"': 1.237, '1-1/2"': 1.711, '2"': 2.874, '2-1/2"': 4.119, '3"': 6.442, '3-1/2"': 8.688, '4"': 11.258, '5"': 17.855 },
     GRS:   { '1/2"': 0.314, '3/4"': 0.549, '1"': 0.887, '1-1/4"': 1.526, '1-1/2"': 2.071, '2"': 3.408, '2-1/2"': 4.866, '3"': 7.499, '3-1/2"': 10.010, '4"': 12.882, '5"': 20.212, '6"': 29.158 },
-    IMC:   { '1/2"': 0.342, '3/4"': 0.586, '1"': 0.959, '1-1/4"': 1.647, '1-1/2"': 2.225, '2"': 3.630, '2-1/2"': 5.135, '3"': 7.922, '3-1/2"': 10.584, '4"': 13.631 }
+    IMC:   { '1/2"': 0.342, '3/4"': 0.586, '1"': 0.959, '1-1/4"': 1.647, '1-1/2"': 2.225, '2"': 3.630, '2-1/2"': 5.135, '3"': 7.922, '3-1/2"': 10.584, '4"': 13.631 },
+    ENT:   { '1/2"': 0.285, '3/4"': 0.508, '1"': 0.832, '1-1/4"': 1.453, '1-1/2"': 1.986 },
+    FMC:   { '3/8"': 0.116, '1/2"': 0.317, '3/4"': 0.533, '1"': 0.817, '1-1/4"': 1.277, '1-1/2"': 1.858, '2"': 3.269, '2-1/2"': 4.909, '3"': 7.069 }
   };
-  var TUBO_NOM = { EMT: 'EMT', PVC40: 'PVC Sch 40', PVC80: 'PVC Sch 80', GRS: 'GRS (rígido)', IMC: 'IMC' };
-  var TAMANOS = ['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"', '3-1/2"', '4"', '5"', '6"'];
+  var TUBO_NOM = { EMT: 'EMT', PVC40: 'PVC Sch 40', PVC80: 'PVC Sch 80', GRS: 'GRS (rígido)', IMC: 'IMC', ENT: 'ENT (Smurf tube)', FMC: 'Flex metal conduit' };
+  var TAMANOS = ['3/8"', '1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"', '3-1/2"', '4"', '5"', '6"'];
 
   /* Tabla 1: qué parte del tubo se puede llenar según cuántos conductores. */
   function pctPermitido(n) { return n <= 0 ? 0 : n === 1 ? 0.53 : n === 2 ? 0.31 : 0.40; }
 
-  function areaDe(calibre, n) { var a = CONDUCTOR[calibre]; return a ? a * n : NaN; }
+  function areaDe(calibre, n, mat) { var a = areaConductor(calibre, mat); return a ? a * n : NaN; }
 
-  /* ¿Cabe? Devuelve el detalle, no solo sí/no: Edgar quiere ver el %. */
-  function llenado(tipo, tam, calibre, n) {
+  /* ¿Cabe? Devuelve el detalle, no solo sí/no: Edgar quiere ver el %.
+     `mat`: 'CU' (por defecto) o 'AL' (aluminio compacto XHHW). */
+  function llenado(tipo, tam, calibre, n, mat) {
     var t = TUBO[tipo], area = t && t[tam];
-    if (!area || !CONDUCTOR[calibre] || !(n > 0)) return null;
-    var usado = areaDe(calibre, n), pct = pctPermitido(n), maxArea = area * pct;
-    return { tipo: tipo, tam: tam, calibre: calibre, n: n, area: area, usado: usado,
+    if (!area || !areaConductor(calibre, mat) || !(n > 0)) return null;
+    var usado = areaDe(calibre, n, mat), pct = pctPermitido(n), maxArea = area * pct;
+    return { tipo: tipo, tam: tam, calibre: calibre, mat: mat || 'CU', n: n, area: area, usado: usado,
              pctPermitido: pct, pct: usado / area, cabe: usado <= maxArea + 1e-9 };
   }
   /* Cuántos conductores de un calibre caben (todos iguales), con la Nota 7. */
-  function maxConductores(tipo, tam, calibre) {
-    var t = TUBO[tipo], area = t && t[tam], c = CONDUCTOR[calibre];
+  function maxConductores(tipo, tam, calibre, mat) {
+    var t = TUBO[tipo], area = t && t[tam], c = areaConductor(calibre, mat);
     if (!area || !c) return 0;
     // la Nota 7 (decimal ≥ 0,8 redondea arriba) vale en las TRES filas de la
     // Tabla 1: 1/2" EMT con #6 da 1,86 al 31 % y el Anexo C dice 2
@@ -76,18 +94,18 @@
     return 0;
   }
   /* El tamaño MÁS CHICO de ese tipo de tubo en que caben n conductores. */
-  function tamanoMinimo(tipo, calibre, n) {
+  function tamanoMinimo(tipo, calibre, n, mat) {
     var t = TUBO[tipo]; if (!t) return null;
     for (var i = 0; i < TAMANOS.length; i++) {
-      var tam = TAMANOS[i];
-      if (t[tam] && llenado(tipo, tam, calibre, n).cabe) return tam;
+      var tam = TAMANOS[i], ll = t[tam] && llenado(tipo, tam, calibre, n, mat);
+      if (ll && ll.cabe) return tam;
     }
     return null;
   }
   /* Los tamaños que valen para ese calibre y esa cantidad (del mínimo para arriba). */
-  function tamanosQueCaben(tipo, calibre, n) {
+  function tamanosQueCaben(tipo, calibre, n, mat) {
     var t = TUBO[tipo]; if (!t) return [];
-    return TAMANOS.filter(function (tam) { return t[tam] && llenado(tipo, tam, calibre, n).cabe; });
+    return TAMANOS.filter(function (tam) { var ll = t[tam] && llenado(tipo, tam, calibre, n, mat); return !!(ll && ll.cabe); });
   }
 
   /* 310.15(C)(1): el ajuste por más de 3 portadores. Devuelve el factor. */
@@ -148,23 +166,44 @@
     PVC40: function (tam) { return PVC40_NOM[tam] || (tam + ' PVC CONDUIT. SCH 40'); },
     PVC80: function (tam) { return tam + ' PVC CONDUIT.SCH 80'; },
     GRS:   function (tam) { return tam.replace('-', ' ') + ' GRS CONDUIT'; },
-    IMC:   function (tam) { return tam + ' IMC CONDUIT'; }
+    IMC:   function (tam) { return tam + ' IMC CONDUIT'; },                       // Edgar no lo tiene en el catálogo: llega por nombre
+    ENT:   function (tam) { return tam.replace('-', ' ') + ' ENT CONDUIT'; },     // '1 1/4" ENT CONDUIT', con espacio
+    FMC:   function (tam) { return tam.replace('-', ' ') + ' FLEX. METAL CONDUIT'; }
   };
   function itemTubo(tipo, tam) { var f = ITEM_TUBO[tipo]; return f ? f(tam) : (tam + ' ' + tipo + ' CONDUIT'); }
-  function itemHilo(calibre) {
-    // #14…#1 → '#12 THHN CU'; 1/0…4/0 → '1/0 THHN CU'; 250… → '250 MCM CU'
-    if (/^#/.test(calibre)) return calibre + ' THHN CU';
-    if (/\/0$/.test(calibre)) return calibre + ' THHN CU';
-    return calibre + ' MCM CU';
+  /* El hilo con el NOMBRE EXACTO de su catálogo (15/09), para que case por
+     nombre sin depender de un alias:
+       '#14'        → '# 14 THHN SOLID CU.'        (el 14 lo compra sólido)
+       '#12'…'#1'   → '# 12 THHN STRANDED CU.'
+       '1/0'…'4/0'  → '# 1/0 THHN STRANDED CU.'
+       '250'…'600'  → '# 250 MCM THW CU.'
+       aluminio     → '# 1/0 XHHW STRANDED ALUMINUM COMPACT' / '# 250 MCM XHHW STRANDED ALUMINUM COMPACT'
+     El catálogo los tiene en MLF (miles de pies): el que reciba pies tiene
+     que dividir por 1000 — ver factorUnidad. */
+  function itemHilo(calibre, mat) {
+    var num = String(calibre).replace(/^#\s*/, '');
+    var mcm = !/^\d{1,2}$/.test(num) && !/\/0$/.test(num);
+    if (mat === 'AL') return '# ' + num + (mcm ? ' MCM' : '') + ' XHHW STRANDED ALUMINUM COMPACT';
+    if (mcm) return '# ' + num + ' MCM THW CU.';
+    return '# ' + num + (num === '14' ? ' THHN SOLID CU.' : ' THHN STRANDED CU.');
+  }
+  /* Cuando lo medido viene en pies y el catálogo vende por mil pies (MLF),
+     la cantidad se divide por 1000. Al revés, por mil. Si no, tal cual. */
+  function factorUnidad(unidadMedida, unidadCatalogo) {
+    var u = String(unidadMedida || '').trim().toUpperCase(), c = String(unidadCatalogo || '').trim().toUpperCase();
+    if (c === 'MLF' && (u === 'FT' || u === 'LF' || u === 'PIES')) return 0.001;
+    if ((c === 'FT' || c === 'LF') && u === 'MLF') return 1000;
+    return 1;
   }
 
   var NEC = {
-    CONDUCTOR: CONDUCTOR, CALIBRES: CALIBRES, TUBO: TUBO, TUBO_NOM: TUBO_NOM, TAMANOS: TAMANOS,
+    CONDUCTOR: CONDUCTOR, CALIBRES: CALIBRES, CONDUCTOR_AL: CONDUCTOR_AL, CALIBRES_AL: CALIBRES_AL,
+    TUBO: TUBO, TUBO_NOM: TUBO_NOM, TAMANOS: TAMANOS,
     MAX_PORTADORES: MAX_PORTADORES,
     pctPermitido: pctPermitido, llenado: llenado, maxConductores: maxConductores,
     tamanoMinimo: tamanoMinimo, tamanosQueCaben: tamanosQueCaben,
     ajuste: ajuste, hilos: hilos, maxCkts: maxCkts,
-    itemTubo: itemTubo, itemHilo: itemHilo
+    itemTubo: itemTubo, itemHilo: itemHilo, factorUnidad: factorUnidad
   };
   raiz.NEC = NEC;
   if (typeof module !== 'undefined' && module.exports) module.exports = NEC;

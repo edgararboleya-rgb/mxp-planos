@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.H';
+  var APP_VERSION = 'v32.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2136,6 +2136,15 @@
      y 310.15(C)(1)); aquí solo se pregunta. Si nec.js no cargó, el homerun
      sigue funcionando como antes (cable de la lista), sin reventar. */
   function hayNEC() { return typeof window !== 'undefined' && window.NEC && typeof window.NEC.hilos === 'function'; }
+  /* Pies medidos contra la unidad del catálogo: FT → MLF divide por 1000. Vive
+     aquí (y no solo en nec.js) porque el envío al estimador no puede depender
+     de que nec.js haya cargado. */
+  function factorUnidad(unidadMedida, unidadCatalogo) {
+    var u = String(unidadMedida || '').trim().toUpperCase(), c = String(unidadCatalogo || '').trim().toUpperCase();
+    if (c === 'MLF' && (u === 'FT' || u === 'LF' || u === 'PIES')) return 0.001;
+    if ((c === 'FT' || c === 'LF') && u === 'MLF') return 1000;
+    return 1;
+  }
   /* Los hilos de un circuito en tubo: hot/neutro/tierra, portadores y ajuste. */
   function hilosTubo(c) {
     if (!hayNEC()) return null;
@@ -2155,7 +2164,7 @@
      sigan entendiendo el circuito: 'THHN #12 en 3/4" EMT'. */
   function cableDeTubo(c) {
     var tam = tamTubo(c) || c.tam || '1/2"';
-    var nomTubo = { EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC Sch 80', GRS: 'GRS', IMC: 'IMC' }[c.tubo || 'EMT'] || (c.tubo || 'EMT');
+    var nomTubo = { EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC Sch 80', GRS: 'GRS', IMC: 'IMC', ENT: 'ENT', FMC: 'FMC' }[c.tubo || 'EMT'] || (c.tubo || 'EMT');
     return 'THHN ' + (c.calibre || '#12') + ' en ' + tam + ' ' + nomTubo;
   }
   function esTuboCirc(c) { return c && (c.sistema === 'tubo' || (!c.sistema && esTubo(c.cable))); }
@@ -2164,7 +2173,7 @@
     if (!c) return c;
     if (!c.sistema) c.sistema = esTubo(c.cable) ? 'tubo' : /^MC/i.test(c.cable || '') ? 'mc' : 'romex';
     if (c.sistema === 'tubo') {
-      if (!c.tubo) { var pt0 = partesTubo(c.cable); c.tubo = pt0 && /PVC/i.test(pt0.tubo) ? 'PVC40' : pt0 && /GRS|RIGID/i.test(pt0.tubo) ? 'GRS' : 'EMT'; }
+      if (!c.tubo) { var pt0 = partesTubo(c.cable); c.tubo = pt0 && /PVC.*80/i.test(pt0.tubo) ? 'PVC80' : pt0 && /PVC/i.test(pt0.tubo) ? 'PVC40' : pt0 && /GRS|RIGID/i.test(pt0.tubo) ? 'GRS' : pt0 && /ENT/i.test(pt0.tubo) ? 'ENT' : pt0 && /FMC|FLEX/i.test(pt0.tubo) ? 'FMC' : pt0 && /IMC/i.test(pt0.tubo) ? 'IMC' : 'EMT'; }
       if (!c.calibre) { var pt1 = partesTubo(c.cable); c.calibre = pt1 ? pt1.calibre : '#12'; }
       if (!c.ckts) c.ckts = 1;
       if (!c.neutro) c.neutro = c.poles === 2 ? 'ninguno' : 'propio';
@@ -2247,7 +2256,8 @@
      caben) y la línea de verdad: hilos, llenado y el ajuste de 310.15(C)(1).
      Sin NEC: la lista de cables de siempre. `pref` distingue Propiedades del
      menú ▾ (ids distintos, misma lógica). */
-  var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['IMC', 'IMC']];
+  // los tubos que Edgar compra (su catálogo, 15/09) — el IMC lo pidió igual
+  var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['ENT', 'ENT (Smurf tube)'], ['FMC', 'Flex metal conduit'], ['IMC', 'IMC']];
   var CALIBRE_OPC = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0'];
   var NEUTRO_OPC = [['propio', 'Neutro propio (uno por circuito)'], ['compartido', 'Neutro compartido (multihilo 120/240)'], ['ninguno', 'Sin neutro (240 V puro)']];
   function filasCircuitoNEC(c, pref) {
@@ -2323,7 +2333,7 @@
   function rotuloCirc(c) {
     var r = resumenNEC(c);
     // en tubo, el rótulo dice lo que se compra: 3/4" EMT · 5#12 (2 ckts)
-    var cab = r ? (r.tam + ' ' + ({ EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC80', GRS: 'GRS', IMC: 'IMC' }[c.tubo || 'EMT'] || c.tubo) +
+    var cab = r ? (r.tam + ' ' + ({ EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC80', GRS: 'GRS', IMC: 'IMC', ENT: 'ENT', FMC: 'FMC' }[c.tubo || 'EMT'] || c.tubo) +
                    ' · ' + r.h.total + (c.calibre || '#12') + (c.ckts > 1 ? ' (' + c.ckts + ' ckts)' : ''))
                 : (c.cable || '');
     return '#' + (c.num || '?') + ' · ' + cab + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
@@ -8515,8 +8525,13 @@
     function rutaNEC(campo, v) {
       var et = findSel(); if (!et || !et.ruta) return;
       pushUndo();
-      if (campo === 'fases') { et.ruta.fases = Math.max(0, parseInt(v, 10) || 0); if (et.ruta.fases && !et.ruta.calibre) et.ruta.calibre = '#8'; et.ruta.tam = null; }
+      if (campo === 'fases') { et.ruta.fases = Math.max(0, parseInt(v, 10) || 0); if (et.ruta.fases && !et.ruta.calibre) et.ruta.calibre = et.ruta.mat === 'AL' ? '1/0' : '#8'; et.ruta.tam = null; }
       else if (campo === 'calibre') { et.ruta.calibre = v; et.ruta.tam = null; }
+      else if (campo === 'mat') {
+        // al pasar a aluminio, un calibre que no existe en aluminio (#8) sube al 1/0, que es el primero que Edgar compra
+        et.ruta.mat = v === 'AL' ? 'AL' : 'CU'; et.ruta.tam = null;
+        if (hayNEC() && calibresRuta(et.ruta).indexOf(et.ruta.calibre) < 0) et.ruta.calibre = et.ruta.mat === 'AL' ? '1/0' : '#8';
+      }
       else if (campo === 'neu') { et.ruta.neu = v === '1'; et.ruta.tam = null; }
       else if (campo === 'gnd') { et.ruta.gnd = v === '1'; et.ruta.tam = null; }
       else if (campo === 'sets') et.ruta.sets = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
@@ -8525,6 +8540,7 @@
     }
     on('prRutaFases', 'change', function (n) { rutaNEC('fases', n.value); });
     on('prRutaCal', 'change', function (n) { rutaNEC('calibre', n.value); });
+    on('prRutaMat', 'change', function (n) { rutaNEC('mat', n.value); });
     on('prRutaNeu', 'change', function (n) { rutaNEC('neu', n.value); });
     on('prRutaGnd', 'change', function (n) { rutaNEC('gnd', n.value); });
     on('prRutaSets', 'change', function (n) { rutaNEC('sets', n.value); });
@@ -9166,7 +9182,11 @@
      tamaño admite esos hilos y a qué % va; el takeoff saca el tubo con su
      nombre exacto del catálogo y los hilos en pies. Sin hilos puestos, la ruta
      sigue siendo solo pies de tubo por tipo, como hasta ahora. */
-  var RUTA_NEC_TIPO = { EMT: 'EMT', PVC: 'PVC40', GRS: 'GRS', IMC: 'IMC' };
+  var RUTA_NEC_TIPO = { EMT: 'EMT', PVC: 'PVC40', GRS: 'GRS', IMC: 'IMC', ENT: 'ENT', FMC: 'FMC' };
+  /* El material del conductor de una ruta: cobre (THHN / THW) por defecto;
+     aluminio compacto XHHW solo del 1/0 para arriba, que es lo que Edgar compra. */
+  function rutaMat(r) { return r && r.mat === 'AL' ? 'AL' : 'CU'; }
+  function calibresRuta(r) { return rutaMat(r) === 'AL' ? window.NEC.CALIBRES_AL : window.NEC.CALIBRES; }
   function rutaNecTipo(a) { var t = rutaTipo(a && a.ruta && a.ruta.tipo); return t ? (RUTA_NEC_TIPO[t.mat] || null) : null; }
   /* Los hilos de la ruta: fases + neutro + tierra, por juego. */
   function hilosRuta(r) {
@@ -9186,13 +9206,15 @@
     if (!hayNEC() || !a || !a.ruta) return null;
     var r = a.ruta, h = hilosRuta(r); if (!h || !r.calibre) return null;
     var tipo = rutaNecTipo(a); if (!tipo) return { h: h, sinTabla: true };
-    var min = window.NEC.tamanoMinimo(tipo, r.calibre, h.porTubo);
-    var tam = (r.tam && window.NEC.llenado(tipo, r.tam, r.calibre, h.porTubo) && window.NEC.llenado(tipo, r.tam, r.calibre, h.porTubo).cabe) ? r.tam : min;
-    if (!tam) return { h: h, tipo: tipo, sinTam: true };
-    var ll = window.NEC.llenado(tipo, tam, r.calibre, h.porTubo);
-    return { h: h, tipo: tipo, tam: tam, min: min, llenado: ll, pct: Math.round(ll.pct * 100),
-             tamanos: window.NEC.tamanosQueCaben(tipo, r.calibre, h.porTubo),
-             itemTubo: window.NEC.itemTubo(tipo, tam), itemHilo: window.NEC.itemHilo(r.calibre) };
+    var mat = rutaMat(r);
+    var min = window.NEC.tamanoMinimo(tipo, r.calibre, h.porTubo, mat);
+    var llR = r.tam ? window.NEC.llenado(tipo, r.tam, r.calibre, h.porTubo, mat) : null;
+    var tam = (llR && llR.cabe) ? r.tam : min;
+    if (!tam) return { h: h, tipo: tipo, mat: mat, sinTam: true };
+    var ll = window.NEC.llenado(tipo, tam, r.calibre, h.porTubo, mat);
+    return { h: h, tipo: tipo, mat: mat, tam: tam, min: min, llenado: ll, pct: Math.round(ll.pct * 100),
+             tamanos: window.NEC.tamanosQueCaben(tipo, r.calibre, h.porTubo, mat),
+             itemTubo: window.NEC.itemTubo(tipo, tam), itemHilo: window.NEC.itemHilo(r.calibre, mat) };
   }
   /* Lo que se compra de una ruta: si tiene hilos y tamaño, el tubo con su
      nombre exacto (× juegos) y los hilos en pies; si no, nada aquí — el
@@ -9215,8 +9237,11 @@
     h += '<div class="row"><label>Fases (hilos)</label><select id="prRutaFases" title="Cuántos conductores de fase van en el tubo. 0 = solo el tubo, sin hilos">' +
       [0, 1, 2, 3, 4].map(function (n) { return '<option value="' + n + '"' + ((+r.fases || 0) === n ? ' selected' : '') + '>' + (n ? n : '— solo tubo —') + '</option>'; }).join('') + '</select></div>';
     if (!(+r.fases > 0)) return h + '<div class="muted small">Pon las fases y sale el calibre, el tamaño que admite esos hilos y los pies de conductor al takeoff.</div>';
-    h += '<div class="row"><label>Calibre</label><select id="prRutaCal">' + window.NEC.CALIBRES.map(function (k) {
-      return '<option value="' + k + '"' + ((r.calibre || '#8') === k ? ' selected' : '') + '>' + k + (/^#|\/0$/.test(k) ? ' THHN' : ' MCM') + '</option>';
+    var matR = rutaMat(r);
+    h += '<div class="row"><label>Material</label><select id="prRutaMat"><option value="CU"' + (matR === 'CU' ? ' selected' : '') + '>Cobre (THHN · THW)</option><option value="AL"' + (matR === 'AL' ? ' selected' : '') + '>Aluminio compacto XHHW (1/0 en adelante)</option></select></div>';
+    h += '<div class="row"><label>Calibre</label><select id="prRutaCal">' + calibresRuta(r).map(function (k) {
+      var etq = matR === 'AL' ? (/\/0$/.test(k) ? ' XHHW AL' : ' MCM XHHW AL') : (/^#|\/0$/.test(k) ? ' THHN' : ' MCM THW');
+      return '<option value="' + k + '"' + ((r.calibre || '#8') === k ? ' selected' : '') + '>' + k + etq + '</option>';
     }).join('') + '</select></div>';
     h += '<div class="row"><label>Neutro</label><select id="prRutaNeu">' + [[1, 'Sí — 1 neutro'], [0, 'No']].map(function (o) { return '<option value="' + o[0] + '"' + ((r.neu ? 1 : 0) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
     h += '<div class="row"><label>Tierra</label><select id="prRutaGnd">' + [[1, 'Sí — 1 tierra'], [0, 'No (tubo metálico como tierra)']].map(function (o) { return '<option value="' + o[0] + '"' + ((r.gnd === false ? 0 : 1) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
@@ -9224,10 +9249,10 @@
     var R = resumenNECRuta(a);
     if (R && R.tam) {
       h += '<div class="row"><label>Tamaño</label><select id="prRutaTam">' + R.tamanos.map(function (t) {
-        var ll = window.NEC.llenado(R.tipo, t, r.calibre, R.h.porTubo);
+        var ll = window.NEC.llenado(R.tipo, t, r.calibre, R.h.porTubo, R.mat);
         return '<option value="' + esc(t) + '"' + (R.tam === t ? ' selected' : '') + '>' + esc(t) + (t === R.min ? ' (mínimo)' : '') + ' · ' + Math.round(ll.pct * 100) + ' % lleno</option>';
       }).join('') + '</select></div>';
-      h += '<div class="muted small"><b>' + R.h.porTubo + ' hilos ' + esc(r.calibre) + ' por tubo</b>' + (R.h.sets > 1 ? ' × ' + R.h.sets + ' juegos' : '') +
+      h += '<div class="muted small"><b>' + R.h.porTubo + ' hilos ' + esc(r.calibre) + (R.mat === 'AL' ? ' AL' : '') + ' por tubo</b>' + (R.h.sets > 1 ? ' × ' + R.h.sets + ' juegos' : '') +
         ' · llenado <b>' + R.pct + ' %</b> de ' + R.tam + ' · ' + R.h.portadores + ' portadores → ' + Math.round(R.h.ajuste * 100) + ' %' +
         '<br>Al takeoff: ' + esc(R.itemTubo) + (R.h.sets > 1 ? ' × ' + R.h.sets : '') + ' y ' + esc(R.itemHilo) + ' × ' + R.h.total + '.</div>';
     } else if (R && R.sinTam) {
@@ -9245,7 +9270,7 @@
     if ((+r.drop) > 0) extra += ' +' + (+r.drop) + "' drop";
     if ((+r.mult) > 1) extra += ' ×' + (+r.mult);
     var R = resumenNECRuta(a);
-    var cab = R && R.tam ? (R.tam + ' ' + (t ? t.mat : '') + ' · ' + R.h.porTubo + (/^#/.test(r.calibre) ? '' : '×') + r.calibre + (R.h.sets > 1 ? ' ×' + R.h.sets + ' juegos' : '')) : (t ? (t.mat || t.subj) : '?');
+    var cab = R && R.tam ? (R.tam + ' ' + (t ? t.mat : '') + ' · ' + R.h.porTubo + (/^#/.test(r.calibre) ? '' : '×') + r.calibre + (R.mat === 'AL' ? ' AL' : '') + (R.h.sets > 1 ? ' ×' + R.h.sets + ' juegos' : '')) : (t ? (t.mat || t.subj) : '?');
     var txt = cab + ' ' + fmtFtIn(largoRuta(a)) + extra;
     return '<text x="0" y="' + (-(a.lw || 1.3) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
       ') rotate(' + an.toFixed(1) + ')" font-size="' + (8 * glifoK(a)).toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' +
@@ -9421,7 +9446,7 @@
   /* el homerun en tubo, para probarlo sin clics: defaults, cambios con el NEC delante, partidas, rótulo */
   window.__homerunDbg = {
     defaults: circDefaults, cambia: aplicaCambioNEC, nuevo: nuevoCirc, partidas: partidasHomerun,
-    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC
+    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad
   };
 
   /* ==================================================================
@@ -11399,7 +11424,9 @@
           var n = normTxt2(e.name), target = null, factor = 1;
           var al = aliasByNorm[n];
           if (al) { target = catByNorm[normTxt2(al.item)]; factor = Number(al.factor) || 1; }
-          if (!target) target = catByNorm[n];
+          // por NOMBRE (sin alias): si se midió en pies y el catálogo vende por mil pies
+          // (los THHN están en MLF), se divide por 1000 — 500 ft de 4/0 no son 500 MLF (15/09)
+          if (!target) { target = catByNorm[n]; if (target) factor = factorUnidad(e.unit, target.unidad); }
           if (!target) { unmapped.push(e.name + ' (' + e.qty + ' ' + e.unit + ')'); return; }
           // el mismo item en dos partidas (jbox en rough y en feeders) son dos renglones
           var cod = esCodigo(e.codigo) ? e.codigo : CODIGO_DEFECTO;
