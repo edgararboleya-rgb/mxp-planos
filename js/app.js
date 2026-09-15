@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.R';
+  var APP_VERSION = 'v32.S';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2283,6 +2283,36 @@
       out[kb] = (out[kb] || 0) + g.mult;
     });
     return out;
+  }
+  /* Los circuitos por panel: { 'NHI': [2, 4], 'MSP': [2, 4] }. Es lo que se
+     enseña debajo de los breakers para que se vea DE DÓNDE sale la cuenta.
+     Edgar (16/09): «me pone 4 breakers cuando realmente son solo dos» — eran
+     los mismos números repartidos en dos nombres de panel. */
+  function circuitosPorPanel(areas) {
+    var por = {};
+    (areas || []).forEach(function (ar) {
+      if (!ar || !ar.open || !ar.circ) return;
+      var pan = String(ar.circ.panel || '').trim().toUpperCase() || '(sin panel)';
+      por[pan] = por[pan] || {};
+      numsCirc(ar.circ).forEach(function (q) { if (q > 0) por[pan][q] = (por[pan][q] || 0) + 1; });
+    });
+    var out = {};
+    Object.keys(por).sort().forEach(function (pan) {
+      out[pan] = Object.keys(por[pan]).map(Number).sort(function (a, b) { return a - b; }).map(function (n) { return { num: n, tramos: por[pan][n] }; });
+    });
+    return out;
+  }
+  /* Renombrar un panel en TODOS sus tramos: MSP → NHI de un toque. */
+  function renombraPanelCirc(viejo, nuevo) {
+    var v = String(viejo || '').trim().toUpperCase(), n = String(nuevo || '').trim().slice(0, 20), k = 0;
+    if (!n) return 0;
+    (state.areas || []).forEach(function (ar) {
+      if (!ar || !ar.open || !ar.circ) return;
+      var pan = String(ar.circ.panel || '').trim().toUpperCase() || '(SIN PANEL)';
+      if (pan === v || (v === '(SIN PANEL)' && pan === '(SIN PANEL)')) { ar.circ.panel = n; k++; }
+    });
+    var d = circDefaults(); if (String(d.panel || '').trim().toUpperCase() === v) d.panel = n;
+    return k;
   }
   // cuántos circuitos distintos hay (no cuántos tramos): para el panel Materiales
   function cuentaCircuitos(areas) {
@@ -9712,6 +9742,7 @@
     resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad,
     // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
     tipo: tipoCorrida, nums: numsCirc, sincroniza: sincronizaNums, proximo: proximoCircLibre,
+    porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc,
     breakers: breakersDeCircuitos, cuenta: cuentaCircuitos, normaliza: normalizaCirc
   };
 
@@ -11023,6 +11054,18 @@
       Object.keys(brk).sort().forEach(function (k) {
         rows += '<tr><td>' + esc(k) + '</td><td class="n">' + brk[k] + '</td></tr>';
       });
+      // de dónde sale esa cuenta: los circuitos de cada panel. Si el mismo
+      // número aparece en dos paneles, ahí está el breaker de más.
+      var porPan = circuitosPorPanel(state.areas), nomPan = Object.keys(porPan);
+      nomPan.forEach(function (pan) {
+        var lst = porPan[pan];
+        rows += '<tr><td colspan="2" class="muted small">Panel <b>' + esc(pan) + '</b> · ckt ' +
+          lst.map(function (q) { return q.num + (q.tramos > 1 ? '<span class="muted"> (' + q.tramos + ' tramos)</span>' : ''); }).join(', ') +
+          ' <button class="small btnRenPan" data-pan="' + esc(pan) + '" title="Cambiar el nombre de este panel en todos sus tramos">✎</button></td></tr>';
+      });
+      if (nomPan.length > 1) {
+        rows += '<tr><td colspan="2" class="small" style="color:#a33">⚠ Hay tramos en <b>' + nomPan.length + ' paneles distintos</b>. El mismo número de ckt en dos paneles son dos breakers. Si es el mismo panel con dos nombres, toca ✎ y ponle el mismo a todos.</td></tr>';
+      }
     }
     // cableado: agrupado por etiqueta (o por estilo si no tiene)
     var wireGroups = {};
@@ -11055,6 +11098,19 @@
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
     enganchaConteoPanel();
     enganchaRutasPanel();
+    $$('#countsBody .btnRenPan').forEach(function (bt) {
+      bt.addEventListener('click', function () {
+        var pan = bt.dataset.pan || '';
+        uiPrompt('Nombre del panel para TODOS los tramos que hoy dicen «' + pan + '»', pan === '(sin panel)' ? '' : pan, function (v) {
+          if (v === null) return;
+          var nuevo = String(v).trim(); if (!nuevo) return;
+          pushUndo();
+          var k = renombraPanelCirc(pan, nuevo);
+          refresh(); refreshCounts(); scheduleAutosave();
+          setHint(k + ' tramo(s) pasan al panel ' + nuevo + ' — los breakers se recuentan');
+        });
+      });
+    });
     var bcp = $('#btnCircPanel');
     if (bcp) bcp.addEventListener('click', function () {
       pushUndo();
