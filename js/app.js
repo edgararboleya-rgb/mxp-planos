@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.B';
+  var APP_VERSION = 'v32.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9221,8 +9221,26 @@
   }
 
   /* --- casar el texto del ingeniero con la biblioteca de takeoff --- */
-  var LEY_PARA = { THE: 1, AND: 1, WITH: 1, AT: 1, TO: 1, OF: 1, IN: 1, ON: 1, OR: 1, PER: 1, AS: 1, NOTED: 1, TYP: 1, TYPICAL: 1, MTD: 1, MOUNTED: 1, MOUNT: 1, AFF: 1, AFG: 1, ABOVE: 1, FINISHED: 1, FLOOR: 0, HIGH: 1, UNLESS: 1, OTHERWISE: 1, UON: 1, SEE: 1, SCHEDULE: 1, DRAWINGS: 1, PLANS: 1, NEW: 1, EXISTING: 0, PROVIDE: 1, INSTALL: 1, FURNISHED: 1, BY: 1, OWNER: 0, VERIFY: 1, LOCATION: 1, FIELD: 1, W: 1, V: 1 };
-  var LEY_SIN = { RECEPT: 'RECEPTACLE', RECEPTACLES: 'RECEPTACLE', OUTLET: 'RECEPTACLE', OUTLETS: 'RECEPTACLE', GFI: 'GFCI', GROUND: 'GFCI', FAULT: 'GFCI', INTERRUPTER: 'GFCI', WEATHERPROOF: 'WP', WEATHER: 'WP', PROOF: 'WP', RESISTANT: 'WP', SW: 'SWITCH', SWITCHES: 'SWITCH', LIGHT: 'LIGHT', LIGHTING: 'LIGHT', FIXTURE: 'LIGHT', LUMINAIRE: 'LIGHT', LUMINAIRES: 'LIGHT', FIXTURES: 'LIGHT', SIGN: 'SIGN', EMERG: 'EMERGENCY', EMER: 'EMERGENCY', DET: 'DETECTOR', DETECTORS: 'DETECTOR', JB: 'JUNCTION', 'J-BOX': 'JUNCTION', BOX: 'BOX', BOXES: 'BOX', TELE: 'PHONE', TELEPHONE: 'PHONE', TEL: 'PHONE', COMPUTER: 'DATA', COMM: 'DATA', COMMUNICATION: 'DATA', VOICE: 'PHONE', QUAD: 'QUADPLEX', FOURPLEX: 'QUADPLEX', DBL: 'DOUBLE', '1P': 'SINGLE', SP: 'SINGLE', '3W': 'THREE', '3-WAY': 'THREE WAY', '4-WAY': 'FOUR WAY', DIM: 'DIMMER', OCC: 'OCCUPANCY', SENSOR: 'SENSOR', THERMOSTAT: 'THERMOSTAT', 'T-STAT': 'THERMOSTAT', DISC: 'DISCONNECT', DISCONNECT: 'DISCONNECT', XFMR: 'TRANSFORMER', PNL: 'PANEL', PANELBOARD: 'PANEL', CKT: 'CIRCUIT', BKR: 'CB', BREAKER: 'CB', AMP: 'A', AMPS: 'A', VOLT: 'V', VOLTS: 'V' };
+  /* Medido contra la leyenda real de la E-0.1 de NCH Radiology (15/09): la
+     primera fórmula (intersección / unión) dejaba TODO sin pareja, porque el
+     ingeniero escribe "FIRE ALARM FLASHING/STROBE LIGHT-NUMBER DENOTES
+     CANDELAS (CEILING OR WALL MOUNTED). COMPATIBLE WITH EXISTING FIRE ALARM
+     SYSTEM" y el tool de Bluebeam se llama "STROBE LIGHT W/BACKBOX". Trece
+     palabras contra tres: la unión se come el parecido aunque el item entero
+     esté dentro de la descripción.
+
+     Lo que manda ahora es CUÁNTO DEL ITEM está en la descripción (recall,
+     65 %), y solo después cuánto de la descripción sobra (precisión, 35 %).
+     Encima: un número o voltaje que el item tiene y la descripción no
+     ("120V", "1900") pesa doble en contra — es la señal más fiable de que no
+     es ése; el amperaje distinto castiga; y la FAMILIA que dijo el modelo se
+     cruza con el tool set: +0,15 si es el suyo (fire_alarm ↔ Fire Alarm),
+     −0,20 si es otro conocido — un SPEAKER de sonido no puede irse al FIRE
+     ALARM SPEAKER solo porque comparten una palabra. */
+  var LEY_PARA = { THE: 1, AND: 1, WITH: 1, AT: 1, TO: 1, OF: 1, IN: 1, ON: 1, OR: 1, PER: 1, AS: 1, NOTED: 1, TYP: 1, TYPICAL: 1, MTD: 1, MOUNTED: 1, MOUNT: 1, AFF: 1, AFG: 1, ABOVE: 1, FINISHED: 1, HIGH: 1, UNLESS: 1, OTHERWISE: 1, UON: 1, SEE: 1, SCHEDULE: 1, DRAWINGS: 1, PLANS: 1, NEW: 1, PROVIDE: 1, INSTALL: 1, FURNISHED: 1, BY: 1, VERIFY: 1, LOCATION: 1, FIELD: 1, W: 1, V: 1, A: 1,
+    NUMBER: 1, DENOTES: 1, COMPATIBLE: 1, SYSTEM: 1, TYPE: 1, SHALL: 1, BE: 1, LEAST: 1, BUT: 1, NOT: 1, MORE: 1, THAN: 1, ENTIRE: 1, WILL: 1, FOR: 1, OVER: 1, ALL: 1, EACH: 1, ACCESSIBLE: 1, RECOMMENDATIONS: 1, MANUFACTURER: 1, EQUIPMENT: 1, ETC: 1,
+    BASE: 1, MODULES: 1, DEVICES: 1 };   // W/BASE, W/MODULES: el accesorio con que viene el tool, no lo que lo distingue de otro
+  var LEY_SIN = { RECEPT: 'RECEPTACLE', RECEPTACLES: 'RECEPTACLE', OUTLET: 'RECEPTACLE', OUTLETS: 'RECEPTACLE', GFI: 'GFCI', GROUND: 'GFCI', FAULT: 'GFCI', INTERRUPTER: 'GFCI', WEATHERPROOF: 'WP', WEATHER: 'WP', PROOF: 'WP', RESISTANT: 'WP', SW: 'SWITCH', SWITCHES: 'SWITCH', LIGHTING: 'LIGHT', FIXTURE: 'LIGHT', LUMINAIRE: 'LIGHT', LUMINAIRES: 'LIGHT', FIXTURES: 'LIGHT', EMERG: 'EMERGENCY', EMER: 'EMERGENCY', DET: 'DETECTOR', DETECTORS: 'DETECTOR', JB: 'JUNCTION', 'J-BOX': 'JUNCTION', BOXES: 'BOX', TELE: 'PHONE', TELEPHONE: 'PHONE', TEL: 'PHONE', PH: 'PHONE', COMPUTER: 'DATA', COMM: 'DATA', COMMUNICATION: 'DATA', VOICE: 'PHONE', QUAD: 'QUADPLEX', FOURPLEX: 'QUADPLEX', DBL: 'DOUBLE', '1P': 'SINGLE', SP: 'SINGLE', '3W': 'THREE', '3-WAY': 'THREE WAY', '4-WAY': 'FOUR WAY', DIM: 'DIMMER', OCC: 'OCCUPANCY', OCUP: 'OCCUPANCY', 'T-STAT': 'THERMOSTAT', DISC: 'DISCONNECT', XFMR: 'TRANSFORMER', PNL: 'PANEL', PANELBOARD: 'PANEL', CKT: 'CIRCUIT', BKR: 'CB', BREAKER: 'CB', AMP: 'A', AMPS: 'A', VOLT: 'V', VOLTS: 'V', COMBO: 'COMBINATION', GEN: 'GENERATOR', CAM: 'CAMERA', CAMERAS: 'CAMERA', STROBES: 'STROBE', FLASHING: 'STROBE', HORNS: 'HORN', JACKS: 'PORTS', JACK: 'PORTS', PORT: 'PORTS', SPEAKERS: 'SPEAKER', BACKBOX: 'BOX' };
   function leyTokens(s) {
     var t = String(s || '').toUpperCase().replace(/[“”]/g, '"').replace(/(\d)\s*(AMPS?|A)\b/g, '$1A').replace(/(\d)\s*V\b/g, '$1V')
       .replace(/[,;:()\[\]\/+\-]/g, ' ').replace(/["'.]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -9232,52 +9250,82 @@
       w = LEY_SIN[w] || w;
       w.split(' ').forEach(function (u) {
         if (LEY_PARA[u] === 1) return;
-        if (/^\d+V$/.test(u)) return;                 // 120V / 277V no distinguen items en el catálogo
-        if (/^\+?\d+$/.test(u) && !/A$/.test(u)) return;   // la altura (+18) no es el item
+        if (/^\+/.test(u) || (/^\d+$/.test(u) && u.length <= 2)) return;   // la altura (+18", 42", 96") no es el item; 600 (watts) y 1900 (caja) sí
         if (!seen[u]) { seen[u] = 1; out[u] = 1; }
       });
     });
     return Object.keys(out);
   }
+  // un número, un amperaje o un voltaje pesan doble: son la ESPECIFICACIÓN
+  function leyPeso(w) { return /^\d+(A|V|W|KW|KVA)$/.test(w) ? 2 : 1; }
+  /* …y una palabra pesa MENOS cuanto más común es en la biblioteca: FIRE y
+     ALARM están en veinte tools, STROBE en cuatro. Sin esto, "FIRE ALARM
+     RELAY" le ganaba al strobe porque la descripción larga del ingeniero
+     dice FIRE ALARM dos veces (medido, 15/09). */
+  var _leyDf = null;
+  function leyW(w) {
+    if (!_leyDf) leyIndice();
+    var df = (_leyDf && _leyDf[w]) || 0;
+    return leyPeso(w) / (1 + Math.log(1 + df));
+  }
+  /* Qué familia es cada tool set de Edgar. Los que no están (Electrical Tool
+     Set de fábrica, Demolition) no dan bonus ni castigo. */
+  var LEY_SET_FAM = { 'Fire Alarm': 'fire_alarm', CCTV: 'security_cctv', Telecom: 'data_comm', Receptacles: 'receptacle', Switches: 'switch', Lights: 'lighting', Boxes: 'junction_box', 'Pull Boxes': 'junction_box', 'Floor Boxes': 'junction_box', 'SwitchGear(1)': 'panel_equipment', 'SwitchGear(2)': 'panel_equipment', Generator: 'panel_equipment', 'Lightning Protection': 'grounding' };
+  function leyMismaFam(a, b) {
+    if (!a || !b) return null;
+    var n = function (f) { return f === 'exit_emergency' ? 'lighting' : f === 'motor_mech' ? 'panel_equipment' : f; };
+    return n(a) === n(b);
+  }
   var _leyIdx = null;
   function leyIndice() {
     if (_leyIdx) return _leyIdx;
-    var idx = [];
+    var idx = [], df = {};
     tlibSets().forEach(function (st) {
       st.items.forEach(function (it) {
         if (it.tipo !== 'conteo' || it.descartado) return;
-        idx.push({ set: st, it: it, tok: leyTokens(it.subj + (it.item && it.item !== it.subj ? ' ' + it.item : '')), fabrica: st.nom === 'Electrical Tool Set' });
+        // el nombre del tool y, si es distinto, el del item: se prueba con los dos y gana el mejor
+        var vars = [leyTokens(it.subj)];
+        if (it.item && it.item.replace(/\s+/g, ' ').toUpperCase() !== it.subj.replace(/\s+/g, ' ').toUpperCase()) vars.push(leyTokens(it.item));
+        var vistos = {};
+        vars.forEach(function (tok) { tok.forEach(function (w) { if (!vistos[w]) { vistos[w] = 1; df[w] = (df[w] || 0) + 1; } }); });
+        idx.push({ set: st, it: it, vars: vars, fabrica: st.nom === 'Electrical Tool Set', fam: LEY_SET_FAM[st.nom] || null });
       });
     });
-    _leyIdx = idx;
+    _leyIdx = idx; _leyDf = df;
     return idx;
   }
-  /* Devuelve hasta 3 parejas [{k, nom, sc, set, it}] de mayor a menor. El
-     parecido es intersección / unión de palabras normalizadas, con un plus
-     por tener item en el catálogo (llega al estimador con precio) y un
-     castigo al Electrical Tool Set de fábrica (109 de sus 119 no tienen
-     pareja y varios de sus alias son dudosos). El amperaje cuenta doble: un
-     20A y un 15A del mismo receptáculo son dos items distintos. */
-  function leyendaCasa(desc, tag) {
+  /* Devuelve hasta 3 parejas [{k, nom, sc, set, it}] de mayor a menor. */
+  function leyendaCasa(desc, tag, familia) {
     var q = leyTokens(desc + ' ' + (tag || ''));
     if (!q.length) return [];
+    var pesoQ = 0; q.forEach(function (w) { pesoQ += leyW(w); });
+    var qa = q.filter(function (w) { return /^\d+A$/.test(w); });
     var res = [];
     leyIndice().forEach(function (e) {
-      var inter = 0, peso = 0;
-      q.forEach(function (w) { var p = /^\d+A$/.test(w) ? 2 : 1; peso += p; if (e.tok.indexOf(w) >= 0) inter += p; });
-      if (!inter) return;
-      var pesoE = 0; e.tok.forEach(function (w) { pesoE += /^\d+A$/.test(w) ? 2 : 1; });
-      var sc = inter / (peso + pesoE - inter);
+      var mejor = 0;
+      e.vars.forEach(function (tok) {
+        var inter = 0, pesoE = 0;
+        tok.forEach(function (w) { var pw = leyW(w); pesoE += pw; if (q.indexOf(w) >= 0) inter += pw; });
+        if (!inter || !pesoE) return;
+        var recall = inter / pesoE, prec = inter / pesoQ;
+        var sc = 0.65 * recall + 0.35 * prec;
+        var ea = tok.filter(function (w) { return /^\d+A$/.test(w); });
+        if (qa.length && ea.length && qa[0] !== ea[0]) sc -= 0.25;   // amperaje distinto = otro item
+        if (sc > mejor) mejor = sc;
+      });
+      if (!mejor) return;
+      var sc = mejor;
       if (e.it.item) sc += 0.06;
-      if (e.fabrica) sc -= 0.10;
-      // amperaje distinto = no es el mismo item, aunque el resto coincida
-      var qa = q.filter(function (w) { return /^\d+A$/.test(w); }), ea = e.tok.filter(function (w) { return /^\d+A$/.test(w); });
-      if (qa.length && ea.length && qa[0] !== ea[0]) sc -= 0.25;
+      if (e.fabrica) sc -= 0.25;   // el Electrical Tool Set de fábrica: 109 de 119 sin pareja y alias dudosos; los sets de Edgar mandan
+      var mf = leyMismaFam(familia, e.fam);
+      if (mf === true) sc += 0.15; else if (mf === false) sc -= 0.20;
       if (sc <= 0.15) return;
-      res.push({ k: tlibKey(e.set.nom, e.it.subj), nom: e.it.subj, sc: Math.max(0, Math.min(1, sc)), set: e.set.nom, it: e.it });
+      res.push({ k: tlibKey(e.set.nom, e.it.subj), nom: e.it.subj, sc: sc, set: e.set.nom, it: e.it });
     });
+    // se ordena con el número CRUDO: si se recorta a 1 antes, dos buenos empatan
+    // y gana el que esté primero en el set (así el receptáculo normal se iba al GFCI)
     res.sort(function (a, b) { return b.sc - a.sc; });
-    return res.slice(0, 3);
+    return res.slice(0, 3).map(function (r) { r.sc = Math.max(0, Math.min(1, r.sc)); return r; });
   }
   var LEY_UMBRAL = 0.55;
 
@@ -9335,7 +9383,7 @@
         fam: LEY_FAM_NOM[s && s.familia] ? s.familia : 'other',
         mont: String((s && s.montaje) || 'unknown'), nota: String((s && s.nota) || '').slice(0, 120),
         caja: s && s.caja, glifo: leyGlifo(s && s.caja),
-        parejas: desc ? leyendaCasa(desc, s && s.tag) : [],
+        parejas: desc ? leyendaCasa(desc, s && s.tag, s && s.familia) : [],
         nom: desc, fuera: !desc
       };
       // la pareja propuesta: la mejor si pasa el umbral; si no, sin pareja
@@ -9349,14 +9397,70 @@
     pintaLey();
     setHint('Leyenda leída: ' + ley.filas.length + ' símbolo(s). Revisa la lista, quita los que no son, y crea las categorías.');
   }
-  /* El recorte del símbolo, para verlo en la fila. 56 px de alto, JPEG chico. */
+  /* El recorte del símbolo, para verlo en la fila.
+
+     Medido con la leyenda real (15/09): las cajas que devuelve el modelo NO
+     caen sobre el dibujo. En una imagen alta y estrecha —23 filas— un error
+     de 2 % en vertical es una fila entera, y salían todos en blanco. Así que
+     la caja del modelo solo dice EN QUÉ FILA está; el recorte lo decide la
+     tabla misma: sus rayas horizontales marcan las filas, y la primera raya
+     vertical separa la columna del símbolo de la del texto. Eso es
+     determinista y no depende de la puntería del modelo. Si la tabla no
+     tiene rayas (las hay sin cuadrícula), se cae a la caja con margen. */
+  function leyTabla() {
+    if (!ley || !ley.cv) return null;
+    if (ley.tabla) return ley.tabla;
+    var W = ley.w, H = ley.h, ctx = ley.cv.getContext('2d', { willReadFrequently: true });
+    var d;
+    try { d = ctx.getImageData(0, 0, W, H).data; } catch (e) { return (ley.tabla = { filas: [], colX: null }); }
+    var oscuro = function (i) { return (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < 150; };
+    // rayas horizontales: filas de píxeles con más del 45 % oscuro (una raya
+    // de tabla cruza casi todo el ancho; una línea de texto, no)
+    var hs = [], y, x, n, i;
+    for (y = 0; y < H; y++) { n = 0; for (x = 0; x < W; x++) if (oscuro((y * W + x) * 4)) n++; hs.push(n / W); }
+    var rayasH = [], enRaya = false, y0 = 0;
+    for (y = 0; y <= H; y++) {
+      var es = y < H && hs[y] > 0.45;
+      if (es && !enRaya) { enRaya = true; y0 = y; }
+      else if (!es && enRaya) { enRaya = false; rayasH.push((y0 + y - 1) / 2); }
+    }
+    // rayas verticales: columnas con más del 60 % oscuro. La primera que no
+    // sea el borde izquierdo separa el símbolo del texto.
+    var colX = null;
+    for (x = Math.round(W * 0.04); x < W * 0.6; x++) {
+      n = 0; for (y = 0; y < H; y++) if (oscuro((y * W + x) * 4)) n++;
+      if (n / H > 0.6) { colX = x; break; }
+    }
+    var filas = [];
+    for (i = 0; i + 1 < rayasH.length; i++) {
+      var a = rayasH[i], b = rayasH[i + 1];
+      if (b - a >= 6) filas.push([a, b]);   // una raya doble no es una fila
+    }
+    ley.tabla = { filas: filas, colX: colX, rayasH: rayasH.length };
+    return ley.tabla;
+  }
   function leyGlifo(caja) {
     if (!ley || !ley.cv || !caja) return '';
     var W = ley.w, H = ley.h;
-    var x0 = Math.max(0, Math.min(100, +caja.x0 || 0)) / 100 * W, x1 = Math.max(0, Math.min(100, +caja.x1 || 0)) / 100 * W;
-    var y0 = Math.max(0, Math.min(100, +caja.y0 || 0)) / 100 * H, y1 = Math.max(0, Math.min(100, +caja.y1 || 0)) / 100 * H;
-    var m = Math.max(3, (x1 - x0) * 0.12, (y1 - y0) * 0.12);
-    x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(W, x1 + m); y1 = Math.min(H, y1 + m);
+    var cx0 = Math.max(0, Math.min(100, +caja.x0 || 0)) / 100 * W, cx1 = Math.max(0, Math.min(100, +caja.x1 || 0)) / 100 * W;
+    var cy0 = Math.max(0, Math.min(100, +caja.y0 || 0)) / 100 * H, cy1 = Math.max(0, Math.min(100, +caja.y1 || 0)) / 100 * H;
+    var x0, y0, x1, y1, t = leyTabla();
+    var cy = (cy0 + cy1) / 2, fila = null;
+    if (t && t.filas.length >= 3) {
+      for (var i = 0; i < t.filas.length; i++) if (cy >= t.filas[i][0] && cy <= t.filas[i][1]) { fila = t.filas[i]; break; }
+      // el modelo suele errar por poco: si cayó justo en una raya, la fila más cercana
+      if (!fila) { var dm = Infinity; t.filas.forEach(function (f) { var dd = Math.min(Math.abs(cy - f[0]), Math.abs(cy - f[1])); if (dd < dm) { dm = dd; fila = f; } }); if (dm > H * 0.03) fila = null; }
+    }
+    if (fila) {
+      y0 = fila[0] + 1; y1 = fila[1] - 1;
+      // la celda del símbolo: del borde izquierdo a la raya vertical; sin raya, la caja con margen
+      var bordeIzq = 0;
+      x0 = bordeIzq; x1 = t.colX ? t.colX - 1 : Math.min(W, Math.max(cx1 + (cx1 - cx0) * 0.5, W * 0.18));
+      if (x1 - x0 < 8) { x0 = 0; x1 = Math.min(W, W * 0.18); }
+    } else {
+      var m = Math.max(3, (cx1 - cx0) * 0.12, (cy1 - cy0) * 0.12);
+      x0 = Math.max(0, cx0 - m); y0 = Math.max(0, cy0 - m); x1 = Math.min(W, cx1 + m); y1 = Math.min(H, cy1 + m);
+    }
     if (x1 - x0 < 4 || y1 - y0 < 4) return '';
     var k = Math.min(1, 56 / (y1 - y0), 120 / (x1 - x0));
     var cv = document.createElement('canvas');
@@ -9465,7 +9569,9 @@
     filas: function () { return ley && ley.filas ? ley.filas.map(function (f) { return { desc: f.desc, nom: f.nom, sel: f.sel, fuera: !!f.fuera, ya: !!f.ya, glifo: !!f.glifo, parejas: f.parejas.map(function (p) { return [p.nom, Math.round(p.sc * 100)]; }) }; }) : null; },
     marca: function (i, v) { if (ley && ley.filas && ley.filas[i]) { ley.filas[i].fuera = !v; pintaLey(); } },
     crea: leyendaCrea,
-    estado: function () { return ley ? { filas: ley.filas ? ley.filas.length : null, w: ley.w, h: ley.h, rect: ley.rect } : null; }
+    estado: function () { return ley ? { filas: ley.filas ? ley.filas.length : null, w: ley.w, h: ley.h, rect: ley.rect } : null; },
+    tabla: function () { return leyTabla(); },
+    glifoDe: function (i) { return ley && ley.filas && ley.filas[i] ? ley.filas[i].glifo : ''; }
   };
 
 
