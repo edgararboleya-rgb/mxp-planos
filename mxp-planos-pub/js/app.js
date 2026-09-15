@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.F';
+  var APP_VERSION = 'v32.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -16098,6 +16098,44 @@
       });
     }).catch(function () { cb(null); });
   }
+  /* ¿POR QUÉ esta página no trae texto? (E7, 15/09)
+     Hasta ahora, cero textos = "está escaneado, es una foto". Es verdad a
+     medias, y la otra mitad es el caso de Edgar: su ED-0.1 es un PDF
+     VECTORIAL —líneas nítidas a cualquier zoom— pero el CAD exportó las
+     letras convertidas en CURVAS. No hay texto que buscar, pero tampoco es
+     una foto, y decirle "escanéalo con OCR" lo manda por el camino
+     equivocado: lo que hay que pedir es que reexporten el PDF con las
+     fuentes dentro. Aquí se distingue mirando lo que la página DIBUJA:
+       · muchos trazos y casi ninguna imagen → texto en curvas
+       · una imagen grande y casi ningún trazo → escaneado de verdad
+     Se mira una sola página (la primera con PDF): con eso basta para saber de
+     qué taller salió el set, y una hoja grande tarda ya bastante. */
+  var diagCache = {};
+  function diagnosticoPagina(rec, cb) {
+    if (!rec || !rec.doc || typeof pdfjsLib === 'undefined' || !pdfjsLib.OPS) { cb(null); return; }
+    var k = (rec.key || 'x') + ':' + rec.page;
+    if (diagCache[k]) { cb(diagCache[k]); return; }
+    rec.doc.getPage(rec.page).then(function (page) {
+      return Promise.all([page.getOperatorList(), page.getTextContent()]).then(function (a) {
+        var OPS = pdfjsLib.OPS, fn = a[0].fnArray || [];
+        var IMG = {}; [OPS.paintImageXObject, OPS.paintJpegXObject, OPS.paintImageMaskXObject,
+                       OPS.paintInlineImageXObject, OPS.paintImageXObjectRepeat].forEach(function (o) { if (o != null) IMG[o] = 1; });
+        var d = { trazos: 0, imgs: 0, textos: (a[1].items || []).filter(function (it) { return String(it.str || '').trim(); }).length };
+        fn.forEach(function (o) {
+          if (o === OPS.constructPath) d.trazos++;
+          else if (IMG[o]) d.imgs++;
+        });
+        d.tipo = d.textos ? 'texto'
+               : (d.trazos >= 40 && d.trazos > d.imgs * 20) ? 'curvas'
+               : (d.imgs > 0 && d.trazos < 40) ? 'escaneado'
+               : 'vacio';
+        diagCache[k] = d;
+        cb(d);
+      });
+    }).catch(function () { cb(null); });
+  }
+  window.__diagPdfDbg = function (cb) { diagCache = {}; diagnosticoPagina(pdfLive[state.curSheet], cb); };
+
   /* El fondo de una hoja cualquiera, sin cambiar de hoja: la activa se lee de
      state, las demás de su data guardada. */
   function fondoDeHoja(i) {
@@ -16140,20 +16178,39 @@
         });
         if (--pend === 0) {
           buscaRes.sort(function (a, b) { return a.hoja - b.hoja || a.y - b.y || a.x - b.x; });
-          pintaBusca(conTexto ? '' : 'escaneado');
-          pintaMarcasBusca();
+          if (conTexto) { pintaBusca(''); pintaMarcasBusca(); return; }
+          // ninguna hoja trae texto: antes de decir "es una foto", se mira
+          pintaBusca('buscando');
+          diagnosticoPagina(hojas[0].rec, function (d) {
+            pintaBusca(d && d.tipo === 'curvas' ? 'curvas' : d && d.tipo === 'vacio' ? 'vacio' : 'escaneado', d);
+            pintaMarcasBusca();
+          });
         }
       });
     });
   }
-  function pintaBusca(estado) {
+  // "1 imagen" · "3 imágenes" · "ninguna imagen"; igual con los trazos
+  function nTxt(n, uno, varios, cero) { return !n ? cero : n === 1 ? '1 ' + uno : n + ' ' + varios; }
+  function pintaBusca(estado, diag) {
     var lista = $('#buscaLista'), n = $('#buscaN');
     if (!lista) return;
     if (estado === 'buscando') { lista.innerHTML = '<div class="bMuted">Buscando…</div>'; if (n) n.textContent = ''; return; }
     if (estado === 'sinfondo') { lista.innerHTML = '<div class="bMuted">Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero con el botón <b>Fondo</b>.</div>'; if (n) n.textContent = ''; return; }
     if (estado === 'sinpdf') { lista.innerHTML = '<div class="bMuted">El fondo de esta hoja es una <b>imagen</b>, no un PDF: no trae texto que buscar. Vuelve a importarlo como PDF y se puede buscar dentro.</div>'; if (n) n.textContent = ''; return; }
     if (estado === 'escaneado') {
-      lista.innerHTML = '<div class="bMuted">Ese PDF <b>no trae texto</b>: está escaneado, es una foto de la hoja. Para buscar ahí haría falta OCR, y la app todavía no lo hace. La verdad es esa: no es que la palabra no esté, es que no hay texto que leer.</div>';
+      lista.innerHTML = '<div class="bMuted">Ese PDF <b>no trae texto</b>: está escaneado, es una foto de la hoja' +
+        (diag && diag.imgs ? ' (' + nTxt(diag.imgs, 'imagen', 'imágenes', '') + ' y ' + nTxt(diag.trazos, 'trazo', 'trazos', 'ningún trazo') + ' de dibujo)' : '') +
+        '. Para buscar ahí haría falta OCR, y la app todavía no lo hace. La verdad es esa: no es que la palabra no esté, es que no hay texto que leer.</div>';
+      if (n) n.textContent = ''; return;
+    }
+    if (estado === 'curvas') {
+      lista.innerHTML = '<div class="bMuted">Ese PDF <b>sí es vectorial</b>' + (diag ? ' (' + nTxt(diag.trazos, 'trazo', 'trazos', 'ningún trazo') + ' de dibujo, ' + nTxt(diag.imgs, 'imagen', 'imágenes', 'ninguna imagen') + ')' : '') +
+        ', pero las letras vienen <b>convertidas en curvas</b>: se ven nítidas a cualquier zoom, y aun así no son texto, son dibujos con forma de letra. Aquí no hay nada que buscar — <b>ni en Bluebeam tampoco</b>, no es cosa de esta app.<br><br>' +
+        'Lo que sí funciona: pídele al ingeniero que <b>reexporte el PDF con las fuentes dentro</b> (en AutoCAD, sin «convertir texto a geometría»; en Revit, sin «vectorizar texto»). Mientras tanto, cuenta con <b>Count</b> o con <b>Buscar iguales</b>, que miran el dibujo y no el texto.</div>';
+      if (n) n.textContent = ''; return;
+    }
+    if (estado === 'vacio') {
+      lista.innerHTML = '<div class="bMuted">Esa página del PDF viene <b>casi vacía</b>: ni texto, ni trazos, ni imágenes que valgan. Puede que el plano esté en otra página del archivo, o que la exportación saliera mal.</div>';
       if (n) n.textContent = ''; return;
     }
     if (!estado && !String(($('#buscaTxt') || {}).value || '').trim()) { lista.innerHTML = '<div class="bMuted">Escribe una palabra del plano: PANEL A, GFCI, 2-WAY, DISHWASHER…</div>'; if (n) n.textContent = ''; return; }
@@ -16856,13 +16913,14 @@
   }
   /* El contenido que se estampa: nuestros trazos, en el sistema de la página
      del PDF (puntos, con la Y hacia arriba). */
-  function contenidoEncima(bg, view) {
+  function contenidoEncima(bg, view, cm) {
     var vx0 = view[0], vy0 = view[1], pw = view[2] - view[0], ph = view[3] - view[1];
     var kx = pw / bg.w, ky = ph / bg.h;
     function X(wx) { return vx0 + (wx - bg.x) * kx; }
     function Y(wy) { return view[3] - (wy - bg.y) * ky; }
     var esc = (kx + ky) / 2;               // de pulgadas de obra a puntos del papel
     var out = ['q', '1 J 1 j'], n = 0, hayTexto = false;
+    if (cm) out.push(cm + ' cm');
     var ultimo = null;
     function estilo(e, relleno) {
       var s2 = '';
@@ -16928,13 +16986,41 @@
     if (fin < 0) return null;
     return { desde: mejor, cuerpoIni: ini, cuerpoFin: fin, cuerpo: str.slice(ini, fin) };
   }
+  /* De la página COMO SE VE al papel sin girar. El origen del dibujo es la
+     esquina de abajo a la izquierda de lo que se ve; la matriz la manda a la
+     esquina del papel que le toca según el giro:
+       ·   0° → esa misma esquina
+       ·  90° (giro horario al mostrar) → la de abajo a la DERECHA del papel
+       · 180° → la de arriba a la derecha
+       · 270° → la de arriba a la izquierda
+     Comprobado esquina por esquina en tools/prueba-pdf-vector.js. */
+  function matrizGiro(rot, view) {
+    var x0 = view[0], y0 = view[1], x1 = view[2], y1 = view[3];
+    if (rot === 90) return '0 1 -1 0 ' + pdfNum(x1) + ' ' + pdfNum(y0);
+    if (rot === 180) return '-1 0 0 -1 ' + pdfNum(x1) + ' ' + pdfNum(y1);
+    if (rot === 270) return '0 -1 1 0 ' + pdfNum(x0) + ' ' + pdfNum(y1);
+    return '1 0 0 1 ' + pdfNum(x0) + ' ' + pdfNum(y0);
+  }
+  window.__giroDbg = matrizGiro;
   function pdfEncimaDelOriginal(cb) {
     var bg = state.bg, rec = pdfLive[state.curSheet];
     if (!bg || !bg.pdfId || !rec || !rec.doc) { cb({ err: 'Esta hoja no tiene un PDF del ingeniero de fondo. El PDF vectorial encima solo tiene sentido si hay uno debajo.' }); return; }
     idbGet(bg.pdfId, function (bytes) {
       if (!bytes) { cb({ err: 'El PDF original ya no está guardado en este aparato. Vuelve a importarlo y prueba otra vez.' }); return; }
       rec.doc.getPage(rec.page).then(function (page) {
-        if ((page.rotate || 0) % 360 !== 0) { cb({ err: 'Esa página del PDF viene girada ' + page.rotate + '°. Todavía no sé estampar encima de una página girada sin arriesgarme a dejarla torcida.' }); return; }
+        /* PÁGINAS GIRADAS (E7, 15/09). Un PDF de obra trae /Rotate 90 muy a
+           menudo: el ingeniero dibuja en vertical y entrega en horizontal.
+           Antes se rechazaban ("no sé estampar sin dejarla torcida"), que era
+           honesto pero inútil: media hoja de un set viene girada.
+
+           Cómo se resuelve sin tocar el resto: el dibujo se calcula SIEMPRE en
+           coordenadas de la página TAL COMO SE VE (que es de donde salen bg.w
+           y bg.h, porque pdf.js ya aplica el giro en su viewport), y luego una
+           sola matriz `cm` lo lleva al papel sin girar, que es el sistema en
+           que vive el contenido del PDF. Una matriz, no mil cuentas: el texto
+           y los grosores viajan solos dentro de ella. */
+        var rot = ((page.rotate || 0) % 360 + 360) % 360;
+        if (rot % 90 !== 0) { cb({ err: 'Esa página dice estar girada ' + page.rotate + '°, que no es un giro válido de PDF (solo 0, 90, 180 o 270). No la toco.' }); return; }
         var view = page.view;                       // [x0,y0,x1,y1] en puntos
         var ref = page.ref;
         if (!ref || ref.num == null) { cb({ err: 'No pude localizar la página dentro del PDF.' }); return; }
@@ -16954,7 +17040,12 @@
         var pg = objRaw(str, ref.num, ref.gen || 0);
         if (!pg) { cb({ err: 'La página está comprimida dentro del PDF (ObjStm) y no la puedo reescribir sin riesgo. Usa el botón PDF de siempre.' }); return; }
 
-        var cont = contenidoEncima(bg, view);
+        /* La página COMO SE VE: con 90 o 270 el ancho y el alto se cambian.
+           El dibujo se hace sobre [0,0,Wd,Hd] y la matriz lo coloca. */
+        var pwPt = view[2] - view[0], phPt = view[3] - view[1];
+        var Wd = (rot % 180) ? phPt : pwPt, Hd = (rot % 180) ? pwPt : phPt;
+        var cm = matrizGiro(rot, view);
+        var cont = contenidoEncima(bg, [0, 0, Wd, Hd], cm);
         if (!cont.n) { cb({ err: 'No hay nada dibujado encima del plano: no hay marcas que estampar.' }); return; }
 
         var siguiente = parseInt(mSize[1], 10);
