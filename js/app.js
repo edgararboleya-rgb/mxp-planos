@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.T';
+  var APP_VERSION = 'v32.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2294,13 +2294,29 @@
       if (!ar || !ar.open || !ar.circ) return;
       var pan = String(ar.circ.panel || '').trim().toUpperCase() || '(sin panel)';
       por[pan] = por[pan] || {};
-      numsCirc(ar.circ).forEach(function (q) { if (q > 0) por[pan][q] = (por[pan][q] || 0) + 1; });
+      var m = Math.max(1, (+ar.circ.mult) || 1);
+      numsCirc(ar.circ).forEach(function (q) {
+        if (!(q > 0)) return;
+        var g = por[pan][q] || (por[pan][q] = { tramos: 0, mult: 1, ids: [] });
+        g.tramos++; g.mult = Math.max(g.mult, m); g.ids.push(ar.id);
+      });
     });
     var out = {};
     Object.keys(por).sort().forEach(function (pan) {
-      out[pan] = Object.keys(por[pan]).map(Number).sort(function (a, b) { return a - b; }).map(function (n) { return { num: n, tramos: por[pan][n] }; });
+      out[pan] = Object.keys(por[pan]).map(Number).sort(function (a, b) { return a - b; }).map(function (n) {
+        var g = por[pan][n]; return { num: n, tramos: g.tramos, mult: g.mult, ids: g.ids };
+      });
     });
     return out;
+  }
+  /* Tocar un ckt en la lista de Materiales selecciona sus tramos en el plano:
+     para encontrar de un golpe el 5 que no debería estar. */
+  function marcaCktEnHoja(pan, num) {
+    var por = circuitosPorPanel(state.areas), lst = (por[pan] || []).filter(function (q) { return q.num === num; })[0];
+    if (!lst || !lst.ids.length) return;
+    if (tool !== 'select') setTool('select');
+    var n = ponSel(lst.ids.map(function (id) { return { kind: 'area', id: id }; }));
+    setHint('✔ ' + n + ' tramo(s) del ckt ' + num + ' del panel ' + pan + ' seleccionados — en Propiedades les cambias el número; Supr los borra');
   }
   /* Renombrar un panel en TODOS sus tramos: MSP → NHI de un toque. */
   function renombraPanelCirc(viejo, nuevo) {
@@ -9785,7 +9801,7 @@
     resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad,
     // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
     tipo: tipoCorrida, nums: numsCirc, sincroniza: sincronizaNums, proximo: proximoCircLibre,
-    porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc,
+    porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc, marcaCkt: marcaCktEnHoja,
     breakers: breakersDeCircuitos, cuenta: cuentaCircuitos, normaliza: normalizaCirc
   };
 
@@ -11102,10 +11118,17 @@
       var porPan = circuitosPorPanel(state.areas), nomPan = Object.keys(porPan);
       nomPan.forEach(function (pan) {
         var lst = porPan[pan];
-        rows += '<tr><td colspan="2" class="muted small">Panel <b>' + esc(pan) + '</b> · ckt ' +
-          lst.map(function (q) { return q.num + (q.tramos > 1 ? '<span class="muted"> (' + q.tramos + ' tramos)</span>' : ''); }).join(', ') +
-          ' <button class="small btnRenPan" data-pan="' + esc(pan) + '" title="Cambiar el nombre de este panel en todos sus tramos">✎</button></td></tr>';
+        rows += '<tr><td colspan="2" class="muted small">Panel <b>' + esc(pan) + '</b> · ' +
+          lst.map(function (q) {
+            return '<button class="small btnCkt" data-pan="' + esc(pan) + '" data-num="' + q.num + '" title="Seleccionar en el plano los ' + q.tramos + ' tramo(s) de este ckt">ckt ' + q.num +
+              (q.tramos > 1 ? ' <span class="muted">· ' + q.tramos + ' tramos</span>' : '') +
+              (q.mult > 1 ? ' <b style="color:#a33">×' + q.mult + ' unid.</b>' : '') + '</button>';
+          }).join(' ') +
+          ' <button class="small btnRenPan" data-pan="' + esc(pan) + '" title="Cambiar el nombre de este panel en todos sus tramos">✎ panel</button></td></tr>';
       });
+      var totalCkt = nomPan.reduce(function (a, pan) { return a + porPan[pan].length; }, 0);
+      var conMult = nomPan.some(function (pan) { return porPan[pan].some(function (q) { return q.mult > 1; }); });
+      rows += '<tr><td colspan="2" class="muted small">Cada botón es un breaker' + (conMult ? ' (los de × unidades cuentan tantas veces como diga)' : '') + '. Tócalo para ver sus tramos en el plano. Si sobra un número, ahí está el breaker de más.</td></tr>';
       if (nomPan.length > 1) {
         rows += '<tr><td colspan="2" class="small" style="color:#a33">⚠ Hay tramos en <b>' + nomPan.length + ' paneles distintos</b>. El mismo número de ckt en dos paneles son dos breakers. Si es el mismo panel con dos nombres, toca ✎ y ponle el mismo a todos.</td></tr>';
       }
@@ -11141,6 +11164,9 @@
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
     enganchaConteoPanel();
     enganchaRutasPanel();
+    $$('#countsBody .btnCkt').forEach(function (bt) {
+      bt.addEventListener('click', function () { marcaCktEnHoja(bt.dataset.pan || '', parseInt(bt.dataset.num, 10) || 0); });
+    });
     $$('#countsBody .btnRenPan').forEach(function (bt) {
       bt.addEventListener('click', function () {
         var pan = bt.dataset.pan || '';
