@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.S';
+  var APP_VERSION = 'v32.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2407,9 +2407,39 @@
     });
     return u;
   }
+  /* La PAREJA de un circuito: si en el plano ya hay un tubo de k circuitos
+     en el mismo panel que lleva el número `num`, devuelve sus números. Es lo
+     que hace que escribir «2» en un tubo de 2 ckts traiga al 4 solo, en vez
+     de inventar un 5. Edgar (16/09): «me sale 6 porque he corrido dos
+     tuberías, la negra y la roja» — eran números inventados por el relleno. */
+  function parejaDe(pan, num, k, excluirId) {
+    var P = String(pan || '').trim().toUpperCase();
+    for (var i = (state && state.areas || []).length - 1; i >= 0; i--) {
+      var a = state.areas[i];
+      if (!a || !a.open || !a.circ || a.id === excluirId) continue;
+      if (String(a.circ.panel || '').trim().toUpperCase() !== P) continue;
+      var ns = numsCirc(a.circ);
+      if (ns.length !== k || ns.indexOf(num) < 0) continue;
+      if (ns.some(function (q) { return !(q > 0); })) continue;
+      return ns.slice();
+    }
+    return null;
+  }
   function sincronizaNums(c, excluirId) {
     if (!c) return c;
     var out = numsCirc(c), usados = null, vistos = {};
+    out.forEach(function (n) { if (n > 0) vistos[n] = 1; });
+    // 1) huecos: primero la pareja que ese circuito YA tiene en el plano
+    if (out.some(function (n) { return !(n > 0); }) && out.length > 1) {
+      var base = out.filter(function (n) { return n > 0; })[0];
+      var par = base ? parejaDe(c.panel, base, out.length, excluirId) : null;
+      if (par) {
+        var sobran = par.filter(function (q) { return !vistos[q]; });
+        for (var j = 0; j < out.length && sobran.length; j++) if (!(out[j] > 0)) { out[j] = sobran.shift(); vistos[out[j]] = 1; }
+      }
+    }
+    // 2) lo que siga vacío o repetido: el siguiente libre
+    vistos = {};
     for (var i = 0; i < out.length; i++) {
       var n = out[i];
       if (n > 0 && !vistos[n]) { vistos[n] = 1; continue; }
@@ -6695,7 +6725,15 @@
     }
     if (pendingAreaLabel) e.showLabel = true;
     estampaCofre('area', e);
-    if (esHomerun) { e.lineStyle = 'homerun'; e.capS = 'arrow'; }   // el homerun manda sobre lo del cofre
+    if (esHomerun) {
+      e.lineStyle = 'homerun'; e.capS = 'arrow';   // la corrida manda sobre lo del cofre
+      // (16/09, Edgar) el color se queda pegado: negro para el power, morado
+      // para los switch legs, rojo para emergencia — se cambia una vez y las
+      // siguientes salen igual, no hay que tocarlo en cada línea
+      var dCol = circDefaults();
+      if (dCol.color) e.color = dCol.color;
+      if (dCol.lw > 0) e.lw = dCol.lw;
+    }
     if (esRutaT && e.ruta && e.ruta.tipo) {
       // y la ruta manda sobre lo del cofre igual que el homerun: si no, una
       // herramienta guardada le cambiaba el color y ya no se sabía qué tubo era
@@ -8676,7 +8714,9 @@
     });
     $$('#prColorRow .sw').forEach(function (sw) {
       sw.addEventListener('click', function () {
-        pushUndo(); e.color = sw.dataset.c; refresh(); showProps();
+        pushUndo(); e.color = sw.dataset.c;
+        if (e.open && e.circ) circDefaults().color = e.color;   // las próximas corridas salen con este color
+        refresh(); showProps();
       });
     });
     $$('#prFillRow .sw').forEach(function (sw) {
@@ -8687,7 +8727,7 @@
       });
     });
     on('prFillOp', 'change', function (n) { pushUndo(); e.rellenoOp = Math.max(0.05, Math.min(1, parseFloat(n.value) || 0.3)); refresh(); });
-    on('prAreaLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.9; refresh(); });
+    on('prAreaLw', 'change', function (n) { pushUndo(); e.lw = parseFloat(n.value) || 0.9; if (e.open && e.circ) circDefaults().lw = e.lw; refresh(); });
     on('prAreaLbl', 'change', function (n) { pushUndo(); e.showLabel = n.checked; refresh(); });
     on('prToWall', 'click', function () {
       // convierte cada tramo de la polilínea en una pared del tipo actual
@@ -8731,6 +8771,9 @@
         pushUndo();
         var lista = numsCirc(et.circ);
         lista[i] = (v > 0 && v <= 84) ? v : 0;
+        // al cambiar el PRIMER número, los demás se vuelven a sacar de la pareja
+        // que ese circuito ya tiene en el plano (el 2 trae al 4), no del anterior
+        if (i === 0) for (var j = 1; j < lista.length; j++) lista[j] = 0;
         et.circ.nums = lista;
         if (lista[0]) et.circ.num = lista[0];
         sincronizaNums(et.circ, et.id); recuerdaCirc(et.circ); refresh(); showProps();
@@ -20137,7 +20180,10 @@
         lstC.map(function (q, i) {
           return '<input class="tmCircN" data-i="' + i + '" type="number" min="1" max="84" style="flex:1;min-width:0" value="' + esc(String(q || '')) + '">';
         }).join('') +
-        '<button id="tmCircSig" class="small" title="Pasar al siguiente circuito libre del plano" style="flex:0 0 auto">› sig.</button></div>';
+        '<button id="tmCircSig" class="small" title="Pasar al siguiente circuito libre del plano" style="flex:0 0 auto">› sig.</button></div>' +
+        '<div class="row"><label>Color</label><div class="swRow" id="tmCircColor">' +
+        COLOR_PRESETS.map(function (cc) { return '<span class="sw' + ((dC.color || '#14161a') === cc[0] ? ' cur' : '') + '" data-c="' + cc[0] + '" title="' + cc[1] + '" style="background:' + cc[0] + '"></span>'; }).join('') +
+        '</div></div>';
       html += '<div class="tmForm">' + filaTipo + wrapC.innerHTML +
         '<div class="row"><label>Breaker</label><select id="tmCircAmps">' + BREAKERS.map(function (am) { return '<option value="' + am + '"' + (+dC.amps === am ? ' selected' : '') + '>' + am + ' A</option>'; }).join('') + '</select></div>' +
         '<div class="row"><label>Polos</label><select id="tmCircPoles">' + [1, 2, 3].map(function (pl) {
@@ -20223,6 +20269,7 @@
           else if (el.classList.contains('tmCircN')) {
             var iN = parseInt(el.dataset.i, 10) || 0, vN = parseInt(el.value, 10), lN = numsCirc(d);
             lN[iN] = (vN > 0 && vN <= 84) ? vN : 0;
+            if (iN === 0) for (var jN = 1; jN < lN.length; jN++) lN[jN] = 0;   // la pareja se rederiva
             d.nums = lN; if (lN[0]) d.num = lN[0];
             sincronizaNums(d, null);
           }
@@ -20231,6 +20278,14 @@
             var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircGnd: 'gnd', tmCircTam: 'tam', tmCircAmps: 'amps' }[id];
             if (campo) aplicaCambioNEC(d, campo, el.value);
           }
+          scheduleAutosave();
+          showToolMenu('homerun', anchor);
+        });
+      });
+      // el color de las próximas corridas: se elige aquí y se queda
+      $$('#tmCircColor .sw').forEach(function (sw) {
+        sw.addEventListener('click', function () {
+          circDefaults().color = sw.dataset.c;
           scheduleAutosave();
           showToolMenu('homerun', anchor);
         });
