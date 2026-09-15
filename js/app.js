@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.P';
+  var APP_VERSION = 'v32.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -8214,8 +8214,11 @@
         html += '<div class="row"><label>Panel</label><input id="prCircPanel" value="' + esc(c.panel || '') + '" placeholder="MSP, A, B…"></div>';
         html += '<div class="row"><label>Circuito #</label><input id="prCircNum" type="number" min="1" max="84" value="' + esc(String(c.num || '')) + '" title="' + (tpP === 'derivado' ? 'Ponle el MISMO número del homerun que continúa' : 'El número de este circuito en el panel') + '"></div>';
         if (nCk > 1) {
-          // los demás circuitos del tubo: se escriben separados por coma
-          html += '<div class="row"><label>Los ' + nCk + ' del tubo</label><input id="prCircNums" value="' + esc(numsCirc(c).filter(function (q) { return q > 0; }).join(', ')) + '" placeholder="5, 7" title="Qué circuitos van dentro de este tubo. Cada uno pide su breaker"></div>';
+          // los números de los circuitos que comparten el tubo, separados por coma
+          var lstN = numsCirc(c).filter(function (q) { return q > 0; });
+          html += '<div class="row"><label>¿Cuáles ' + nCk + ' ckts?</label><input id="prCircNums" value="' + esc(lstN.join(', ')) + '" placeholder="ej. 2, 4" title="Los números de los ' + nCk + ' circuitos que van dentro de ESTE tubo, separados por coma. Cada uno pide su breaker y su espacio en el panel"></div>';
+          html += '<div class="muted small" style="margin:-2px 0 6px">Por este tubo van <b>' + nCk + ' circuitos</b>. Escribe sus números separados por coma (ej. <b>2, 4</b>): son <b>' + nCk + ' breakers</b> y ' + nCk + ' espacios en el panel ' + esc(c.panel || '') + '.' +
+            (lstN.length < nCk ? ' <b style="color:#a33">Falta ' + (nCk - lstN.length) + '.</b>' : '') + '</div>';
         }
         html += '<div class="row"><label>Cuarto / carga</label><input id="prCircDesc" value="' + esc(c.desc || '') + '" placeholder="Master bedroom, Range, A/C…"></div>';
         html += filasCircuitoNEC(c);
@@ -9708,6 +9711,7 @@
   };
   /* el homerun en tubo, para probarlo sin clics: defaults, cambios con el NEC delante, partidas, rótulo */
   window.__panelSchDbg = function () { return circuitosAlPanel(); };   // gancho de pruebas
+  window.__saneaDbg = function () { return saneaState(); };            // gancho de pruebas
   window.__homerunDbg = {
     defaults: circDefaults, cambia: aplicaCambioNEC, nuevo: nuevoCirc, partidas: partidasHomerun,
     resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad,
@@ -14240,6 +14244,14 @@
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
       if (!urlFondoSegura(b.url)) { state[k] = null; return; }
       nums(b, ['x', 'y', 'w', 'h', 'opacity']);
+    });
+    /* (15/09) Los circuitos de un plano GUARDADO: se les pone el tipo
+       (sin tipo = homerun, como siempre) y se les rellenan los números de
+       los circuitos que van en el tubo. Sin esto, un tubo de 2 ckts
+       guardado antes del cambio se quedaba con un solo número y volvía a
+       contar UN breaker en vez de dos. */
+    (state.areas || []).forEach(function (o) {
+      if (o && o.open && o.circ && typeof o.circ === 'object') { try { normalizaCirc(o.circ); sincronizaNums(o.circ, o.id); } catch (e) {} }
     });
   }
   function sinProto(o) {
