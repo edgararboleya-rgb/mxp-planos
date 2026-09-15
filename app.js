@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.L';
+  var APP_VERSION = 'v32.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -294,18 +294,20 @@
   };
   window.__undoDbg = function () { return { n: undoStack.length, undo: function () { undo(); } }; };
   window.__visualDbg = {
-    busca: function (rect, umbral, cb) {
+    busca: function (rect, umbral, cb, todo) {
       // igual que el flujo de verdad (vsearchFin): abre el panel y lo pinta,
       // porque la lista de revisión vive en el panel y hay que poder tocarla
       abreVisual();
+      var t0 = Date.now();
       visualArranca(rect, function (res) {
         if (res.err) { cb({ err: res.err }); return; }
-        visual = { ctx0: res, umbral: umbral, hits: null };
-        visualBarre(res, umbral, null, function (hits) {
-          visual.hits = hits; pintaVisual(); pintaPanelVisual(); cb({ hits: hits });
+        visual = { ctx0: res, umbral: umbral == null ? VISUAL_UMBRAL_DEF : umbral, hits: null, todo: !!todo };
+        (todo ? visualBarreTodo : visualBarre)(res, visual.umbral, null, function (hits) {
+          visual.hits = hits; pintaVisual(); pintaPanelVisual(); cb({ hits: hits, ms: Date.now() - t0, bbox: res.bbox });
         });
       });
     },
+    umbralDef: function () { return VISUAL_UMBRAL_DEF; },
     mete: function (catId) { metVisualAlConteo(catId); },
     lista: function () { return visual && visual.hits ? visual.hits.map(function (q, i) { return { i: i, sc: q.sc, fuera: !!q.fuera }; }) : null; },
     descarta: function (i) { if (visual && visual.hits && visual.hits[i]) { visual.hits[i].fuera = !visual.hits[i].fuera; pintaVisual(); pintaPanelVisual(); } },
@@ -17841,9 +17843,10 @@
      confundir — por eso los resultados se ENSEÑAN antes de contarlos y hay
      una barra de "cuánto se tienen que parecer".
      ================================================================== */
-  var visual = null;      // { rect, img, cv, ctx, esc, tpl, hits, umbral }
-  function visualCargaFondo(cb) {
-    var bg = state.bg;
+  var visual = null;      // { ctx0, umbral, hits, todo, cur }
+  var VISUAL_UMBRAL_DEF = 0.84;
+  function visualCargaFondo(cb, bgOpt) {
+    var bg = bgOpt || state.bg;
     if (!bg || !bg.url) { cb(null); return; }
     var im = new Image();
     im.onload = function () {
@@ -17890,7 +17893,7 @@
           integ[(y + 1) * W + (x + 1)] = integ[y * W + (x + 1)] + fila;
         }
       }
-      cb({ w: cw, h: ch, tinta: tinta, gorda: gorda, integ: integ, W: W, esc: esc });
+      cb({ w: cw, h: ch, tinta: tinta, gorda: gorda, integ: integ, W: W, esc: esc, bg: bg });
     };
     im.onerror = function () { cb(null); };
     im.src = bg.url;
@@ -17901,7 +17904,7 @@
   }
   /* Del rectángulo del plano (pulgadas) al de la imagen (píxeles). */
   function rectAImagen(F, r) {
-    var bg = state.bg;
+    var bg = F.bg || state.bg;
     var kx = F.w / bg.w, ky = F.h / bg.h;
     return {
       x0: Math.max(0, Math.round((r.x0 - bg.x) * kx)), y0: Math.max(0, Math.round((r.y0 - bg.y) * ky)),
@@ -17922,67 +17925,153 @@
         tplG[y * tw + x] = F.gorda[(R2.y0 + y) * F.w + (R2.x0 + x)];
       }
       if (tint < 8) { cb({ err: 'En ese marco casi no hay dibujo: no hay nada que reconocer.' }); return; }
-      cb({ F: F, tpl: tpl, tplG: tplG, tw: tw, th: th, tint: tint, rectImg: R2 });
+      /* MOLDE DEGENERADO (E3 v2): una raya sola o un borrón macizo «se parecen»
+         a media pared del plano y llenan la lista de falsos. Se mira la caja
+         de la tinta: si es una línea (menos de 6 px de ancho o de alto) o un
+         bloque casi sólido, se dice antes de buscar. */
+      var bx0 = tw, by0 = th, bx1 = -1, by1 = -1;
+      for (var yq = 0; yq < th; yq++) for (var xq = 0; xq < tw; xq++) if (tpl[yq * tw + xq]) { if (xq < bx0) bx0 = xq; if (xq > bx1) bx1 = xq; if (yq < by0) by0 = yq; if (yq > by1) by1 = yq; }
+      var bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+      if (Math.min(bw, bh) < 6) { cb({ err: 'El marco encierra solo una línea: eso se parece a cualquier pared o tubo del plano. Encierra un símbolo con forma (un can, un receptáculo, una salida).' }); return; }
+      if (tint / (bw * bh) > 0.6) { cb({ err: 'El marco encierra un borrón macizo, sin forma que reconocer. Encierra el símbolo dibujado, no un relleno.' }); return; }
+      cb({ F: F, tpl: tpl, tplG: tplG, tw: tw, th: th, tint: tint, rectImg: R2, bbox: { w: bw, h: bh } });
     });
   }
-  /* El barrido. Por tandas de filas, con pausa, para no congelar la app. */
-  function visualBarre(ctx0, umbral, onPaso, cb) {
-    var F = ctx0.F, tw = ctx0.tw, th = ctx0.th, tpl = ctx0.tpl, tplG = ctx0.tplG, tint = ctx0.tint;
-    // el paso tiene que ser fino: con la tinta engordada 1 px se aguanta un
-    // píxel de desajuste, no cuatro
-    var paso = Math.max(1, Math.min(4, Math.round(Math.min(tw, th) / 24)));
-    var hits = [];
-    var y = 0, filas = F.h - th;
+  /* El molde a otra escala (para una hoja cuyo raster no tiene la misma
+     densidad): vecino más cercano, engordado 1 px otra vez. */
+  function escalaMolde(ctx0, k) {
+    if (Math.abs(k - 1) < 0.02) return ctx0;
+    var tw = Math.max(4, Math.round(ctx0.tw * k)), th = Math.max(4, Math.round(ctx0.th * k));
+    var tpl = new Uint8Array(tw * th), tint = 0;
+    for (var y = 0; y < th; y++) for (var x = 0; x < tw; x++) {
+      var sx = Math.min(ctx0.tw - 1, Math.floor(x / k)), sy = Math.min(ctx0.th - 1, Math.floor(y / k));
+      var v = ctx0.tpl[sy * ctx0.tw + sx]; tpl[y * tw + x] = v; tint += v;
+    }
+    var tplG = new Uint8Array(tw * th);
+    for (var gy = 0; gy < th; gy++) for (var gx = 0; gx < tw; gx++) {
+      if (!tpl[gy * tw + gx]) continue;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+        var yy = gy + dy, xx = gx + dx; if (yy < 0 || yy >= th || xx < 0 || xx >= tw) continue; tplG[yy * tw + xx] = 1;
+      }
+    }
+    return { tpl: tpl, tplG: tplG, tw: tw, th: th, tint: tint };
+  }
+  /* EL BARRIDO EN DOS PASADAS (E3 v2, 15/09).
+     Antes: una pasada con salto de hasta 4 px y ahí se quedaba. Un símbolo
+     que caía entre dos saltos perdía nota (por eso a 90 % solo salían 8 de
+     13 en el plano real): el parecido se medía DESALINEADO.
+     Ahora: 1) pasada GRUESA con salto grande y umbral bajo, que solo dice
+     «por aquí puede haber algo»; 2) pasada FINA al píxel alrededor de cada
+     candidato, que se queda con la mejor alineación. Las notas de los
+     verdaderos suben (están alineados) y las de los falsos no, así que el
+     umbral por defecto puede ser más exigente y la lista trae menos basura.
+     Y es más rápido: la gruesa mira 4–9 veces menos ventanas. */
+  function visualNota(F, tpl, tplG, tw, th, tint, x, y) {
+    var enc1 = 0, enc2 = 0, tw2 = 0;
+    for (var yy = 0; yy < th; yy++) {
+      var of1 = yy * tw, of2 = (y + yy) * F.w + x;
+      for (var xx = 0; xx < tw; xx++) {
+        var a = tpl[of1 + xx], b = F.tinta[of2 + xx];
+        if (a && F.gorda[of2 + xx]) enc1++;
+        if (b) { tw2++; if (tplG[of1 + xx]) enc2++; }
+      }
+    }
+    var rec = enc1 / (tint || 1), pre = enc2 / (tw2 || 1);
+    /* La nota pesa más lo que del MOLDE aparece (rec) que lo que sobra en la
+       ventana (pre): en un plano real el símbolo casi siempre tiene una pared
+       o un homerun pasándole por encima, y eso no lo hace otro símbolo. Con
+       la media armónica de antes un can cruzado por una raya caía al 70 %;
+       un círculo SIN cruz (el pariente más cercano) se queda en ~74 % con
+       este peso, por debajo del 84 % por defecto. Medido en la prueba. */
+    return 0.65 * rec + 0.35 * pre;
+  }
+  function visualBarre(ctx0, umbral, onPaso, cb, molde) {
+    var F = ctx0.F, M = molde || ctx0, tw = M.tw, th = M.th, tpl = M.tpl, tplG = M.tplG, tint = M.tint;
+    var pasoG = Math.max(2, Math.min(6, Math.round(Math.min(tw, th) / 10)));
+    var umbralG = Math.max(0.45, umbral - 0.18);
+    var cand = [], y = 0, filas = F.h - th;
     var tMin = tint * 0.55, tMax = tint * 1.9;
-    function tanda() {
+    function gruesa() {
       var t0 = Date.now();
       while (y <= filas) {
-        for (var x = 0; x + tw <= F.w; x += paso) {
-          // primer filtro, de una resta: ¿hay siquiera tinta parecida aquí?
-          var s = integTinta(F, x, y, x + tw, y + th);
-          if (s < tMin || s > tMax) continue;
-          /* Parecido en los dos sentidos, contra la tinta engordada:
-             · cuánto del MOLDE aparece en la ventana (¿está el dibujo?)
-             · cuánto de la VENTANA cabe en el molde (¿o hay de más?)
-             y se juntan en una sola nota (media armónica). Así ni un símbolo
-             a medias ni un borrón lleno de tinta pasan por bueno. */
-          var enc1 = 0, enc2 = 0, tw2 = 0;
-          for (var yy = 0; yy < th; yy++) {
-            var of1 = yy * tw, of2 = (y + yy) * F.w + x;
-            for (var xx = 0; xx < tw; xx++) {
-              var a = tpl[of1 + xx], b = F.tinta[of2 + xx];
-              if (a && F.gorda[of2 + xx]) enc1++;
-              if (b) { tw2++; if (tplG[of1 + xx]) enc2++; }
-            }
-          }
-          var rec = enc1 / (tint || 1), pre = enc2 / (tw2 || 1);
-          var sc = (rec + pre) ? (2 * rec * pre / (rec + pre)) : 0;
-          if (sc >= umbral) hits.push({ x: x, y: y, sc: sc });
+        for (var x = 0; x + tw <= F.w; x += pasoG) {
+          var sm = integTinta(F, x, y, x + tw, y + th);
+          if (sm < tMin || sm > tMax) continue;
+          var sc = visualNota(F, tpl, tplG, tw, th, tint, x, y);
+          if (sc >= umbralG) cand.push({ x: x, y: y, sc: sc });
         }
-        y += paso;
+        y += pasoG;
         if (Date.now() - t0 > 40) break;      // se suelta el hilo cada 40 ms
       }
-      if (onPaso) onPaso(Math.min(1, y / (filas || 1)));
-      if (y <= filas) { setTimeout(tanda, 0); return; }
+      if (onPaso) onPaso(Math.min(0.7, 0.7 * y / (filas || 1)));
+      if (y <= filas) { setTimeout(gruesa, 0); return; }
+      // los candidatos se agrupan por cercanía antes de afinar: una zona, una afinada
+      cand.sort(function (a, b) { return b.sc - a.sc; });
+      var dmin = Math.max(tw, th) * 0.62, zonas = [];
+      cand.forEach(function (h) {
+        for (var i = 0; i < zonas.length; i++) if (Math.abs(zonas[i].x - h.x) < dmin && Math.abs(zonas[i].y - h.y) < dmin) return;
+        zonas.push(h);
+      });
+      cand = zonas.slice(0, 600);   // más de 600 zonas es que el molde no vale: se afinan las mejores
+      fina(0);
+    }
+    var hits = [];
+    function fina(i0) {
+      var t0 = Date.now(), i = i0;
+      while (i < cand.length) {
+        var c = cand[i], mejor = { x: c.x, y: c.y, sc: -1 };
+        var x0 = Math.max(0, c.x - pasoG), x1 = Math.min(F.w - tw, c.x + pasoG);
+        var y0 = Math.max(0, c.y - pasoG), y1 = Math.min(F.h - th, c.y + pasoG);
+        for (var yy = y0; yy <= y1; yy++) for (var xx = x0; xx <= x1; xx++) {
+          var sc = visualNota(F, tpl, tplG, tw, th, tint, xx, yy);
+          if (sc > mejor.sc) mejor = { x: xx, y: yy, sc: sc };
+        }
+        if (mejor.sc >= umbral) hits.push(mejor);
+        i++;
+        if (Date.now() - t0 > 40) break;
+      }
+      if (onPaso) onPaso(0.7 + 0.3 * (cand.length ? i / cand.length : 1));
+      if (i < cand.length) { setTimeout(function () { fina(i); }, 0); return; }
       // se quedan los mejores y se tiran los vecinos: un símbolo, un resultado
       hits.sort(function (a, b) { return b.sc - a.sc; });
       var dmin = Math.max(tw, th) * 0.62, buenos = [];
       hits.forEach(function (h) {
-        for (var i = 0; i < buenos.length; i++) {
-          if (Math.abs(buenos[i].x - h.x) < dmin && Math.abs(buenos[i].y - h.y) < dmin) return;
-        }
+        for (var k = 0; k < buenos.length; k++) if (Math.abs(buenos[k].x - h.x) < dmin && Math.abs(buenos[k].y - h.y) < dmin) return;
         buenos.push(h);
       });
-      var bg = state.bg, kx = bg.w / F.w, ky = bg.h / F.h;
+      var bg = F.bg || state.bg, kx = bg.w / F.w, ky = bg.h / F.h;
       cb(buenos.map(function (h) {
-        return {
-          sc: h.sc,
-          x: bg.x + (h.x + tw / 2) * kx, y: bg.y + (h.y + th / 2) * ky,
-          w: tw * kx, h: th * ky
-        };
+        return { sc: h.sc, x: bg.x + (h.x + tw / 2) * kx, y: bg.y + (h.y + th / 2) * ky, w: tw * kx, h: th * ky };
       }));
     }
-    setTimeout(tanda, 0);
+    setTimeout(gruesa, 0);
+  }
+  /* TODO EL SET (E3 v2): el molde de esta hoja se busca también en las otras
+     hojas con plano de fondo. Cada hoja carga su raster, el molde se lleva
+     a su escala si hace falta, y los resultados salen con su hoja. */
+  function visualBarreTodo(ctx0, umbral, onPaso, cb) {
+    var hojas = (state.sheets || []).map(function (sh, i) { return i; }).filter(function (i) { return i !== state.curSheet; });
+    var todos = [], densAqui = ctx0.F.w / ((ctx0.F.bg || state.bg).w || 1);
+    visualBarre(ctx0, umbral, function (pc) { if (onPaso) onPaso(pc / (hojas.length + 1)); }, function (hits) {
+      hits.forEach(function (h) { h.sheet = state.curSheet; });
+      todos = todos.concat(hits);
+      var k = 0;
+      function sig() {
+        if (k >= hojas.length) { cb(todos); return; }
+        var i = hojas[k++], sh = state.sheets[i], o = null;
+        try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = null; }
+        if (!o || !o.bg || !o.bg.url) { sig(); return; }
+        visualCargaFondo(function (F2) {
+          if (!F2) { sig(); return; }
+          var dens = F2.w / (o.bg.w || 1);
+          var M = escalaMolde(ctx0, dens / densAqui);
+          visualBarre({ F: F2, tw: M.tw, th: M.th, tpl: M.tpl, tplG: M.tplG, tint: M.tint }, umbral,
+            function (pc) { if (onPaso) onPaso((k + pc) / (hojas.length + 1)); },
+            function (hs) { hs.forEach(function (h) { h.sheet = i; }); todos = todos.concat(hs); sig(); }, M);
+        }, o.bg);
+      }
+      sig();
+    });
   }
   /* ---- la parte que se ve ---- */
   function pintaVisual() {
@@ -17990,6 +18079,7 @@
     if (!visual || !visual.hits) return;
     var s2 = '';
     visual.hits.forEach(function (h, i) {
+      if (h.sheet !== undefined && h.sheet !== state.curSheet) return;   // los de otras hojas se pintan al saltar allí
       s2 += '<rect class="visual' + (i === 0 ? ' molde' : '') + (h.fuera ? ' fuera' : '') +
         (i === visual.cur ? ' cur' : '') + '" x="' + (h.x - h.w / 2).toFixed(1) + '" y="' + (h.y - h.h / 2).toFixed(1) +
         '" width="' + h.w.toFixed(1) + '" height="' + h.h.toFixed(1) + '"/>';
@@ -18016,8 +18106,14 @@
     }
     var cats = catsCount();
     var vivos = visual.hits.filter(function (q) { return !q.fuera; });
+    var hojasCon = {}; visual.hits.forEach(function (q) { if (q.sheet !== undefined) hojasCon[q.sheet] = 1; });
+    var nHojasCon = Object.keys(hojasCon).length;
     var h = '<div class="vN"><b>' + vivos.length + '</b> para contar' +
+      (nHojasCon > 1 ? ' <span class="muted">· en ' + nHojasCon + ' hojas</span>' : '') +
       (visual.hits.length > vivos.length ? ' <span class="muted">· ' + (visual.hits.length - vivos.length) + ' descartado(s)</span>' : '') + '</div>';
+    if ((state.sheets || []).length > 1) {
+      h += '<div class="row"><label style="flex:1">Buscar en todas las hojas (' + state.sheets.length + ')</label><input id="vTodo" type="checkbox"' + (visual.todo ? ' checked' : '') + ' title="El mismo símbolo en todas las hojas del set que tengan plano de fondo. Cada resultado dice en qué hoja está y al tocarlo salta allí."></div>';
+    }
     h += '<div class="row"><label>Se parecen</label><input id="vUmbral" type="range" min="55" max="97" step="1" value="' + Math.round(visual.umbral * 100) + '" style="flex:1"><span id="vUmbralN" class="muted small" style="width:34px;text-align:right">' + Math.round(visual.umbral * 100) + '%</span></div>';
     h += '<div class="muted small">Bájalo si faltan; súbelo si está cogiendo cosas que no son. Sobra mejor que falte: lo que sobra lo ves y lo quitas de la lista, lo que falta no lo sabes nunca.</div>';
     /* La lista de revisión: uno por fila, del que más se parece al que menos.
@@ -18028,7 +18124,7 @@
       visual.hits.forEach(function (q, i) {
         h += '<div class="vFila' + (q.fuera ? ' fuera' : '') + (i === visual.cur ? ' cur' : '') + '" data-i="' + i + '">' +
           '<span class="vPc">' + Math.round(q.sc * 100) + '%</span>' +
-          '<span class="vTxt">' + (q.fuera ? 'descartado' : 'nº ' + (i + 1)) + '</span>' +
+          '<span class="vTxt">' + (q.fuera ? 'descartado' : 'nº ' + (i + 1)) + (q.sheet !== undefined && q.sheet !== state.curSheet && state.sheets[q.sheet] ? ' <span class="muted">· ' + esc(state.sheets[q.sheet].no || ('hoja ' + (q.sheet + 1))) + '</span>' : '') + '</span>' +
           '<button class="vX" data-x="' + i + '" title="' + (q.fuera ? 'Volver a contarlo' : 'No es: sácalo de la cuenta') + '">' + (q.fuera ? '↺' : '✗') + '</button>' +
           '</div>';
       });
@@ -18046,6 +18142,8 @@
       u.addEventListener('input', function () { if (un) un.textContent = u.value + '%'; });
       u.addEventListener('change', function () { visual.umbral = (+u.value) / 100; relanzaVisual(); });
     }
+    var vt = $('#vTodo');
+    if (vt) vt.addEventListener('change', function () { visual.todo = vt.checked; relanzaVisual(); });
     var lista = $('#vLista');
     if (lista) {
       lista.addEventListener('click', function (ev) {
@@ -18088,6 +18186,11 @@
     // view.k: eso fue un error que dejaba el botón sin hacer nada.)
     var q = visual && visual.hits && visual.hits[i]; if (!q) return;
     try {
+      if (q.sheet !== undefined && q.sheet !== state.curSheet && state.sheets[q.sheet]) {
+        // el resultado está en otra hoja: se guarda esta y se abre aquella, con la búsqueda viva
+        var vv = visual; syncSheet(); activateSheet(q.sheet); visual = vv;
+        var g0 = document.getElementById('gVisual'); if (g0) pintaVisual();
+      }
       var w = $('#canvasWrap').getBoundingClientRect();
       view.tx = w.width / 2 - q.x * view.z;
       view.ty = w.height / 2 - q.y * view.z;
@@ -18100,8 +18203,18 @@
     if (!ponen.length) return;
     if (!catCount(catId)) catId = catActivaSegura().id;
     if (!yaUndo) pushUndo();
+    var otras = {};
     ponen.forEach(function (h) {
-      state.counts.push({ id: uid(), x: Math.round(h.x), y: Math.round(h.y), cat: catId });
+      if (h.sheet === undefined || h.sheet === state.curSheet) { state.counts.push({ id: uid(), x: Math.round(h.x), y: Math.round(h.y), cat: catId }); return; }
+      (otras[h.sheet] = otras[h.sheet] || []).push({ id: uid(), x: Math.round(h.x), y: Math.round(h.y), cat: catId });
+    });
+    // las de otras hojas se escriben en el JSON de su hoja (sin abrirla)
+    Object.keys(otras).forEach(function (k) {
+      var sh = state.sheets[+k]; if (!sh) return;
+      var o = null; try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = null; }
+      if (!o) return;
+      o.counts = (o.counts || []).concat(otras[k]);
+      sh.data = JSON.stringify(o);
     });
     var n = ponen.length;
     var nom = (catCount(catId) || {}).nom || '';
@@ -18112,7 +18225,8 @@
   function relanzaVisual() {
     if (!visual || !visual.ctx0) return;
     pintaPanelVisual('Buscando… 0 %');
-    visualBarre(visual.ctx0, visual.umbral,
+    var fn = visual.todo ? visualBarreTodo : visualBarre;
+    fn(visual.ctx0, visual.umbral,
       function (pc) { pintaPanelVisual('Buscando… ' + Math.round(pc * 100) + ' %'); },
       function (hits) { visual.hits = hits; pintaVisual(); pintaPanelVisual(); });
   }
@@ -18128,7 +18242,10 @@
       //   90 % → solo 8 de 13.
       // Y ojo: MÁS resolución es PEOR, no mejor. A 4000 px encuentra 8 de 13 y
       // tarda seis veces más, porque un desajuste de un píxel pesa el doble.
-      visual = { ctx0: res, umbral: 0.80, hits: null };
+      // E3 v2 (15/09): con la pasada fina el parecido se mide ALINEADO, y las
+      // notas de los verdaderos suben; el umbral por defecto sube a 84 %.
+      // Queda por medir contra el plano real de Epic (ED-1.3): ver docs.
+      visual = { ctx0: res, umbral: VISUAL_UMBRAL_DEF, hits: null, todo: false };
       relanzaVisual();
     });
   }
