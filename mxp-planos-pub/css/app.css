@@ -249,6 +249,13 @@ body[data-barras="grandes"] { --tb: 1.25; }
 #toolMenu .tmItem { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; white-space: nowrap; }
 #toolMenu .tmItem:hover { background: var(--mp-sky-2); }
 #toolMenu .tmItem.cur { background: var(--mp-deep); color: #fff; }
+/* el formulario dentro del ▾ (homerun, 15/09): filas cortas, etiqueta fija */
+#toolMenu .tmForm { padding: 2px 8px 6px; display: flex; flex-direction: column; gap: 5px; max-width: 360px; }
+#toolMenu .tmForm .row { display: flex; align-items: center; gap: 6px; }
+#toolMenu .tmForm .row label { flex: none; width: 118px; font-size: 11px; color: var(--mp-ink-2); }
+#toolMenu .tmForm select, #toolMenu .tmForm input { flex: 1; min-width: 0; font-size: 12px; padding: 4px 6px; border: 1px solid var(--mp-line); border-radius: 7px; background: #fff; color: var(--mp-ink); }
+#toolMenu .tmForm .muted.small { white-space: normal; line-height: 1.4; font-size: 11px; }
+body.touch #toolMenu .tmForm select, body.touch #toolMenu .tmForm input { font-size: 14px; padding: 8px; }
 #toolMenu .tmItem { border-radius: 8px; }
 #toolMenu .tmItem svg { flex: none; border: 1px solid var(--mp-line); border-radius: 3px; background: var(--mp-card); }
 #toolMenu .tmTool { gap: 10px; padding: 7px 8px; }

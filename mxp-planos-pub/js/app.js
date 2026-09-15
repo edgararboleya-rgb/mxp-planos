@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.G';
+  var APP_VERSION = 'v32.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -246,7 +246,7 @@
     panels: [],    // panel schedules E-2
     precision: 4,  // fracción de pulgada para medidas (8=1/8")
     symEsc: 0.5,   // tamaño de los devices (switches, receptáculos…) respecto al dibujo — Edgar 03/09: "están muy grandes"
-    cntEsc: 0.6,   // tamaño de las marcas del Count respecto a antes — Edgar 15/09: "están muy grandes y se me van a confundir"
+    cntEsc: 0.45,  // marcas del Count del tamaño de un receptáculo (16×20 al 50 % = 8×10"; radio 4"). Edgar 15/09, dos veces: "muy grandes"
     lwEsc: 0.5,    // grosor de las líneas del plano (paredes, puertas, símbolos) — Edgar 03/09: "ponlas más finas", luego "más fino" (0.7 → 0.5)
     sheets: [{ no: '', title: '', data: null }],   // multi-hoja: cada hoja guarda su dibujo (sin nombre hasta que haya contenido)
     curSheet: 0,
@@ -275,6 +275,7 @@
   window.__loadSheetDbg = function (j) { try { loadSheetData(j); } catch (e) {} };
   window.__selGrupoDbg = function (g) { selGroup = g; sel = null; renderSel(); showProps(); };
   window.__mxpSelDbg = function () { return sel ? { kind: sel.kind, id: sel.id } : (selGroup ? { grupo: selGroup.length } : null); };
+  window.__selPonDbg = function (kind, id) { sel = kind ? { kind: kind, id: id } : null; selGroup = null; renderSel(); showProps(); };
   window.__conteoDbg = {
     csv: function () { return conteoCsvTexto(); },
     takeoff: function (soloHoja) { return buildTakeoffEntries(soloHoja); },
@@ -629,7 +630,7 @@
   function estadoVacio() {
     return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
       walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [], counts: [], countCats: [],
-      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, cntEsc: 0.6, printScale: 'fit', printSello: '', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
+      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, cntEsc: 0.45, printScale: 'fit', printSello: '', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
       project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '', id: nuevoIdProyecto(), rev: 0, creado: new Date().toISOString() }
     } };
   }
@@ -2116,12 +2117,70 @@
   // mismo panel, el mismo cable y el número siguiente (viaja con el proyecto)
   function circDefaults() {
     if (!state.circDefaults) state.circDefaults = { panel: 'MSP', num: 0, cable: '12/2', amps: 20, poles: 1, drop: 15 };
-    return state.circDefaults;
+    var d = state.circDefaults;
+    // (15/09) lo nuevo del homerun en tubo: qué tubo, qué calibre, cuántos
+    // circuitos comparten el tubo y cómo va el neutro. Se rellena si falta.
+    if (!d.sistema) d.sistema = /THHN/i.test(d.cable || '') ? 'tubo' : /^MC/i.test(d.cable || '') ? 'mc' : 'romex';
+    if (!d.tubo) d.tubo = 'EMT';
+    if (!d.calibre) d.calibre = '#12';
+    if (!d.ckts) d.ckts = 1;
+    if (!d.neutro) d.neutro = 'propio';
+    return d;
+  }
+  /* --- el homerun EN TUBO, con el NEC delante (Edgar, 15/09) ---
+     «Antes de correr la línea, escoger qué tubería, qué size, cuántos cables
+     adentro o cuántos circuitos, siempre con máximo 6 hot sin contar la tierra
+     para cumplir con el 80 %; si pongo cable 12 que me deje 1/2 o 3/4, si
+     pongo cable 6 que ya no me deje media porque no cabe.»
+     Todo lo que sabe de código vive en js/nec.js (Tablas 1, 4 y 5 del cap. 9
+     y 310.15(C)(1)); aquí solo se pregunta. Si nec.js no cargó, el homerun
+     sigue funcionando como antes (cable de la lista), sin reventar. */
+  function hayNEC() { return typeof window !== 'undefined' && window.NEC && typeof window.NEC.hilos === 'function'; }
+  /* Los hilos de un circuito en tubo: hot/neutro/tierra, portadores y ajuste. */
+  function hilosTubo(c) {
+    if (!hayNEC()) return null;
+    return window.NEC.hilos(c.ckts || 1, c.poles || 1, c.neutro || 'propio', true);
+  }
+  /* El tamaño de tubo que toca: el mínimo en que caben todos los hilos, o el
+     que Edgar eligió si es mayor. Nunca uno en que no caben. */
+  function tamTubo(c) {
+    if (!hayNEC()) return c.tam || null;
+    var h = hilosTubo(c); if (!h) return c.tam || null;
+    var min = window.NEC.tamanoMinimo(c.tubo || 'EMT', c.calibre || '#12', h.total);
+    if (!min) return null;
+    if (c.tam && window.NEC.llenado(c.tubo || 'EMT', c.tam, c.calibre || '#12', h.total) && window.NEC.llenado(c.tubo || 'EMT', c.tam, c.calibre || '#12', h.total).cabe) return c.tam;
+    return min;
+  }
+  /* El texto «cable» de siempre, para que alias, propuestas y pruebas viejas
+     sigan entendiendo el circuito: 'THHN #12 en 3/4" EMT'. */
+  function cableDeTubo(c) {
+    var tam = tamTubo(c) || c.tam || '1/2"';
+    var nomTubo = { EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC Sch 80', GRS: 'GRS', IMC: 'IMC' }[c.tubo || 'EMT'] || (c.tubo || 'EMT');
+    return 'THHN ' + (c.calibre || '#12') + ' en ' + tam + ' ' + nomTubo;
+  }
+  function esTuboCirc(c) { return c && (c.sistema === 'tubo' || (!c.sistema && esTubo(c.cable))); }
+  /* Sincroniza el texto viejo con el modelo nuevo cuando el circuito va en tubo. */
+  function normalizaCirc(c) {
+    if (!c) return c;
+    if (!c.sistema) c.sistema = esTubo(c.cable) ? 'tubo' : /^MC/i.test(c.cable || '') ? 'mc' : 'romex';
+    if (c.sistema === 'tubo') {
+      if (!c.tubo) { var pt0 = partesTubo(c.cable); c.tubo = pt0 && /PVC/i.test(pt0.tubo) ? 'PVC40' : pt0 && /GRS|RIGID/i.test(pt0.tubo) ? 'GRS' : 'EMT'; }
+      if (!c.calibre) { var pt1 = partesTubo(c.cable); c.calibre = pt1 ? pt1.calibre : '#12'; }
+      if (!c.ckts) c.ckts = 1;
+      if (!c.neutro) c.neutro = c.poles === 2 ? 'ninguno' : 'propio';
+      c.tam = tamTubo(c) || c.tam;
+      c.cable = cableDeTubo(c);
+    }
+    return c;
   }
   // el cable va en TUBO (THHN en EMT/PVC): el takeoff saca tubo Y conductores
   function esTubo(cable) { return /THHN/i.test(cable || ''); }
   // conductores sin tierra segun polos: 1P = fase + neutro; 2P = 2 fases (+ neutro si lo pide); 3P = 3 fases + neutro
-  function hilosDe(c) { return c.hilos > 0 ? +c.hilos : (+c.poles === 3 ? 4 : +c.poles === 2 ? 3 : 2); }
+  // (15/09) si el circuito va en tubo con el modelo nuevo, manda el NEC: hot + neutros de TODOS los circuitos del tubo
+  function hilosDe(c) {
+    if (esTuboCirc(c) && c.ckts) { var h = hilosTubo(c); if (h) return h.hot + h.neu; }
+    return c.hilos > 0 ? +c.hilos : (+c.poles === 3 ? 4 : +c.poles === 2 ? 3 : 2);
+  }
   function partesTubo(cable) {
     // 'THHN #12 en 1/2" EMT' -> { calibre: '#12', tubo: '1/2" EMT' }
     var m = /THHN\s*(#\d+)\s*en\s*(.+)$/i.exec(cable || '');
@@ -2133,11 +2192,15 @@
     state.areas.forEach(function (x) { if (x.circ && x.circ.num) usados[x.circ.num] = 1; });
     var n = (d.num || 0) + 1;
     while (usados[n]) n++;
-    return { panel: d.panel, num: n, desc: '', cable: d.cable, amps: d.amps, poles: d.poles, drop: d.drop, mult: 1 };
+    var c = { panel: d.panel, num: n, desc: '', cable: d.cable, amps: d.amps, poles: d.poles, drop: d.drop, mult: 1,
+              sistema: d.sistema, tubo: d.tubo, calibre: d.calibre, ckts: d.ckts, neutro: d.neutro, tam: d.tam || null };
+    return normalizaCirc(c);
   }
   function recuerdaCirc(c) {
     var d = circDefaults();
     d.panel = c.panel; d.cable = c.cable; d.amps = c.amps; d.poles = c.poles; d.drop = c.drop;
+    d.sistema = c.sistema || d.sistema; d.tubo = c.tubo || d.tubo; d.calibre = c.calibre || d.calibre;
+    d.ckts = c.ckts || d.ckts; d.neutro = c.neutro || d.neutro; d.tam = c.tam || null;
     if (c.num > (d.num || 0)) d.num = c.num;
   }
   // largo de cable que se compra: (trazo por el plano + lo que baja del techo) x
@@ -2150,6 +2213,16 @@
   // que cantidades salen de un homerun para materiales / CSV / estimador
   function partidasHomerun(a) {
     var c = a.circ || {}, L = largoHomerun(a), out = [];
+    if (esTuboCirc(c) && c.ckts && hayNEC()) {
+      // el modelo nuevo: UN tubo (con su nombre exacto del catálogo) y los hilos
+      // de todos los circuitos que van dentro, más UNA tierra por tubo
+      var h = hilosTubo(c), tam = tamTubo(c);
+      if (h && tam) {
+        out.push({ item: window.NEC.itemTubo(c.tubo || 'EMT', tam), ft: L });
+        out.push({ item: window.NEC.itemHilo(c.calibre || '#12'), ft: L * h.total });
+        return out;
+      }
+    }
     var pt = esTubo(c.cable) ? partesTubo(c.cable) : null;
     if (pt) {
       out.push({ item: pt.tubo + ' CONDUIT', ft: L });                              // el tubo
@@ -2159,8 +2232,101 @@
     }
     return out;
   }
+  /* El resumen NEC de un circuito en tubo, para el rótulo, el menú y Propiedades. */
+  function resumenNEC(c) {
+    if (!esTuboCirc(c) || !hayNEC()) return null;
+    var h = hilosTubo(c), tam = tamTubo(c); if (!h || !tam) return null;
+    var ll = window.NEC.llenado(c.tubo || 'EMT', tam, c.calibre || '#12', h.total);
+    return { h: h, tam: tam, llenado: ll, pct: ll ? Math.round(ll.pct * 100) : null,
+             min: window.NEC.tamanoMinimo(c.tubo || 'EMT', c.calibre || '#12', h.total),
+             tamanos: window.NEC.tamanosQueCaben(c.tubo || 'EMT', c.calibre || '#12', h.total),
+             maxCkts: window.NEC.maxCkts(c.poles || 1, c.neutro || 'propio') };
+  }
+  /* Las filas del sistema del circuito. Con NEC cargado y sistema 'tubo':
+     tubo → calibre → circuitos en el tubo → neutro → tamaño (solo los que
+     caben) y la línea de verdad: hilos, llenado y el ajuste de 310.15(C)(1).
+     Sin NEC: la lista de cables de siempre. `pref` distingue Propiedades del
+     menú ▾ (ids distintos, misma lógica). */
+  var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['IMC', 'IMC']];
+  var CALIBRE_OPC = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0'];
+  var NEUTRO_OPC = [['propio', 'Neutro propio (uno por circuito)'], ['compartido', 'Neutro compartido (multihilo 120/240)'], ['ninguno', 'Sin neutro (240 V puro)']];
+  function filasCircuitoNEC(c, pref) {
+    var P = pref || 'prCirc', h = '';
+    var sis = c.sistema || (esTubo(c.cable) ? 'tubo' : /^MC/i.test(c.cable || '') ? 'mc' : 'romex');
+    h += '<div class="row"><label>Sistema</label><select id="' + P + 'Sis">' +
+      [['romex', 'Romex (NM-B)'], ['mc', 'Cable MC'], ['tubo', 'THHN en tubo (EMT · PVC · GRS)']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (sis === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select></div>';
+    if (sis !== 'tubo' || !hayNEC()) {
+      var lista = CABLES.filter(function (cb) { return sis === 'tubo' ? /THHN/.test(cb[0]) : sis === 'mc' ? /^MC/.test(cb[0]) : !/THHN|^MC/.test(cb[0]); });
+      h += '<div class="row"><label>Cable</label><select id="' + P + 'Cable">' + lista.map(function (cb) {
+        // el nombre del cable lleva comillas (1/2" EMT): va escapado o rompe el value
+        return '<option value="' + esc(cb[0]) + '"' + (c.cable === cb[0] ? ' selected' : '') + '>' + esc(cb[1]) + '</option>';
+      }).join('') + '</select></div>';
+      return h;
+    }
+    var r = resumenNEC(c);
+    h += '<div class="row"><label>Tubo</label><select id="' + P + 'Tubo">' + TUBO_OPC.map(function (o) {
+      return '<option value="' + o[0] + '"' + ((c.tubo || 'EMT') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+    }).join('') + '</select></div>';
+    h += '<div class="row"><label>Calibre</label><select id="' + P + 'Cal">' + CALIBRE_OPC.map(function (k) {
+      return '<option value="' + k + '"' + ((c.calibre || '#12') === k ? ' selected' : '') + '>' + k + ' THHN</option>';
+    }).join('') + '</select></div>';
+    var maxC = r ? r.maxCkts : 3;
+    h += '<div class="row"><label>Circuitos en el tubo</label><select id="' + P + 'Ckts" title="Cuántos circuitos van juntos en este tubo. El tope lo pone el NEC: no más de 6 hilos que lleven corriente, para quedarse en el ajuste del 80 % (310.15(C)(1))">' +
+      [1, 2, 3, 4, 5, 6].map(function (n) {
+        var pasa = n <= maxC;
+        return '<option value="' + n + '"' + ((c.ckts || 1) === n ? ' selected' : '') + (pasa ? '' : ' disabled') + '>' + n + (pasa ? '' : ' — pasa de 6 portadores') + '</option>';
+      }).join('') + '</select></div>';
+    h += '<div class="row"><label>Neutro</label><select id="' + P + 'Neu">' + NEUTRO_OPC.map(function (o) {
+      return '<option value="' + o[0] + '"' + ((c.neutro || 'propio') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+    }).join('') + '</select></div>';
+    if (r) {
+      // solo los tamaños en que CABE: el 1/2" desaparece solo cuando pones #6
+      h += '<div class="row"><label>Tamaño</label><select id="' + P + 'Tam">' + r.tamanos.map(function (t) {
+        var ll = window.NEC.llenado(c.tubo || 'EMT', t, c.calibre || '#12', r.h.total);
+        return '<option value="' + esc(t) + '"' + (r.tam === t ? ' selected' : '') + '>' + esc(t) + (t === r.min ? ' (mínimo)' : '') + ' · ' + Math.round(ll.pct * 100) + ' % lleno</option>';
+      }).join('') + '</select></div>';
+      var it = window.NEC.itemTubo(c.tubo || 'EMT', r.tam);
+      h += '<div class="muted small" id="' + P + 'Nec">' +
+        '<b>' + r.h.total + ' hilos ' + (c.calibre || '#12') + '</b>: ' + r.h.hot + ' hot + ' + r.h.neu + ' neutro' + (r.h.neu === 1 ? '' : 's') + ' + 1 tierra' +
+        ' · llenado <b>' + r.pct + ' %</b> de ' + r.tam + ' (máx. ' + Math.round(r.llenado.pctPermitido * 100) + ' %)' +
+        ' · <b>' + r.h.portadores + ' portadores → ' + Math.round(r.h.ajuste * 100) + ' %</b>' + (r.h.pasa ? '' : ' ⚠ pasa de 6') +
+        '<br>Al takeoff: ' + esc(it) + ' y ' + esc(window.NEC.itemHilo(c.calibre || '#12')) + ' × ' + r.h.total + '.</div>';
+    } else {
+      h += '<div class="muted small" style="color:#a33">Con ese calibre y esos hilos no hay tamaño de ' + esc(c.tubo || 'EMT') + ' en la tabla. Baja circuitos o sube de tubo.</div>';
+    }
+    return h;
+  }
+  /* Los cambios del selector, para Propiedades (escriben en el circuito
+     seleccionado) y para el menú ▾ (escriben en los valores por defecto). */
+  function aplicaCambioNEC(c, campo, valor) {
+    if (campo === 'sistema') {
+      c.sistema = valor;
+      if (valor === 'romex') c.cable = /^MC|THHN/.test(c.cable || '') ? '12/2' : (c.cable || '12/2');
+      else if (valor === 'mc') c.cable = /^MC/.test(c.cable || '') ? c.cable : 'MC 12/2';
+      else { c.tubo = c.tubo || 'EMT'; c.calibre = c.calibre || '#12'; c.ckts = c.ckts || 1; c.neutro = c.neutro || (c.poles === 2 ? 'ninguno' : 'propio'); c.tam = null; }
+    } else if (campo === 'cable') c.cable = valor;
+    else if (campo === 'tubo') { c.tubo = valor; c.tam = null; }
+    else if (campo === 'calibre') { c.calibre = valor; c.tam = null; }
+    else if (campo === 'ckts') { c.ckts = Math.max(1, Math.min(6, parseInt(valor, 10) || 1)); c.tam = null; }
+    else if (campo === 'neutro') { c.neutro = valor; c.tam = null; }
+    else if (campo === 'tam') c.tam = valor;
+    else if (campo === 'poles') { c.poles = parseInt(valor, 10) || 1; if (c.sistema === 'tubo') c.tam = null; }
+    // un tope de circuitos que se pasó al cambiar polos o neutro se recorta, y se dice
+    if (c.sistema === 'tubo' && hayNEC()) {
+      var mx = window.NEC.maxCkts(c.poles || 1, c.neutro || 'propio');
+      if ((c.ckts || 1) > mx) { c.ckts = mx; setHint('Con ' + (c.poles || 1) + ' polo(s) y ese neutro caben ' + mx + ' circuito(s) sin pasar de 6 portadores: se recortó'); }
+    }
+    return normalizaCirc(c);
+  }
   function rotuloCirc(c) {
-    return '#' + (c.num || '?') + ' · ' + (c.cable || '') + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
+    var r = resumenNEC(c);
+    // en tubo, el rótulo dice lo que se compra: 3/4" EMT · 5#12 (2 ckts)
+    var cab = r ? (r.tam + ' ' + ({ EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC80', GRS: 'GRS', IMC: 'IMC' }[c.tubo || 'EMT'] || c.tubo) +
+                   ' · ' + r.h.total + (c.calibre || '#12') + (c.ckts > 1 ? ' (' + c.ckts + ' ckts)' : ''))
+                : (c.cable || '');
+    return '#' + (c.num || '?') + ' · ' + cab + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
       (c.desc ? ' · ' + c.desc : '');
   }
   var GLIFO_ALTO = 30;
@@ -7836,10 +8002,7 @@
         html += '<div class="row"><label>Panel</label><input id="prCircPanel" value="' + esc(c.panel || '') + '" placeholder="MSP, A, B…"></div>';
         html += '<div class="row"><label>Circuito #</label><input id="prCircNum" type="number" min="1" max="84" value="' + esc(String(c.num || '')) + '"></div>';
         html += '<div class="row"><label>Cuarto / carga</label><input id="prCircDesc" value="' + esc(c.desc || '') + '" placeholder="Master bedroom, Range, A/C…"></div>';
-        html += '<div class="row"><label>Cable</label><select id="prCircCable">' + CABLES.map(function (cb) {
-          // el nombre del cable lleva comillas (1/2" EMT): va escapado o rompe el value
-          return '<option value="' + esc(cb[0]) + '"' + (c.cable === cb[0] ? ' selected' : '') + '>' + esc(cb[1]) + '</option>';
-        }).join('') + '</select></div>';
+        html += filasCircuitoNEC(c);
         html += '<div class="row"><label>Breaker</label><select id="prCircAmps">' + BREAKERS.map(function (am) {
           return '<option value="' + am + '"' + (+c.amps === am ? ' selected' : '') + '>' + am + ' A</option>';
         }).join('') + '</select></div>';
@@ -7848,7 +8011,7 @@
         }).join('') + '</select></div>';
         html += '<div class="row"><label>Drop (ft)</label><input id="prCircDrop" type="number" min="0" step="1" value="' + (c.drop == null ? 15 : c.drop) + '" title="Lo que baja el cable del techo a las cajas: con techos de 10\' se calculan 10–15 ft por circuito"></div>';
         html += '<div class="row"><label>× Unidades</label><input id="prCircMult" type="number" min="1" step="1" value="' + (c.mult || 1) + '" title="El mismo recorrido repetido: 3 pisos iguales = 3. Como el # of Units del Excel"></div>';
-        if (esTubo(c.cable)) {
+        if (esTubo(c.cable) && !esTuboCirc(c)) {
           html += '<div class="row"><label>Hilos (sin tierra)</label><input id="prCircHilos" type="number" min="1" max="6" step="1" value="' + hilosDe(c) + '" title="Conductores de fase/neutro dentro del tubo; la tierra se suma sola"></div>';
         }
         html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo. Cambia el color o el grosor abajo para distinguir circuitos.</div>';
@@ -7870,6 +8033,7 @@
         html += '<div class="row"><label>Zona / piso</label><input id="prRutaZona" value="' + esc(r.zona || '') + '" placeholder="Piso 1, Ala Este, Mech Room…" title="Con esto la tabla de feeders se puede comprar piso por piso"></div>';
         html += '<div class="row"><label>Drop (ft)</label><input id="prRutaDrop" type="number" min="0" step="1" value="' + (+r.drop || 0) + '" title="Lo que baja del techo o sube a la caja, en pies. Se suma al trazo: (largo + drop) × unidades, igual que tu Excel"></div>';
         html += '<div class="row"><label>× Unidades</label><input id="prRutaMult" type="number" min="1" step="1" value="' + Math.max(1, (+r.mult) || 1) + '" title="El mismo recorrido repetido: 3 pisos iguales = 3. Como el # of Units del Excel"></div>';
+        html += filasRutaNEC(e);
         html += '<div class="muted small">' + (tR ? 'Va al takeoff como <b>' + esc(tR.nom) + '</b>, ' + Math.ceil(largoRuta(e) / 12) + ' ft, partida ' + esc(tR.codigo) + '.' : 'Sin tipo no entra al takeoff: elígelo arriba.') +
           (state.bg && !state.bg.cal ? ' <b>Este plano no está calibrado</b>: los pies son los del dibujo, no los de la obra.' : '') + '</div>';
       } else if (e.open) {
@@ -8305,12 +8469,23 @@
       var et = findSel(); if (!et || !et.circ) return;
       pushUndo(); et.circ[campo] = num ? (parseFloat(v) || 0) : v; recuerdaCirc(et.circ); refresh();
     }
+    // los campos del sistema/tubo pasan por el NEC y repintan Propiedades (cambian las opciones)
+    function circNEC(campo, v) {
+      var et = findSel(); if (!et || !et.circ) return;
+      pushUndo(); aplicaCambioNEC(et.circ, campo, v); recuerdaCirc(et.circ); refresh(); showProps();
+    }
     on('prCircPanel', 'change', function (n) { circSet('panel', n.value.trim()); });
     on('prCircNum', 'change', function (n) { circSet('num', n.value, true); });
     on('prCircDesc', 'change', function (n) { circSet('desc', n.value.trim()); });
-    on('prCircCable', 'change', function (n) { circSet('cable', n.value); });
+    on('prCircCable', 'change', function (n) { circNEC('cable', n.value); });
+    on('prCircSis', 'change', function (n) { circNEC('sistema', n.value); });
+    on('prCircTubo', 'change', function (n) { circNEC('tubo', n.value); });
+    on('prCircCal', 'change', function (n) { circNEC('calibre', n.value); });
+    on('prCircCkts', 'change', function (n) { circNEC('ckts', n.value); });
+    on('prCircNeu', 'change', function (n) { circNEC('neutro', n.value); });
+    on('prCircTam', 'change', function (n) { circNEC('tam', n.value); });
     on('prCircAmps', 'change', function (n) { circSet('amps', n.value, true); });
-    on('prCircPoles', 'change', function (n) { circSet('poles', n.value, true); });
+    on('prCircPoles', 'change', function (n) { circNEC('poles', n.value); });
     on('prCircDrop', 'change', function (n) { circSet('drop', n.value, true); });
     on('prCircMult', 'change', function (n) { circSet('mult', Math.max(1, parseInt(n.value, 10) || 1), true); });
     on('prCircHilos', 'change', function (n) { circSet('hilos', Math.max(1, parseInt(n.value, 10) || 2), true); });
@@ -8337,6 +8512,23 @@
       rutaDropUlt = et.ruta.drop;
       refresh(); refreshCounts(); showProps();
     });
+    function rutaNEC(campo, v) {
+      var et = findSel(); if (!et || !et.ruta) return;
+      pushUndo();
+      if (campo === 'fases') { et.ruta.fases = Math.max(0, parseInt(v, 10) || 0); if (et.ruta.fases && !et.ruta.calibre) et.ruta.calibre = '#8'; et.ruta.tam = null; }
+      else if (campo === 'calibre') { et.ruta.calibre = v; et.ruta.tam = null; }
+      else if (campo === 'neu') { et.ruta.neu = v === '1'; et.ruta.tam = null; }
+      else if (campo === 'gnd') { et.ruta.gnd = v === '1'; et.ruta.tam = null; }
+      else if (campo === 'sets') et.ruta.sets = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
+      else if (campo === 'tam') et.ruta.tam = v;
+      refresh(); refreshCounts(); showProps();
+    }
+    on('prRutaFases', 'change', function (n) { rutaNEC('fases', n.value); });
+    on('prRutaCal', 'change', function (n) { rutaNEC('calibre', n.value); });
+    on('prRutaNeu', 'change', function (n) { rutaNEC('neu', n.value); });
+    on('prRutaGnd', 'change', function (n) { rutaNEC('gnd', n.value); });
+    on('prRutaSets', 'change', function (n) { rutaNEC('sets', n.value); });
+    on('prRutaTam', 'change', function (n) { rutaNEC('tam', n.value); });
     on('prRutaMult', 'change', function (n) {
       var et = findSel(); if (!et || !et.ruta) return;
       var m = parseInt(n.value, 10);
@@ -8425,9 +8617,10 @@
   /* El tamaño de la marca sigue al de los devices: si Edgar bajó los símbolos
      porque "están muy grandes", las marcas del conteo bajan con ellos. */
   /* …y encima su propia perilla (Marcas Count, en Proyecto): al 100 % es el
-     tamaño que tenían hasta el 15/09; al 60 %, el nuevo por defecto, caben
-     entre los símbolos del ingeniero sin taparlos ni confundirse con ellos. */
-  function escCnt() { var v = Number(state.cntEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.6; }
+     tamaño que tenían hasta el 15/09. El 60 % le siguió pareciendo grande a
+     Edgar; al 45 % la marca mide lo que un receptáculo del plano (radio 4"
+     con los símbolos al 50 %), que es la referencia que él dio. */
+  function escCnt() { var v = Number(state.cntEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.45; }
   function countR() { return 9 * ((state.symEsc || 0.5) / 0.5) * escCnt(); }
 
   /* extra (opcional) viene de la Biblioteca de takeoff: alias = el Subject de
@@ -8967,9 +9160,81 @@
     var r = (a && a.ruta) || {};
     return (perimDe(a) + ((+r.drop) || 0) * 12) * Math.max(1, (+r.mult) || 1);
   }
+  /* --- los FEEDERS con la misma lógica que el homerun (Edgar, 15/09) ---
+     Una ruta de conduit lleva, si se le dice, su TAMAÑO y sus hilos: fases,
+     neutro, tierra y cuántos juegos en paralelo. El NEC (js/nec.js) dice qué
+     tamaño admite esos hilos y a qué % va; el takeoff saca el tubo con su
+     nombre exacto del catálogo y los hilos en pies. Sin hilos puestos, la ruta
+     sigue siendo solo pies de tubo por tipo, como hasta ahora. */
+  var RUTA_NEC_TIPO = { EMT: 'EMT', PVC: 'PVC40', GRS: 'GRS', IMC: 'IMC' };
+  function rutaNecTipo(a) { var t = rutaTipo(a && a.ruta && a.ruta.tipo); return t ? (RUTA_NEC_TIPO[t.mat] || null) : null; }
+  /* Los hilos de la ruta: fases + neutro + tierra, por juego. */
+  function hilosRuta(r) {
+    var f = Math.max(0, Math.min(6, Math.round(+r.fases) || 0));
+    if (!f) return null;
+    var n = r.neu ? 1 : 0, g = r.gnd === false ? 0 : 1;
+    var sets = Math.max(1, Math.round(+r.sets) || 1);
+    var porTubo = f + n + g;
+    // portadores: las fases; el neutro cuenta salvo que sea el de un sistema
+    // 120/240 o 3Ø lineal equilibrado — aquí se cuenta siempre (conservador):
+    // en un feeder no se puede saber la carga desde el plano
+    var portadores = f + n;
+    return { fases: f, neu: n, gnd: g, sets: sets, porTubo: porTubo, total: porTubo * sets,
+             portadores: portadores, ajuste: hayNEC() ? window.NEC.ajuste(portadores) : 1 };
+  }
+  function resumenNECRuta(a) {
+    if (!hayNEC() || !a || !a.ruta) return null;
+    var r = a.ruta, h = hilosRuta(r); if (!h || !r.calibre) return null;
+    var tipo = rutaNecTipo(a); if (!tipo) return { h: h, sinTabla: true };
+    var min = window.NEC.tamanoMinimo(tipo, r.calibre, h.porTubo);
+    var tam = (r.tam && window.NEC.llenado(tipo, r.tam, r.calibre, h.porTubo) && window.NEC.llenado(tipo, r.tam, r.calibre, h.porTubo).cabe) ? r.tam : min;
+    if (!tam) return { h: h, tipo: tipo, sinTam: true };
+    var ll = window.NEC.llenado(tipo, tam, r.calibre, h.porTubo);
+    return { h: h, tipo: tipo, tam: tam, min: min, llenado: ll, pct: Math.round(ll.pct * 100),
+             tamanos: window.NEC.tamanosQueCaben(tipo, r.calibre, h.porTubo),
+             itemTubo: window.NEC.itemTubo(tipo, tam), itemHilo: window.NEC.itemHilo(r.calibre) };
+  }
+  /* Lo que se compra de una ruta: si tiene hilos y tamaño, el tubo con su
+     nombre exacto (× juegos) y los hilos en pies; si no, nada aquí — el
+     takeoff la suma por tipo como siempre. */
+  function partidasRuta(a) {
+    var R = resumenNECRuta(a); if (!R || !R.tam) return null;
+    var L = largoRuta(a);
+    return [{ item: R.itemTubo, ft: L * R.h.sets }, { item: R.itemHilo, ft: L * R.h.total }];
+  }
   function esRuta(a) { return !!(a && a.open && a.ruta && a.ruta.tipo); }
   /* El rótulo que se ve en el plano: el material y el largo comprado. Sin el
      material no sirve de nada ver el número. */
+  /* Las filas de hilos y tamaño de una ruta (Propiedades). Solo si el tipo es
+     un tubo que el NEC conoce (EMT, PVC, GRS, IMC); para cable (MC, Romex,
+     CAT5E…) no aplica y no se enseñan. */
+  function filasRutaNEC(a) {
+    var r = a.ruta || {}, tipo = rutaNecTipo(a);
+    if (!tipo || !hayNEC()) return '';
+    var h = '';
+    h += '<div class="row"><label>Fases (hilos)</label><select id="prRutaFases" title="Cuántos conductores de fase van en el tubo. 0 = solo el tubo, sin hilos">' +
+      [0, 1, 2, 3, 4].map(function (n) { return '<option value="' + n + '"' + ((+r.fases || 0) === n ? ' selected' : '') + '>' + (n ? n : '— solo tubo —') + '</option>'; }).join('') + '</select></div>';
+    if (!(+r.fases > 0)) return h + '<div class="muted small">Pon las fases y sale el calibre, el tamaño que admite esos hilos y los pies de conductor al takeoff.</div>';
+    h += '<div class="row"><label>Calibre</label><select id="prRutaCal">' + window.NEC.CALIBRES.map(function (k) {
+      return '<option value="' + k + '"' + ((r.calibre || '#8') === k ? ' selected' : '') + '>' + k + (/^#|\/0$/.test(k) ? ' THHN' : ' MCM') + '</option>';
+    }).join('') + '</select></div>';
+    h += '<div class="row"><label>Neutro</label><select id="prRutaNeu">' + [[1, 'Sí — 1 neutro'], [0, 'No']].map(function (o) { return '<option value="' + o[0] + '"' + ((r.neu ? 1 : 0) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
+    h += '<div class="row"><label>Tierra</label><select id="prRutaGnd">' + [[1, 'Sí — 1 tierra'], [0, 'No (tubo metálico como tierra)']].map(function (o) { return '<option value="' + o[0] + '"' + ((r.gnd === false ? 0 : 1) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
+    h += '<div class="row"><label>Juegos en paralelo</label><input id="prRutaSets" type="number" min="1" max="8" step="1" value="' + Math.max(1, +r.sets || 1) + '" title="Feeders grandes van en 2, 3 o 4 tubos iguales en paralelo: cada juego es un tubo con sus hilos"></div>';
+    var R = resumenNECRuta(a);
+    if (R && R.tam) {
+      h += '<div class="row"><label>Tamaño</label><select id="prRutaTam">' + R.tamanos.map(function (t) {
+        var ll = window.NEC.llenado(R.tipo, t, r.calibre, R.h.porTubo);
+        return '<option value="' + esc(t) + '"' + (R.tam === t ? ' selected' : '') + '>' + esc(t) + (t === R.min ? ' (mínimo)' : '') + ' · ' + Math.round(ll.pct * 100) + ' % lleno</option>';
+      }).join('') + '</select></div>';
+      h += '<div class="muted small"><b>' + R.h.porTubo + ' hilos ' + esc(r.calibre) + ' por tubo</b>' + (R.h.sets > 1 ? ' × ' + R.h.sets + ' juegos' : '') +
+        ' · llenado <b>' + R.pct + ' %</b> de ' + R.tam + ' · ' + R.h.portadores + ' portadores → ' + Math.round(R.h.ajuste * 100) + ' %' +
+        '<br>Al takeoff: ' + esc(R.itemTubo) + (R.h.sets > 1 ? ' × ' + R.h.sets : '') + ' y ' + esc(R.itemHilo) + ' × ' + R.h.total + '.</div>';
+    } else if (R && R.sinTam) {
+      h += '<div class="muted small" style="color:#a33">Esos hilos no caben en ningún tamaño de ' + esc(R.tipo) + ' de la tabla: reparte en más juegos en paralelo.</div>';
+    }
+    return h;
+  }
   function rotuloRuta(a, col) {
     var t = rutaTipo(a.ruta.tipo);
     var tr = largoTramos(a.pts, false);
@@ -8979,7 +9244,9 @@
     var r = a.ruta, extra = '';
     if ((+r.drop) > 0) extra += ' +' + (+r.drop) + "' drop";
     if ((+r.mult) > 1) extra += ' ×' + (+r.mult);
-    var txt = (t ? (t.mat || t.subj) : '?') + ' ' + fmtFtIn(largoRuta(a)) + extra;
+    var R = resumenNECRuta(a);
+    var cab = R && R.tam ? (R.tam + ' ' + (t ? t.mat : '') + ' · ' + R.h.porTubo + (/^#/.test(r.calibre) ? '' : '×') + r.calibre + (R.h.sets > 1 ? ' ×' + R.h.sets + ' juegos' : '')) : (t ? (t.mat || t.subj) : '?');
+    var txt = cab + ' ' + fmtFtIn(largoRuta(a)) + extra;
     return '<text x="0" y="' + (-(a.lw || 1.3) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
       ') rotate(' + an.toFixed(1) + ')" font-size="' + (8 * glifoK(a)).toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' +
       (col || '#14161a') + '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(txt) + '</text>';
@@ -9148,7 +9415,13 @@
     activa: function (k) { if (k) rutaActiva = k; return rutaActiva; },
     totales: rutasTotales,
     csv: rutasCsvTexto,
-    largo: largoRuta
+    largo: largoRuta,
+    hilos: hilosRuta, resumen: resumenNECRuta, partidas: partidasRuta, filas: filasRutaNEC, rotulo: rotuloRuta
+  };
+  /* el homerun en tubo, para probarlo sin clics: defaults, cambios con el NEC delante, partidas, rótulo */
+  window.__homerunDbg = {
+    defaults: circDefaults, cambia: aplicaCambioNEC, nuevo: nuevoCirc, partidas: partidasHomerun,
+    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC
   };
 
   /* ==================================================================
@@ -11017,7 +11290,7 @@
     syncSheet();
     var out = [];
     function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {};   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {};   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -11038,6 +11311,10 @@
       (d.areas || []).forEach(function (ar) {
         if (!ar || !ar.open || !ar.ruta || !ar.ruta.tipo) return;
         var Lr = largoRuta(ar); if (!(Lr > 0)) return;
+        // con hilos y tamaño puestos, la ruta sale como lo que se COMPRA: el
+        // tubo exacto y los conductores (15/09); si no, por tipo, como siempre
+        var pr = partidasRuta(ar);
+        if (pr) { var codR = (rutaTipo(ar.ruta.tipo) || {}).codigo || '08-ROUGH'; pr.forEach(function (q) { var kq = codR + '\u0001' + q.item; rp[kq] = (rp[kq] || 0) + q.ft; }); return; }
         rt[ar.ruta.tipo] = (rt[ar.ruta.tipo] || 0) + Lr;
       });
       (d.areas || []).forEach(function (ar) {
@@ -11076,6 +11353,8 @@
       var tR = rutaTipo(k); if (!tR) return;
       add(tR.nom, Math.ceil(rt[k] / 12), 'FT', tR.codigo);
     });
+    // las rutas con hilos: el tubo exacto y el conductor, con el código de su grupo (feeder → 06-FEED)
+    Object.keys(rp).forEach(function (k) { var i = k.indexOf('\u0001'); add(k.slice(i + 1), Math.ceil(rp[k] / 12), 'FT', k.slice(0, i)); });
     var cntNom = {};
     Object.keys(cnt).forEach(function (id) { var c = catCount(id); var nm = c ? (c.alias || c.nom) : null; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
     Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
@@ -15635,7 +15914,7 @@
     // ajustes de escala: fuera de rango → por defecto (proyectos viejos no traen el campo)
     if (!(isFinite(+st.symEsc) && +st.symEsc >= 0.3 && +st.symEsc <= 1.5)) st.symEsc = 0.5;
     if (!(isFinite(+st.lwEsc) && +st.lwEsc >= 0.3 && +st.lwEsc <= 1.5)) st.lwEsc = 0.5;
-    if (!(isFinite(+st.cntEsc) && +st.cntEsc >= 0.3 && +st.cntEsc <= 1.5)) st.cntEsc = 0.6;   // proyectos de antes: al nuevo tamaño chico
+    if (!(isFinite(+st.cntEsc) && +st.cntEsc >= 0.3 && +st.cntEsc <= 1.5) || +st.cntEsc === 0.6) st.cntEsc = 0.45;   // proyectos de antes (y los del 60 % de ayer): al tamaño de un receptáculo
     return null;
   }
   function hayContenido() {
@@ -18273,7 +18552,7 @@
     { id: 'trim', grp: 'shape', ico: 'trim', nom: 'Trim', key: 'G', tip: 'Trim / Extend / Break (G): recorta lo que sobra de una pared, cable o línea contra lo que se cruza · alárgala hasta que toque · pártela en dos. El ▾ elige cuál de las tres.', menu: 'trim', menuTip: 'Recortar, alargar o partir' },
     { id: 'cloud', grp: 'shape', ico: 'cloud', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
     { id: 'ruta', grp: 'elec', ico: 'ruta', nom: 'Ruta', key: 'U', tip: 'RUTA DE CONDUIT (U): traza el recorrido sobre el plano YA CALIBRADO y el largo se suma por TIPO de tubo — EMT, PVC, MC, GRS, ENT, Romex…— separando Feeders de Branch Circuits. Es el takeoff lineal que sale a CSV para Excel y al estimador.', menu: 'ruta', menuTip: 'Elegir el tipo de tubo o cable' },
-    { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule' },
+    { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule', menu: 'homerun', menuTip: 'Antes de trazar: qué tubo, qué calibre, cuántos circuitos — con el llenado y el 80 % del NEC delante' },
     { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
     { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
     { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
@@ -19044,6 +19323,21 @@
         html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
       }
+    } else if (kind === 'homerun') {
+      /* Lo que pidió Edgar (15/09): elegir tubo, calibre y cuántos circuitos
+         ANTES de correr la línea, con el NEC diciendo qué cabe. Lo que se elige
+         aquí es lo que sale en el próximo homerun; el menú se queda abierto
+         mientras se ajusta. */
+      var dC = circDefaults();
+      html += '<div class="tmHead">El próximo homerun sale así</div>';
+      var wrapC = document.createElement('div'); wrapC.innerHTML = filasCircuitoNEC(dC, 'tmCirc');
+      html += '<div class="tmForm">' + wrapC.innerHTML +
+        '<div class="row"><label>Polos</label><select id="tmCircPoles">' + [1, 2, 3].map(function (pl) {
+          return '<option value="' + pl + '"' + (+dC.poles === pl ? ' selected' : '') + '>' + pl + (pl === 1 ? ' polo (120 V)' : pl === 2 ? ' polos (240 V)' : ' polos (3Ø)') + '</option>';
+        }).join('') + '</select></div>' +
+        '<div class="row"><label>Drop (ft)</label><input id="tmCircDrop" type="number" min="0" step="1" value="' + (dC.drop == null ? 15 : dC.drop) + '"></div></div>';
+      html += '<div class="tmItem" data-k="__trazar"><span><b>Trazar con esto</b> — clic en el panel, clic en la carga</span></div>';
+      html += '<div class="tmPie">El tamaño de tubo que se ofrece es solo el que admite esos hilos (Cap. 9, Tabla 1: 40 % con 3 o más). «Portadores» son los hilos que llevan corriente — la tierra no cuenta, ni el neutro compartido de un multihilo—; con 4 a 6 la ampacidad se ajusta al 80 % (310.15(C)(1)), y de ahí no se pasa.</div>';
     } else if (kind === 'ruta') {
       var tipos = rutaTipos();
       if (!tipos.length) {
@@ -19106,6 +19400,24 @@
     tm.innerHTML = html;
     tm.dataset.kind = kind;
     colocaMenu(tm, anchor, '');
+    /* El formulario del homerun (▾): cada cambio pasa por el NEC, se escribe en
+       los valores por defecto y el menú se vuelve a pintar EN EL MISMO SITIO,
+       porque las opciones dependen unas de otras (poner #6 quita el 1/2"). */
+    if (kind === 'homerun') {
+      $$('#toolMenu .tmForm select, #toolMenu .tmForm input').forEach(function (el) {
+        el.addEventListener('change', function () {
+          var d = circDefaults(), id = el.id;
+          if (id === 'tmCircDrop') d.drop = Math.max(0, parseFloat(el.value) || 0);
+          else if (id === 'tmCircPoles') aplicaCambioNEC(d, 'poles', el.value);
+          else {
+            var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircTam: 'tam' }[id];
+            if (campo) aplicaCambioNEC(d, campo, el.value);
+          }
+          scheduleAutosave();
+          showToolMenu('homerun', anchor);
+        });
+      });
+    }
     $$('#toolMenu .tmItem').forEach(function (it) {
       it.addEventListener('click', function () {
         var k = it.dataset.k;
@@ -19193,6 +19505,8 @@
           var cSel = catCount(k);
           refreshCounts();
           setHint('Contando ' + (cSel ? cSel.nom : '') + ' — toca cada uno en el plano · Esc para salir');
+        } else if (kind === 'homerun') {
+          if (k === '__trazar') { tm.hidden = true; setTool('homerun'); setHint('HOMERUN: clic en el panel, clic en la carga · sale ' + (resumenNEC(circDefaults()) ? rotuloCirc(Object.assign({}, circDefaults(), { num: '' })).replace(/^#\?? · /, '') : circDefaults().cable)); return; }
         } else if (kind === 'ruta') {
           if (k === '__zona') {
             tm.hidden = true;
