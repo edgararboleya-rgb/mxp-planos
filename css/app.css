@@ -458,6 +458,25 @@ body.rpResize #canvasWrap { pointer-events: none; }
 /* (auditoría takeoff 03/09) con float:right el 3er botón caía sobre la tabla y no se podía pulsar */
 .panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; padding: 8px 10px 4px; color: var(--mp-teal-text); font-weight: 650; border-left: 3px solid var(--mp-blue); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .panel h3 button { margin-left: auto; font-size: 10px; padding: 3px 8px; text-transform: none; letter-spacing: 0; }
+/* SECCIONES PLEGABLES (Edgar, 15/09): «que se puedan expandir y recoger por
+   subtítulos … y así no tengo tanta información». El título de cada sección
+   del panel derecho se pliega de un clic (los botones del título siguen
+   funcionando); dentro de Propiedades, las ACCIONES (convertir, girar,
+   espejo, borrar, guardar como herramienta…) y el ASPECTO (opacidad, color,
+   formato) van en dos grupos plegables. Todo se recuerda con las barras. */
+#rightPanel .panel > h3 { cursor: pointer; user-select: none; }
+#rightPanel .panel > h3::before { content: '▾'; flex: none; width: 10px; font-size: 10px; opacity: .6; transition: transform .15s; }
+#rightPanel .panel.plegada > h3::before { content: '▸'; }
+#rightPanel .panel.plegada > :not(h3) { display: none !important; }
+#rightPanel .panel.plegada { border-bottom-color: var(--mp-line); }
+details.prGrupo { border: 1px solid var(--mp-line); border-radius: 10px; background: rgba(255,255,255,.55); margin-top: 4px; }
+details.prGrupo > summary { list-style: none; cursor: pointer; user-select: none; padding: 6px 10px; font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; color: var(--mp-teal-text); display: flex; align-items: center; gap: 6px; }
+details.prGrupo > summary::-webkit-details-marker { display: none; }
+details.prGrupo > summary::before { content: '▸'; font-size: 10px; opacity: .6; }
+details.prGrupo[open] > summary::before { content: '▾'; }
+details.prGrupo > summary .n { margin-left: auto; font-weight: 500; opacity: .6; text-transform: none; letter-spacing: 0; }
+details.prGrupo > .prGrupoBody { display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 8px; border-top: 1px solid var(--mp-line); }
+body.touch details.prGrupo > summary { min-height: 40px; }
 .pbody { padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .pbody input[type="text"], .pbody input:not([type]), .pbody input[type="number"], .pbody select {
   width: 100%; padding: 6px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 12px;

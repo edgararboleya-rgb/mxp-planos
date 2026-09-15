@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.J';
+  var APP_VERSION = 'v32.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -7753,6 +7753,41 @@
     refresh();
   }
 
+  /* PROPIEDADES POR GRUPOS (Edgar, 15/09): lo que DESCRIBE la marca se queda
+     arriba, tal cual; las ACCIONES (convertir en polígono / paredes / línea /
+     ruta, girar, enderezar, espejo, repetir, mover, los parecidos, guardar
+     como herramienta, borrar) van a un grupo plegable «Herramientas», y la
+     opacidad y el formato a «Aspecto». Se hace sobre el DOM ya pintado, así
+     que ninguna rama de showProps cambia y los ids siguen donde estaban. */
+  function agrupaProps(body) {
+    if (!body || !layout) return;
+    function nodo(id) { return body.querySelector('#' + id); }
+    function fila(id) { var n = nodo(id); return n ? (n.closest('.row') || n) : null; }
+    function bloque(id) { var n = nodo(id); return n && n.parentNode !== body ? n.parentNode : n; }
+    var herr = [nodo('prToRuta'), nodo('prToPoly'), nodo('prToWall'), nodo('prToLine'), nodo('prSinCurva'),
+                bloque('prRotSelL'), nodo('prEndSel'), bloque('prEspV'), nodo('prParecidos'), nodo('prCofre'), nodo('prDelete')];
+    var asp = [fila('prOpac'), bloque('prCopiaFmt') || bloque('prPegaFmt')];
+    var fmtNota = asp[1] && asp[1].nextElementSibling && /Formato en memoria/.test(asp[1].nextElementSibling.textContent || '') ? asp[1].nextElementSibling : null;
+    if (fmtNota) asp.push(fmtNota);
+    function grupo(id, titulo, nodos, abierto) {
+      var lista = nodos.filter(function (n, i) { return n && n.parentNode && nodos.indexOf(n) === i; });
+      if (!lista.length) return;
+      var d = document.createElement('details'); d.className = 'prGrupo'; d.id = id; if (abierto) d.open = true;
+      d.innerHTML = '<summary>' + titulo + '<span class="n">' + lista.length + '</span></summary><div class="prGrupoBody"></div>';
+      var cuerpo = d.lastChild;
+      lista.forEach(function (n) { cuerpo.appendChild(n); });
+      body.appendChild(d);
+      d.addEventListener('toggle', function () {
+        var k = id === 'prGrpHerr' ? 'herr' : 'aspecto';
+        if (!layout.prGrupos) layout.prGrupos = { herr: true, aspecto: false };
+        if (layout.prGrupos[k] !== d.open) { layout.prGrupos[k] = d.open; guardaLayoutLuego(); }
+      });
+    }
+    var g = layout.prGrupos || { herr: true, aspecto: false };
+    grupo('prGrpHerr', 'Herramientas', herr, g.herr !== false);
+    grupo('prGrpAspecto', 'Aspecto y formato', asp, !!g.aspecto);
+  }
+
   /* "Los parecidos": el botón que coge de golpe todos los de la misma clase.
      Aparece siempre que hay algo marcado, con uno o con varios. */
   function botonParecidos() {
@@ -8205,6 +8240,7 @@
     if (sel.kind !== 'opening') html += botonesCad(sel.kind === 'area') + botonParecidos() + botonesFormato(false, 1);
     html += '<button id="prCofre" style="width:100%;margin-top:2px" title="Guarda esta marca YA CONFIGURADA como herramienta tuya: después es un solo toque y sale otra igual. Se guarda en este aparato y sirve en todos tus proyectos.">' + ICO.svg('cofre') + ' Guardar como herramienta</button>';
     body.innerHTML = html;
+    agrupaProps(body);
     engancharCad();
     enganchaParecidos();
     if (sel.kind !== 'opening') enganchaFormato([sel]);
@@ -9502,6 +9538,9 @@
     tam: function (t) { layout.tam = t; aplicaTamYPanel(); guardaLayout(); },
     panelW: function (w) { layout.panelW = w; aplicaTamYPanel(); guardaLayout(); },
     costado: costado,
+    plegadas: function () { return (layout.plegadas || []).slice(); },
+    pliega: pliegaSeccion,
+    prGrupos: function () { return Object.assign({}, layout.prGrupos); },
     dock: function (id, d) { DOCKS.forEach(function (k) { layout.docks[k] = layout.docks[k].filter(function (x) { return x !== id; }); }); layout.docks[d].push(id); guardaLayout(); pintaBarras(); },
     abre: abrePanelBarras
   };
@@ -18723,6 +18762,8 @@
     if (TAM_BARRAS.indexOf(g.tam) >= 0) L.tam = g.tam;
     var pw = +g.panelW; L.panelW = (isFinite(pw) && pw >= PANEL_W_MIN && pw <= PANEL_W_MAX) ? Math.round(pw) : null;
     L.palOculta = !!g.palOculta; L.rpOculta = !!g.rpOculta;
+    L.plegadas = Array.isArray(g.plegadas) ? g.plegadas.filter(function (x) { return typeof x === 'string'; }) : [];
+    L.prGrupos = { herr: !(g.prGrupos && g.prGrupos.herr === false), aspecto: !!(g.prGrupos && g.prGrupos.aspecto) };
     return L;
   }
   /* Aplicar lo que no son barras: el tamaño de las cajitas (variable CSS en
@@ -18734,8 +18775,31 @@
     // los costados recogidos (Edgar, 15/09): una clase en el body y el CSS hace el resto
     document.body.classList.toggle('palOculta', !!layout.palOculta);
     document.body.classList.toggle('rpOculta', !!layout.rpOculta);
+    aplicaPlegadas();
     if (typeof actualizaMas === 'function') actualizaMas();
   }
+  /* Las secciones del panel derecho (Propiedades, Capas, Proyecto,
+     Materiales) plegadas por su título; se recuerdan por id. */
+  function aplicaPlegadas() {
+    var pl = (layout && layout.plegadas) || [];
+    $$('#rightPanel section.panel[id]').forEach(function (sec) { sec.classList.toggle('plegada', pl.indexOf(sec.id) >= 0); });
+  }
+  function pliegaSeccion(id, plegada) {
+    if (!layout.plegadas) layout.plegadas = [];
+    var i = layout.plegadas.indexOf(id), q = plegada === undefined ? i < 0 : !!plegada;
+    if (q && i < 0) layout.plegadas.push(id);
+    if (!q && i >= 0) layout.plegadas.splice(i, 1);
+    aplicaPlegadas(); guardaLayout();
+  }
+  (function () {
+    var rp = $('#rightPanel'); if (!rp) return;
+    rp.addEventListener('click', function (ev) {
+      var h = ev.target.closest && ev.target.closest('#rightPanel section.panel[id] > h3');
+      if (!h) return;
+      if (ev.target.closest('button, input, select, a, label')) return;   // los botones del título hacen lo suyo
+      pliegaSeccion(h.parentNode.id);
+    });
+  })();
   /* Esconder o mostrar un costado. `lado`: 'pal' (paleta de símbolos) o 'rp'
      (panel de Propiedades). Sin argumento, alterna. */
   function costado(lado, oculto) {
