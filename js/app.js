@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.D';
+  var APP_VERSION = 'v32.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -246,6 +246,7 @@
     panels: [],    // panel schedules E-2
     precision: 4,  // fracción de pulgada para medidas (8=1/8")
     symEsc: 0.5,   // tamaño de los devices (switches, receptáculos…) respecto al dibujo — Edgar 03/09: "están muy grandes"
+    cntEsc: 0.6,   // tamaño de las marcas del Count respecto a antes — Edgar 15/09: "están muy grandes y se me van a confundir"
     lwEsc: 0.5,    // grosor de las líneas del plano (paredes, puertas, símbolos) — Edgar 03/09: "ponlas más finas", luego "más fino" (0.7 → 0.5)
     sheets: [{ no: '', title: '', data: null }],   // multi-hoja: cada hoja guarda su dibujo (sin nombre hasta que haya contenido)
     curSheet: 0,
@@ -628,7 +629,7 @@
   function estadoVacio() {
     return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
       walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [], wires: [], leaders: [], panels: [], guia: [], huecos: [], inks: [], counts: [], countCats: [],
-      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, printScale: 'fit', printSello: '', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
+      bg: null, bg2: null, precision: 4, symEsc: 0.5, lwEsc: 0.5, cntEsc: 0.6, printScale: 'fit', printSello: '', sheets: [{ no: '', title: '', data: null }], curSheet: 0,
       project: { name: '', client: '', address: '', job: '', sheetNo: '', sheetTitle: '', drawn: '', id: nuevoIdProyecto(), rev: 0, creado: new Date().toISOString() }
     } };
   }
@@ -8423,7 +8424,11 @@
   function catCount(id) { var a = catsCount(); for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i]; return null; }
   /* El tamaño de la marca sigue al de los devices: si Edgar bajó los símbolos
      porque "están muy grandes", las marcas del conteo bajan con ellos. */
-  function countR() { return 9 * ((state.symEsc || 0.5) / 0.5); }
+  /* …y encima su propia perilla (Marcas Count, en Proyecto): al 100 % es el
+     tamaño que tenían hasta el 15/09; al 60 %, el nuevo por defecto, caben
+     entre los símbolos del ingeniero sin taparlos ni confundirse con ellos. */
+  function escCnt() { var v = Number(state.cntEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.6; }
+  function countR() { return 9 * ((state.symEsc || 0.5) / 0.5) * escCnt(); }
 
   /* extra (opcional) viene de la Biblioteca de takeoff: alias = el Subject de
      Bluebeam que el estimador ya entiende, set = de qué tool set salió, item =
@@ -13130,8 +13135,16 @@
   function pintaEscalas() {
     $('#pjSymEsc').value = String(Math.round(escSym() * 100)); $('#pjSymEscV').textContent = Math.round(escSym() * 100) + '%';
     $('#pjLwEsc').value = String(Math.round(escLw() * 100)); $('#pjLwEscV').textContent = Math.round(escLw() * 100) + '%';
+    var pc = $('#pjCntEsc'); if (pc) { pc.value = String(Math.round(escCnt() * 100)); $('#pjCntEscV').textContent = Math.round(escCnt() * 100) + '%'; }
     aplicaGrosor();
   }
+  (function () {
+    var pc = $('#pjCntEsc'); if (!pc) return;
+    pc.addEventListener('input', function () {
+      state.cntEsc = Math.min(1.5, Math.max(0.3, (parseInt(this.value, 10) || 60) / 100));
+      pintaEscalas(); renderConteo(); renderSel(); scheduleAutosave();
+    });
+  })();
   $('#pjSymEsc').addEventListener('input', function () {
     state.symEsc = Math.min(1.5, Math.max(0.3, (parseInt(this.value, 10) || 50) / 100));
     pintaEscalas(); refresh(); scheduleAutosave();
@@ -15615,6 +15628,7 @@
     // ajustes de escala: fuera de rango → por defecto (proyectos viejos no traen el campo)
     if (!(isFinite(+st.symEsc) && +st.symEsc >= 0.3 && +st.symEsc <= 1.5)) st.symEsc = 0.5;
     if (!(isFinite(+st.lwEsc) && +st.lwEsc >= 0.3 && +st.lwEsc <= 1.5)) st.lwEsc = 0.5;
+    if (!(isFinite(+st.cntEsc) && +st.cntEsc >= 0.3 && +st.cntEsc <= 1.5)) st.cntEsc = 0.6;   // proyectos de antes: al nuevo tamaño chico
     return null;
   }
   function hayContenido() {
