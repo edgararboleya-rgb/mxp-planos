@@ -415,6 +415,36 @@ body.touch .pbody .txtBar input.n { height: 32px !important; width: 50px !import
 #rpGrip { flex: none; width: 7px; cursor: col-resize; background: transparent; position: relative; z-index: 3; margin-right: -7px; touch-action: none; }
 #rpGrip:hover, #rpGrip.on { background: linear-gradient(90deg, transparent, rgba(11,132,255,.35)); }
 body.touch #rpGrip { display: none; }
+/* ESCONDER Y MOSTRAR (Edgar, 15/09): «que las barras de los costados las
+   pueda esconder con un clic en el borde». Cada costado lleva un borde con
+   una lengüeta: la paleta a la izquierda (#palGrip) y el panel de
+   Propiedades a la derecha (#rpGrip, que además se arrastra). Un clic en la
+   lengüeta o en el borde lo recoge; recogido queda una tira con el nombre,
+   y el mismo clic lo vuelve a abrir. Se guarda con las barras. */
+#palGrip { flex: none; width: 7px; cursor: pointer; background: transparent; position: relative; z-index: 3; margin-left: -7px; }
+#palGrip:hover { background: linear-gradient(270deg, transparent, rgba(11,132,255,.35)); }
+#palGrip .tab, #rpGrip .tab {
+  position: absolute; top: 50%; width: 14px; height: 44px; margin-top: -22px; border-radius: 0 7px 7px 0;
+  background: var(--mp-navy); color: #fff; font-size: 10px; line-height: 44px; text-align: center; cursor: pointer;
+  opacity: .55; transition: opacity .15s, background .15s; user-select: none; box-shadow: 0 2px 6px rgba(7,26,46,.25);
+}
+#palGrip .tab { left: 7px; }
+#palGrip .tab::before { content: '◂'; }
+#rpGrip .tab { right: 7px; border-radius: 7px 0 0 7px; }
+#rpGrip .tab::before { content: '▸'; }
+#palGrip:hover .tab, #rpGrip:hover .tab, #palGrip .tab:hover, #rpGrip .tab:hover { opacity: 1; background: var(--mp-blue); }
+body.palOculta #palette { display: none; }
+body.palOculta #palGrip { width: 22px; margin-left: 0; background: var(--mp-sky-1); border-right: 1px solid var(--mp-line); }
+body.palOculta #palGrip .tab { left: 22px; }
+body.palOculta #palGrip .tab::before { content: '▸'; }
+body.palOculta #palGrip::after { content: 'Símbolos'; position: absolute; left: 0; right: 0; top: 50%; margin-top: 60px; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 600; color: var(--mp-navy); letter-spacing: .04em; text-align: center; pointer-events: none; }
+body.rpOculta #rightPanel { display: none; }
+body.rpOculta #rpGrip { width: 22px; margin-right: 0; cursor: pointer; background: var(--mp-sky-1); border-left: 1px solid var(--mp-line); }
+body.rpOculta #rpGrip .tab { right: 22px; }
+body.rpOculta #rpGrip .tab::before { content: '◂'; }
+body.rpOculta #rpGrip::after { content: 'Propiedades'; position: absolute; left: 0; right: 0; top: 50%; margin-top: 60px; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 600; color: var(--mp-navy); letter-spacing: .04em; text-align: center; pointer-events: none; }
+body.touch #palGrip { display: none; }
+body.touch.palOculta #palette, body.touch.rpOculta #rightPanel { display: flex; }   /* en el iPad son gavetas: no se esconden así */
 body.rpResize { cursor: col-resize; user-select: none; }
 body.rpResize #canvasWrap { pointer-events: none; }
 /* lo que va en una fila del panel se ENCOGE antes que salirse: los botones

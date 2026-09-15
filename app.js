@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.I';
+  var APP_VERSION = 'v32.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2148,16 +2148,32 @@
   /* Los hilos de un circuito en tubo: hot/neutro/tierra, portadores y ajuste. */
   function hilosTubo(c) {
     if (!hayNEC()) return null;
-    return window.NEC.hilos(c.ckts || 1, c.poles || 1, c.neutro || 'propio', true);
+    return window.NEC.hilos(c.ckts || 1, c.poles || 1, c.neutro || 'propio', c.gnd !== 'no');
+  }
+  /* La tierra del circuito, APARTE y con su calibre (Edgar, 15/09): la del
+     código por el breaker (250.122) si no se eligió otra; 'no' = sin tierra
+     (el tubo metálico hace de tierra). */
+  function tierraCirc(c) {
+    if (c.gnd === 'no') return { n: 0, calibre: null, auto: false };
+    var auto = !c.gndCal;
+    return { n: 1, calibre: auto ? (hayNEC() ? window.NEC.tierraPorAmps(c.amps || 20) : '#12') : c.gndCal, auto: auto };
+  }
+  /* Los grupos de hilos para el llenado: fases+neutros de un calibre, tierra del suyo. */
+  function gruposCirc(c, h) {
+    var g = tierraCirc(c), out = [{ calibre: c.calibre || '#12', n: h.hot + h.neu }];
+    if (g.n) out.push({ calibre: g.calibre, n: g.n });
+    return out;
   }
   /* El tamaño de tubo que toca: el mínimo en que caben todos los hilos, o el
      que Edgar eligió si es mayor. Nunca uno en que no caben. */
   function tamTubo(c) {
     if (!hayNEC()) return c.tam || null;
     var h = hilosTubo(c); if (!h) return c.tam || null;
-    var min = window.NEC.tamanoMinimo(c.tubo || 'EMT', c.calibre || '#12', h.total);
+    var gr = gruposCirc(c, h);
+    var min = window.NEC.tamanoMinimoMixto(c.tubo || 'EMT', gr);
     if (!min) return null;
-    if (c.tam && window.NEC.llenado(c.tubo || 'EMT', c.tam, c.calibre || '#12', h.total) && window.NEC.llenado(c.tubo || 'EMT', c.tam, c.calibre || '#12', h.total).cabe) return c.tam;
+    var ll = c.tam ? window.NEC.llenadoMixto(c.tubo || 'EMT', c.tam, gr) : null;
+    if (ll && ll.cabe) return c.tam;
     return min;
   }
   /* El texto «cable» de siempre, para que alias, propuestas y pruebas viejas
@@ -2177,6 +2193,8 @@
       if (!c.calibre) { var pt1 = partesTubo(c.cable); c.calibre = pt1 ? pt1.calibre : '#12'; }
       if (!c.ckts) c.ckts = 1;
       if (!c.neutro) c.neutro = c.poles === 2 ? 'ninguno' : 'propio';
+      if (c.gnd !== 'no') c.gnd = 'si';
+      if (c.gndCal === undefined) c.gndCal = null;
       c.tam = tamTubo(c) || c.tam;
       c.cable = cableDeTubo(c);
     }
@@ -2202,7 +2220,8 @@
     var n = (d.num || 0) + 1;
     while (usados[n]) n++;
     var c = { panel: d.panel, num: n, desc: '', cable: d.cable, amps: d.amps, poles: d.poles, drop: d.drop, mult: 1,
-              sistema: d.sistema, tubo: d.tubo, calibre: d.calibre, ckts: d.ckts, neutro: d.neutro, tam: d.tam || null };
+              sistema: d.sistema, tubo: d.tubo, calibre: d.calibre, ckts: d.ckts, neutro: d.neutro, tam: d.tam || null,
+              gnd: d.gnd || 'si', gndCal: d.gndCal || null };
     return normalizaCirc(c);
   }
   function recuerdaCirc(c) {
@@ -2210,6 +2229,7 @@
     d.panel = c.panel; d.cable = c.cable; d.amps = c.amps; d.poles = c.poles; d.drop = c.drop;
     d.sistema = c.sistema || d.sistema; d.tubo = c.tubo || d.tubo; d.calibre = c.calibre || d.calibre;
     d.ckts = c.ckts || d.ckts; d.neutro = c.neutro || d.neutro; d.tam = c.tam || null;
+    d.gnd = c.gnd || 'si'; d.gndCal = c.gndCal || null;
     if (c.num > (d.num || 0)) d.num = c.num;
   }
   // largo de cable que se compra: (trazo por el plano + lo que baja del techo) x
@@ -2223,12 +2243,17 @@
   function partidasHomerun(a) {
     var c = a.circ || {}, L = largoHomerun(a), out = [];
     if (esTuboCirc(c) && c.ckts && hayNEC()) {
-      // el modelo nuevo: UN tubo (con su nombre exacto del catálogo) y los hilos
-      // de todos los circuitos que van dentro, más UNA tierra por tubo
+      // el modelo nuevo: UN tubo (con su nombre exacto del catálogo), los hilos
+      // de todos los circuitos que van dentro, y la tierra APARTE con su calibre
       var h = hilosTubo(c), tam = tamTubo(c);
       if (h && tam) {
         out.push({ item: window.NEC.itemTubo(c.tubo || 'EMT', tam), ft: L });
-        out.push({ item: window.NEC.itemHilo(c.calibre || '#12'), ft: L * h.total });
+        out.push({ item: window.NEC.itemHilo(c.calibre || '#12'), ft: L * (h.hot + h.neu) });
+        var g = tierraCirc(c);
+        if (g.n) {
+          var itG = window.NEC.itemHilo(g.calibre);
+          if (itG === out[1].item) out[1].ft += L * g.n; else out.push({ item: itG, ft: L * g.n });
+        }
         return out;
       }
     }
@@ -2245,10 +2270,11 @@
   function resumenNEC(c) {
     if (!esTuboCirc(c) || !hayNEC()) return null;
     var h = hilosTubo(c), tam = tamTubo(c); if (!h || !tam) return null;
-    var ll = window.NEC.llenado(c.tubo || 'EMT', tam, c.calibre || '#12', h.total);
-    return { h: h, tam: tam, llenado: ll, pct: ll ? Math.round(ll.pct * 100) : null,
-             min: window.NEC.tamanoMinimo(c.tubo || 'EMT', c.calibre || '#12', h.total),
-             tamanos: window.NEC.tamanosQueCaben(c.tubo || 'EMT', c.calibre || '#12', h.total),
+    var gr = gruposCirc(c, h), g = tierraCirc(c);
+    var ll = window.NEC.llenadoMixto(c.tubo || 'EMT', tam, gr);
+    return { h: h, tam: tam, llenado: ll, pct: ll ? Math.round(ll.pct * 100) : null, gnd: g,
+             min: window.NEC.tamanoMinimoMixto(c.tubo || 'EMT', gr),
+             tamanos: window.NEC.tamanosQueCabenMixto(c.tubo || 'EMT', gr),
              maxCkts: window.NEC.maxCkts(c.poles || 1, c.neutro || 'propio') };
   }
   /* Las filas del sistema del circuito. Con NEC cargado y sistema 'tubo':
@@ -2291,18 +2317,27 @@
     h += '<div class="row"><label>Neutro</label><select id="' + P + 'Neu">' + NEUTRO_OPC.map(function (o) {
       return '<option value="' + o[0] + '"' + ((c.neutro || 'propio') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
     }).join('') + '</select></div>';
+    // la tierra APARTE, con su calibre: la del código por el breaker, o la que Edgar quiera, o ninguna
+    var gA = window.NEC.tierraPorAmps(c.amps || 20), gSel = c.gnd === 'no' ? 'no' : (c.gndCal || 'auto');
+    h += '<div class="row"><label>Tierra</label><select id="' + P + 'Gnd" title="Una tierra por tubo (250.122). Por defecto la que pide el breaker; cámbiala si quieres otra">' +
+      '<option value="auto"' + (gSel === 'auto' ? ' selected' : '') + '>Por el breaker de ' + (c.amps || 20) + ' A (250.122): ' + gA + ' THHN</option>' +
+      CALIBRE_OPC.map(function (k) { return '<option value="' + k + '"' + (gSel === k ? ' selected' : '') + '>' + k + ' THHN</option>'; }).join('') +
+      '<option value="no"' + (gSel === 'no' ? ' selected' : '') + '>Sin tierra (el tubo metálico hace de tierra)</option></select></div>';
     if (r) {
       // solo los tamaños en que CABE: el 1/2" desaparece solo cuando pones #6
+      var grF = gruposCirc(c, r.h);
       h += '<div class="row"><label>Tamaño</label><select id="' + P + 'Tam">' + r.tamanos.map(function (t) {
-        var ll = window.NEC.llenado(c.tubo || 'EMT', t, c.calibre || '#12', r.h.total);
+        var ll = window.NEC.llenadoMixto(c.tubo || 'EMT', t, grF);
         return '<option value="' + esc(t) + '"' + (r.tam === t ? ' selected' : '') + '>' + esc(t) + (t === r.min ? ' (mínimo)' : '') + ' · ' + Math.round(ll.pct * 100) + ' % lleno</option>';
       }).join('') + '</select></div>';
-      var it = window.NEC.itemTubo(c.tubo || 'EMT', r.tam);
+      var it = window.NEC.itemTubo(c.tubo || 'EMT', r.tam), nFN = r.h.hot + r.h.neu;
       h += '<div class="muted small" id="' + P + 'Nec">' +
-        '<b>' + r.h.total + ' hilos ' + (c.calibre || '#12') + '</b>: ' + r.h.hot + ' hot + ' + r.h.neu + ' neutro' + (r.h.neu === 1 ? '' : 's') + ' + 1 tierra' +
+        '<b>' + nFN + ' hilo' + (nFN === 1 ? '' : 's') + ' ' + (c.calibre || '#12') + '</b> (' + r.h.hot + ' hot + ' + r.h.neu + ' neutro' + (r.h.neu === 1 ? '' : 's') + ')' +
+        (r.gnd.n ? ' + <b>tierra ' + esc(r.gnd.calibre) + '</b>' + (r.gnd.auto ? ' (250.122)' : '') : ' · sin tierra') +
         ' · llenado <b>' + r.pct + ' %</b> de ' + r.tam + ' (máx. ' + Math.round(r.llenado.pctPermitido * 100) + ' %)' +
         ' · <b>' + r.h.portadores + ' portadores → ' + Math.round(r.h.ajuste * 100) + ' %</b>' + (r.h.pasa ? '' : ' ⚠ pasa de 6') +
-        '<br>Al takeoff: ' + esc(it) + ' y ' + esc(window.NEC.itemHilo(c.calibre || '#12')) + ' × ' + r.h.total + '.</div>';
+        '<br>Al takeoff: ' + esc(it) + ', ' + esc(window.NEC.itemHilo(c.calibre || '#12')) + ' × ' + nFN +
+        (r.gnd.n ? ' y tierra ' + esc(window.NEC.itemHilo(r.gnd.calibre)) + ' × 1' : '') + '.</div>';
     } else {
       h += '<div class="muted small" style="color:#a33">Con ese calibre y esos hilos no hay tamaño de ' + esc(c.tubo || 'EMT') + ' en la tabla. Baja circuitos o sube de tubo.</div>';
     }
@@ -2321,6 +2356,12 @@
     else if (campo === 'calibre') { c.calibre = valor; c.tam = null; }
     else if (campo === 'ckts') { c.ckts = Math.max(1, Math.min(6, parseInt(valor, 10) || 1)); c.tam = null; }
     else if (campo === 'neutro') { c.neutro = valor; c.tam = null; }
+    else if (campo === 'gnd') {
+      if (valor === 'no') c.gnd = 'no';
+      else { c.gnd = 'si'; c.gndCal = valor === 'auto' ? null : valor; }
+      c.tam = null;
+    }
+    else if (campo === 'amps') { c.amps = parseFloat(valor) || c.amps; if (c.sistema === 'tubo') c.tam = null; }   // la tierra automática sigue al breaker
     else if (campo === 'tam') c.tam = valor;
     else if (campo === 'poles') { c.poles = parseInt(valor, 10) || 1; if (c.sistema === 'tubo') c.tam = null; }
     // un tope de circuitos que se pasó al cambiar polos o neutro se recorta, y se dice
@@ -2334,7 +2375,7 @@
     var r = resumenNEC(c);
     // en tubo, el rótulo dice lo que se compra: 3/4" EMT · 5#12 (2 ckts)
     var cab = r ? (r.tam + ' ' + ({ EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC80', GRS: 'GRS', IMC: 'IMC', ENT: 'ENT', FMC: 'FMC' }[c.tubo || 'EMT'] || c.tubo) +
-                   ' · ' + r.h.total + (c.calibre || '#12') + (c.ckts > 1 ? ' (' + c.ckts + ' ckts)' : ''))
+                   ' · ' + (r.h.hot + r.h.neu) + (c.calibre || '#12') + (r.gnd.n ? ' + ' + r.gnd.calibre + ' G' : '') + (c.ckts > 1 ? ' (' + c.ckts + ' ckts)' : ''))
                 : (c.cable || '');
     return '#' + (c.num || '?') + ' · ' + cab + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
       (c.desc ? ' · ' + c.desc : '');
@@ -8493,8 +8534,9 @@
     on('prCircCal', 'change', function (n) { circNEC('calibre', n.value); });
     on('prCircCkts', 'change', function (n) { circNEC('ckts', n.value); });
     on('prCircNeu', 'change', function (n) { circNEC('neutro', n.value); });
+    on('prCircGnd', 'change', function (n) { circNEC('gnd', n.value); });
     on('prCircTam', 'change', function (n) { circNEC('tam', n.value); });
-    on('prCircAmps', 'change', function (n) { circSet('amps', n.value, true); });
+    on('prCircAmps', 'change', function (n) { circNEC('amps', n.value); });   // repinta: la tierra por el breaker cambia
     on('prCircPoles', 'change', function (n) { circNEC('poles', n.value); });
     on('prCircDrop', 'change', function (n) { circSet('drop', n.value, true); });
     on('prCircMult', 'change', function (n) { circSet('mult', Math.max(1, parseInt(n.value, 10) || 1), true); });
@@ -8533,7 +8575,11 @@
         if (hayNEC() && calibresRuta(et.ruta).indexOf(et.ruta.calibre) < 0) et.ruta.calibre = et.ruta.mat === 'AL' ? '1/0' : '#8';
       }
       else if (campo === 'neu') { et.ruta.neu = v === '1'; et.ruta.tam = null; }
-      else if (campo === 'gnd') { et.ruta.gnd = v === '1'; et.ruta.tam = null; }
+      else if (campo === 'gnd') {
+        if (v === 'no' || v === '0') et.ruta.gnd = false;
+        else { et.ruta.gnd = true; et.ruta.gndCal = (v === 'auto' || v === '1') ? null : v; }
+        et.ruta.tam = null;
+      }
       else if (campo === 'sets') et.ruta.sets = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
       else if (campo === 'tam') et.ruta.tam = v;
       refresh(); refreshCounts(); showProps();
@@ -9202,27 +9248,42 @@
     return { fases: f, neu: n, gnd: g, sets: sets, porTubo: porTubo, total: porTubo * sets,
              portadores: portadores, ajuste: hayNEC() ? window.NEC.ajuste(portadores) : 1 };
   }
+  /* La tierra del feeder, APARTE y en cobre: la del código por la ampacidad
+     del conductor de fase (250.122) si no se eligió otra; sin tierra si r.gnd
+     es false (el tubo metálico hace de tierra). */
+  function tierraRuta(r) {
+    if (r.gnd === false) return { n: 0, calibre: null, auto: false };
+    var auto = !r.gndCal;
+    return { n: 1, calibre: auto ? (hayNEC() ? window.NEC.tierraPorFase(r.calibre || '#8', rutaMat(r)) : '#8') : r.gndCal, auto: auto };
+  }
+  function gruposRuta(r, h) {
+    var g = tierraRuta(r), out = [{ calibre: r.calibre, n: h.fases + h.neu, mat: rutaMat(r) }];
+    if (g.n) out.push({ calibre: g.calibre, n: g.n, mat: 'CU' });
+    return out;
+  }
   function resumenNECRuta(a) {
     if (!hayNEC() || !a || !a.ruta) return null;
     var r = a.ruta, h = hilosRuta(r); if (!h || !r.calibre) return null;
     var tipo = rutaNecTipo(a); if (!tipo) return { h: h, sinTabla: true };
-    var mat = rutaMat(r);
-    var min = window.NEC.tamanoMinimo(tipo, r.calibre, h.porTubo, mat);
-    var llR = r.tam ? window.NEC.llenado(tipo, r.tam, r.calibre, h.porTubo, mat) : null;
+    var mat = rutaMat(r), gr = gruposRuta(r, h), g = tierraRuta(r);
+    var min = window.NEC.tamanoMinimoMixto(tipo, gr);
+    var llR = r.tam ? window.NEC.llenadoMixto(tipo, r.tam, gr) : null;
     var tam = (llR && llR.cabe) ? r.tam : min;
     if (!tam) return { h: h, tipo: tipo, mat: mat, sinTam: true };
-    var ll = window.NEC.llenado(tipo, tam, r.calibre, h.porTubo, mat);
-    return { h: h, tipo: tipo, mat: mat, tam: tam, min: min, llenado: ll, pct: Math.round(ll.pct * 100),
-             tamanos: window.NEC.tamanosQueCaben(tipo, r.calibre, h.porTubo, mat),
-             itemTubo: window.NEC.itemTubo(tipo, tam), itemHilo: window.NEC.itemHilo(r.calibre, mat) };
+    var ll = window.NEC.llenadoMixto(tipo, tam, gr);
+    return { h: h, tipo: tipo, mat: mat, tam: tam, min: min, llenado: ll, pct: Math.round(ll.pct * 100), gnd: g, grupos: gr,
+             tamanos: window.NEC.tamanosQueCabenMixto(tipo, gr),
+             itemTubo: window.NEC.itemTubo(tipo, tam), itemHilo: window.NEC.itemHilo(r.calibre, mat),
+             itemGnd: g.n ? window.NEC.itemHilo(g.calibre) : null };
   }
   /* Lo que se compra de una ruta: si tiene hilos y tamaño, el tubo con su
      nombre exacto (× juegos) y los hilos en pies; si no, nada aquí — el
      takeoff la suma por tipo como siempre. */
   function partidasRuta(a) {
     var R = resumenNECRuta(a); if (!R || !R.tam) return null;
-    var L = largoRuta(a);
-    return [{ item: R.itemTubo, ft: L * R.h.sets }, { item: R.itemHilo, ft: L * R.h.total }];
+    var L = largoRuta(a), out = [{ item: R.itemTubo, ft: L * R.h.sets }, { item: R.itemHilo, ft: L * (R.h.fases + R.h.neu) * R.h.sets }];
+    if (R.gnd.n) { if (R.itemGnd === R.itemHilo) out[1].ft += L * R.gnd.n * R.h.sets; else out.push({ item: R.itemGnd, ft: L * R.gnd.n * R.h.sets }); }
+    return out;
   }
   function esRuta(a) { return !!(a && a.open && a.ruta && a.ruta.tipo); }
   /* El rótulo que se ve en el plano: el material y el largo comprado. Sin el
@@ -9244,17 +9305,25 @@
       return '<option value="' + k + '"' + ((r.calibre || '#8') === k ? ' selected' : '') + '>' + k + etq + '</option>';
     }).join('') + '</select></div>';
     h += '<div class="row"><label>Neutro</label><select id="prRutaNeu">' + [[1, 'Sí — 1 neutro'], [0, 'No']].map(function (o) { return '<option value="' + o[0] + '"' + ((r.neu ? 1 : 0) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
-    h += '<div class="row"><label>Tierra</label><select id="prRutaGnd">' + [[1, 'Sí — 1 tierra'], [0, 'No (tubo metálico como tierra)']].map(function (o) { return '<option value="' + o[0] + '"' + ((r.gnd === false ? 0 : 1) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
+    // la tierra APARTE y en cobre: la del código por el conductor, la que Edgar quiera, o ninguna
+    var gAuto = window.NEC.tierraPorFase(r.calibre || '#8', matR), gSelR = r.gnd === false ? 'no' : (r.gndCal || 'auto');
+    h += '<div class="row"><label>Tierra</label><select id="prRutaGnd" title="Una tierra por tubo, en cobre (250.122 por la ampacidad del conductor de fase). Cámbiala si el breaker pide otra">' +
+      '<option value="auto"' + (gSelR === 'auto' ? ' selected' : '') + '>Por el conductor (250.122): ' + gAuto + ' CU</option>' +
+      window.NEC.CALIBRES.map(function (k) { return '<option value="' + k + '"' + (gSelR === k ? ' selected' : '') + '>' + k + ' CU</option>'; }).join('') +
+      '<option value="no"' + (gSelR === 'no' ? ' selected' : '') + '>Sin tierra (el tubo metálico hace de tierra)</option></select></div>';
     h += '<div class="row"><label>Juegos en paralelo</label><input id="prRutaSets" type="number" min="1" max="8" step="1" value="' + Math.max(1, +r.sets || 1) + '" title="Feeders grandes van en 2, 3 o 4 tubos iguales en paralelo: cada juego es un tubo con sus hilos"></div>';
     var R = resumenNECRuta(a);
     if (R && R.tam) {
       h += '<div class="row"><label>Tamaño</label><select id="prRutaTam">' + R.tamanos.map(function (t) {
-        var ll = window.NEC.llenado(R.tipo, t, r.calibre, R.h.porTubo, R.mat);
+        var ll = window.NEC.llenadoMixto(R.tipo, t, R.grupos);
         return '<option value="' + esc(t) + '"' + (R.tam === t ? ' selected' : '') + '>' + esc(t) + (t === R.min ? ' (mínimo)' : '') + ' · ' + Math.round(ll.pct * 100) + ' % lleno</option>';
       }).join('') + '</select></div>';
-      h += '<div class="muted small"><b>' + R.h.porTubo + ' hilos ' + esc(r.calibre) + (R.mat === 'AL' ? ' AL' : '') + ' por tubo</b>' + (R.h.sets > 1 ? ' × ' + R.h.sets + ' juegos' : '') +
+      var nFN = R.h.fases + R.h.neu;
+      h += '<div class="muted small"><b>' + nFN + ' hilos ' + esc(r.calibre) + (R.mat === 'AL' ? ' AL' : '') + '</b>' +
+        (R.gnd.n ? ' + <b>tierra ' + esc(R.gnd.calibre) + ' CU</b>' + (R.gnd.auto ? ' (250.122)' : '') : ' · sin tierra') + ' por tubo' + (R.h.sets > 1 ? ' × ' + R.h.sets + ' juegos' : '') +
         ' · llenado <b>' + R.pct + ' %</b> de ' + R.tam + ' · ' + R.h.portadores + ' portadores → ' + Math.round(R.h.ajuste * 100) + ' %' +
-        '<br>Al takeoff: ' + esc(R.itemTubo) + (R.h.sets > 1 ? ' × ' + R.h.sets : '') + ' y ' + esc(R.itemHilo) + ' × ' + R.h.total + '.</div>';
+        '<br>Al takeoff: ' + esc(R.itemTubo) + (R.h.sets > 1 ? ' × ' + R.h.sets : '') + ', ' + esc(R.itemHilo) + ' × ' + (nFN * R.h.sets) +
+        (R.gnd.n ? ' y tierra ' + esc(R.itemGnd) + ' × ' + (R.gnd.n * R.h.sets) : '') + '.</div>';
     } else if (R && R.sinTam) {
       h += '<div class="muted small" style="color:#a33">Esos hilos no caben en ningún tamaño de ' + esc(R.tipo) + ' de la tabla: reparte en más juegos en paralelo.</div>';
     }
@@ -9270,7 +9339,7 @@
     if ((+r.drop) > 0) extra += ' +' + (+r.drop) + "' drop";
     if ((+r.mult) > 1) extra += ' ×' + (+r.mult);
     var R = resumenNECRuta(a);
-    var cab = R && R.tam ? (R.tam + ' ' + (t ? t.mat : '') + ' · ' + R.h.porTubo + (/^#/.test(r.calibre) ? '' : '×') + r.calibre + (R.mat === 'AL' ? ' AL' : '') + (R.h.sets > 1 ? ' ×' + R.h.sets + ' juegos' : '')) : (t ? (t.mat || t.subj) : '?');
+    var cab = R && R.tam ? (R.tam + ' ' + (t ? t.mat : '') + ' · ' + (R.h.fases + R.h.neu) + (/^#/.test(r.calibre) ? '' : '×') + r.calibre + (R.mat === 'AL' ? ' AL' : '') + (R.gnd.n ? ' + ' + R.gnd.calibre + ' G' : '') + (R.h.sets > 1 ? ' ×' + R.h.sets + ' juegos' : '')) : (t ? (t.mat || t.subj) : '?');
     var txt = cab + ' ' + fmtFtIn(largoRuta(a)) + extra;
     return '<text x="0" y="' + (-(a.lw || 1.3) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
       ') rotate(' + an.toFixed(1) + ')" font-size="' + (8 * glifoK(a)).toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' +
@@ -9432,6 +9501,7 @@
     layout: function () { return JSON.parse(JSON.stringify(layout)); },
     tam: function (t) { layout.tam = t; aplicaTamYPanel(); guardaLayout(); },
     panelW: function (w) { layout.panelW = w; aplicaTamYPanel(); guardaLayout(); },
+    costado: costado,
     dock: function (id, d) { DOCKS.forEach(function (k) { layout.docks[k] = layout.docks[k].filter(function (x) { return x !== id; }); }); layout.docks[d].push(id); guardaLayout(); pintaBarras(); },
     abre: abrePanelBarras
   };
@@ -18652,6 +18722,7 @@
     if (g.uso && typeof g.uso === 'object') Object.keys(g.uso).forEach(function (k) { var n = +g.uso[k]; if (defDe(k) && n > 0) L.uso[k] = Math.min(n, 99999); });
     if (TAM_BARRAS.indexOf(g.tam) >= 0) L.tam = g.tam;
     var pw = +g.panelW; L.panelW = (isFinite(pw) && pw >= PANEL_W_MIN && pw <= PANEL_W_MAX) ? Math.round(pw) : null;
+    L.palOculta = !!g.palOculta; L.rpOculta = !!g.rpOculta;
     return L;
   }
   /* Aplicar lo que no son barras: el tamaño de las cajitas (variable CSS en
@@ -18660,7 +18731,18 @@
     document.body.dataset.barras = layout.tam || 'normales';
     var rp = $('#rightPanel');
     if (rp) rp.style.width = layout.panelW ? layout.panelW + 'px' : '';
+    // los costados recogidos (Edgar, 15/09): una clase en el body y el CSS hace el resto
+    document.body.classList.toggle('palOculta', !!layout.palOculta);
+    document.body.classList.toggle('rpOculta', !!layout.rpOculta);
     if (typeof actualizaMas === 'function') actualizaMas();
+  }
+  /* Esconder o mostrar un costado. `lado`: 'pal' (paleta de símbolos) o 'rp'
+     (panel de Propiedades). Sin argumento, alterna. */
+  function costado(lado, oculto) {
+    var k = lado === 'pal' ? 'palOculta' : 'rpOculta';
+    layout[k] = oculto === undefined ? !layout[k] : !!oculto;
+    aplicaTamYPanel(); guardaLayout();
+    setHint(layout[k] ? (lado === 'pal' ? 'Paleta escondida — clic en la tira «Símbolos» para volver a verla' : 'Panel escondido — clic en la tira «Propiedades» para volver a verlo') : '');
   }
   var layout = cargaLayout();
   aplicaTamYPanel();
@@ -18675,15 +18757,18 @@
      con el dedo (pointer events), sin que el plano de debajo reciba el gesto. */
   (function () {
     var g = $('#rpGrip'), rp = $('#rightPanel'); if (!g || !rp) return;
-    var x0 = 0, w0 = 0, activo = false;
+    var x0 = 0, w0 = 0, activo = false, movido = false;
     g.addEventListener('pointerdown', function (ev) {
-      activo = true; x0 = ev.clientX; w0 = rp.getBoundingClientRect().width;
+      if (layout.rpOculta) return;   // recogido: el asa solo abre (clic)
+      activo = true; movido = false; x0 = ev.clientX; w0 = rp.getBoundingClientRect().width;
       g.classList.add('on'); document.body.classList.add('rpResize');
       try { g.setPointerCapture(ev.pointerId); } catch (e) {}
       ev.preventDefault();
     });
     g.addEventListener('pointermove', function (ev) {
       if (!activo) return;
+      if (Math.abs(ev.clientX - x0) >= 4) movido = true;
+      if (!movido) return;
       // el panel está a la derecha: mover a la izquierda lo ENSANCHA
       var w = Math.round(Math.max(PANEL_W_MIN, Math.min(PANEL_W_MAX, w0 + (x0 - ev.clientX))));
       rp.style.width = w + 'px';
@@ -18691,14 +18776,19 @@
     function suelta() {
       if (!activo) return;
       activo = false; g.classList.remove('on'); document.body.classList.remove('rpResize');
+      if (!movido) return;   // fue un clic: lo atiende el 'click' de abajo (esconder)
       var w = Math.round(rp.getBoundingClientRect().width);
       layout.panelW = (w >= PANEL_W_MIN && w <= PANEL_W_MAX) ? w : null;
       guardaLayout(); actualizaMas();
       var bp = $('#barrasPanel'); if (bp && !bp.hidden) pintaPanelBarras();
     }
     g.addEventListener('pointerup', suelta); g.addEventListener('pointercancel', suelta);
+    // un CLIC (sin arrastrar) en el borde o en su lengüeta: esconder / mostrar el panel
+    g.addEventListener('click', function (ev) { if (movido) { movido = false; return; } costado('rp'); ev.preventDefault(); });
     // doble toque en el asa: vuelve al ancho de fábrica
-    g.addEventListener('dblclick', function () { layout.panelW = null; aplicaTamYPanel(); guardaLayout(); setHint('Panel al ancho de fábrica'); });
+    g.addEventListener('dblclick', function () { if (layout.rpOculta) return; layout.panelW = null; aplicaTamYPanel(); guardaLayout(); setHint('Panel al ancho de fábrica'); });
+    // el borde de la paleta: solo esconde y muestra
+    var pg = $('#palGrip'); if (pg) pg.addEventListener('click', function () { costado('pal'); });
   })();
   function dockDe(id) { for (var i = 0; i < DOCKS.length; i++) if (layout.docks[DOCKS[i]].indexOf(id) >= 0) return DOCKS[i]; return null; }
   function barraVisible(id) { return layout.ocultas.indexOf(id) < 0; }
@@ -19055,6 +19145,10 @@
     var pwAct = layout.panelW || Math.round(($('#rightPanel') || { getBoundingClientRect: function () { return { width: 258 }; } }).getBoundingClientRect().width) || 258;
     html += '<div class="bpRow"><input type="range" data-bp="pw" min="' + PANEL_W_MIN + '" max="' + PANEL_W_MAX + '" step="10" value="' + pwAct + '" style="flex:1" title="Ancho del panel de la derecha. También se arrastra por su borde izquierdo."><span class="nm" style="flex:none;width:44px;text-align:right">' + pwAct + ' px</span></div>';
     html += '<p class="bpNota">Si algo del panel se corta (el «Importar» del DXF, el nombre de la nube…), ensánchalo aquí o arrastra su borde izquierdo. Doble clic en el borde: ancho de fábrica.</p>';
+    html += '<div class="bpSec">Los costados — esconder y mostrar</div>';
+    html += '<div class="bpRow bpTam"><button data-bp="pal"' + (layout.palOculta ? ' class="cur"' : '') + ' title="La paleta de símbolos, a la izquierda. También: clic en su borde o en la lengüeta">' + (layout.palOculta ? 'Mostrar la paleta' : 'Esconder la paleta') + '</button>' +
+      '<button data-bp="rp"' + (layout.rpOculta ? ' class="cur"' : '') + ' title="El panel de Propiedades, a la derecha. También: clic en su borde o en la lengüeta">' + (layout.rpOculta ? 'Mostrar el panel' : 'Esconder el panel') + '</button></div>';
+    html += '<p class="bpNota">Un clic en el borde de cada costado (o en su lengüeta) lo recoge; queda una tira con el nombre y otro clic lo abre. El panel derecho, además, se arrastra por el borde para ensancharlo.</p>';
     html += '<div class="bpSec">Mis herramientas — las que quieres a un toque</div>';
     if (!layout.favs.length) html += '<p class="bpNota">Ninguna todavía. Añade abajo, o toca la ☆ de una herramienta dentro de cualquier grupo.</p>';
     layout.favs.forEach(function (id, i) {
@@ -19104,6 +19198,7 @@
     if (!t) return;
     var bp = t.dataset.bp, fila = t.closest('.bpRow');
     if (bp === 'cerrar') { $('#barrasPanel').hidden = true; return; }
+    if (bp === 'pal' || bp === 'rp') { costado(bp); pintaPanelBarras(); return; }
     if (bp === 'reset') {
       var uso = layout.uso;
       layout = clonaLayoutDef(); layout.uso = uso;
@@ -19359,6 +19454,7 @@
       html += '<div class="tmHead">El próximo homerun sale así</div>';
       var wrapC = document.createElement('div'); wrapC.innerHTML = filasCircuitoNEC(dC, 'tmCirc');
       html += '<div class="tmForm">' + wrapC.innerHTML +
+        '<div class="row"><label>Breaker</label><select id="tmCircAmps">' + BREAKERS.map(function (am) { return '<option value="' + am + '"' + (+dC.amps === am ? ' selected' : '') + '>' + am + ' A</option>'; }).join('') + '</select></div>' +
         '<div class="row"><label>Polos</label><select id="tmCircPoles">' + [1, 2, 3].map(function (pl) {
           return '<option value="' + pl + '"' + (+dC.poles === pl ? ' selected' : '') + '>' + pl + (pl === 1 ? ' polo (120 V)' : pl === 2 ? ' polos (240 V)' : ' polos (3Ø)') + '</option>';
         }).join('') + '</select></div>' +
@@ -19437,7 +19533,7 @@
           if (id === 'tmCircDrop') d.drop = Math.max(0, parseFloat(el.value) || 0);
           else if (id === 'tmCircPoles') aplicaCambioNEC(d, 'poles', el.value);
           else {
-            var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircTam: 'tam' }[id];
+            var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircGnd: 'gnd', tmCircTam: 'tam', tmCircAmps: 'amps' }[id];
             if (campo) aplicaCambioNEC(d, campo, el.value);
           }
           scheduleAutosave();

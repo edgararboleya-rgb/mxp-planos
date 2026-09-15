@@ -71,6 +71,53 @@
 
   function areaDe(calibre, n, mat) { var a = areaConductor(calibre, mat); return a ? a * n : NaN; }
 
+  /* 250.122 — la tierra (EGC) según el breaker que protege el circuito, en
+     COBRE. Edgar (15/09): «el ground va seleccionado aparte, con la medida
+     que queramos: con cable 6 quizás necesitamos ground 8, no 6». Esto da la
+     del código como punto de partida; él la cambia si quiere. */
+  var TIERRA_250_122 = [[15, '#14'], [20, '#12'], [60, '#10'], [100, '#8'], [200, '#6'], [300, '#4'], [400, '#3'], [500, '#2'], [600, '#1'], [800, '1/0'], [1000, '2/0'], [1200, '3/0'], [1600, '4/0'], [2000, '250']];
+  function tierraPorAmps(amps) {
+    var a = Number(amps) || 0;
+    for (var i = 0; i < TIERRA_250_122.length; i++) if (a <= TIERRA_250_122[i][0]) return TIERRA_250_122[i][1];
+    return TIERRA_250_122[TIERRA_250_122.length - 1][1];
+  }
+  /* Para un feeder no se sabe el breaker desde el plano: se toma la ampacidad
+     a 75 °C del conductor de fase (Tabla 310.16) como si el breaker fuera ese,
+     y de ahí 250.122. Cobre THHN/THW y aluminio XHHW compacto. */
+  var AMP_75_CU = { '#14': 20, '#12': 25, '#10': 35, '#8': 50, '#6': 65, '#4': 85, '#3': 100, '#2': 115, '#1': 130, '1/0': 150, '2/0': 175, '3/0': 200, '4/0': 230, '250': 255, '300': 285, '350': 310, '400': 335, '500': 380, '600': 420 };
+  var AMP_75_AL = { '1/0': 120, '2/0': 135, '3/0': 155, '4/0': 180, '250': 205, '300': 230, '350': 250, '400': 270, '500': 310, '600': 340 };
+  function ampacidad(calibre, mat) { return (mat === 'AL' ? AMP_75_AL : AMP_75_CU)[calibre] || 0; }
+  function tierraPorFase(calibre, mat) { return tierraPorAmps(ampacidad(calibre, mat)); }
+
+  /* Llenado con hilos de DISTINTO calibre (fases de un calibre, tierra de
+     otro): la suma de áreas contra el % de la Tabla 1 según el total de
+     hilos. `grupos` = [{calibre, n, mat}]. */
+  function llenadoMixto(tipo, tam, grupos) {
+    var t = TUBO[tipo], area = t && t[tam];
+    if (!area) return null;
+    var usado = 0, n = 0;
+    for (var i = 0; i < grupos.length; i++) {
+      var g = grupos[i]; if (!(g.n > 0)) continue;
+      var a = areaConductor(g.calibre, g.mat); if (!a) return null;
+      usado += a * g.n; n += g.n;
+    }
+    if (!(n > 0)) return null;
+    var pct = pctPermitido(n), maxArea = area * pct;
+    return { tipo: tipo, tam: tam, n: n, area: area, usado: usado, pctPermitido: pct, pct: usado / area, cabe: usado <= maxArea + 1e-9 };
+  }
+  function tamanoMinimoMixto(tipo, grupos) {
+    var t = TUBO[tipo]; if (!t) return null;
+    for (var i = 0; i < TAMANOS.length; i++) {
+      var tam = TAMANOS[i], ll = t[tam] && llenadoMixto(tipo, tam, grupos);
+      if (ll && ll.cabe) return tam;
+    }
+    return null;
+  }
+  function tamanosQueCabenMixto(tipo, grupos) {
+    var t = TUBO[tipo]; if (!t) return [];
+    return TAMANOS.filter(function (tam) { var ll = t[tam] && llenadoMixto(tipo, tam, grupos); return !!(ll && ll.cabe); });
+  }
+
   /* ¿Cabe? Devuelve el detalle, no solo sí/no: Edgar quiere ver el %.
      `mat`: 'CU' (por defecto) o 'AL' (aluminio compacto XHHW). */
   function llenado(tipo, tam, calibre, n, mat) {
@@ -203,6 +250,8 @@
     pctPermitido: pctPermitido, llenado: llenado, maxConductores: maxConductores,
     tamanoMinimo: tamanoMinimo, tamanosQueCaben: tamanosQueCaben,
     ajuste: ajuste, hilos: hilos, maxCkts: maxCkts,
+    tierraPorAmps: tierraPorAmps, tierraPorFase: tierraPorFase, ampacidad: ampacidad, TIERRA_250_122: TIERRA_250_122,
+    llenadoMixto: llenadoMixto, tamanoMinimoMixto: tamanoMinimoMixto, tamanosQueCabenMixto: tamanosQueCabenMixto,
     itemTubo: itemTubo, itemHilo: itemHilo, factorUnidad: factorUnidad
   };
   raiz.NEC = NEC;
