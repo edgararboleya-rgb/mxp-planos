@@ -345,6 +345,14 @@
     <div id="buscaFiltro">
       <input type="search" id="buscaTxt" placeholder="Palabra del plano… (PANEL A, GFCI, 2-WAY)">
       <label class="lay" title="Buscar en todas las hojas del set que vengan del mismo PDF"><input type="checkbox" id="buscaTodas" checked> Todo el set</label>
+      <label class="lay" title="CHI-1 no encuentra CHI-11: la palabra tiene que terminar ahí. Para números de circuito es lo que quieres."><input type="checkbox" id="buscaEntera"> Palabra entera</label>
+      <button id="buscaCoge" class="small" title="Coger del plano: el próximo toque sobre un texto del PDF lo mete aquí y lo busca">👆 Coger del plano</button>
+    </div>
+    <div id="buscaMarcar" class="oculto">
+      <div class="swRow" id="buscaColor"></div>
+      <button id="buscaResalta" class="small">Resaltar</button>
+      <button id="buscaAlConteo" class="small" title="Cada resultado pasa a ser una marca del Count, con su número y su total">→ Conteo</button>
+      <button id="buscaBorra" class="small" title="Quitar del plano los resaltes de esta búsqueda">Quitar</button>
     </div>
     <div id="buscaLista"></div>
   </div>

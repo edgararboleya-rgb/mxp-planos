@@ -1122,6 +1122,18 @@ body.touch #scopeCab button { width: 34px; height: 34px; }
 #buscaFiltro input[type=search] { flex: 1; min-width: 0; padding: 6px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 12px; background: #fff; }
 #buscaFiltro input[type=search]:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
 #buscaFiltro .lay { flex: none; font-size: 11px; color: var(--mp-ink-2); white-space: nowrap; }
+#buscaFiltro { flex-wrap: wrap; }
+#buscaFiltro input[type=search] { flex: 1 1 100%; }
+#buscaFiltro button.small { flex: none; }
+#buscaCoge.activo { background: var(--mp-blue); color: #fff; border-color: var(--mp-blue); }
+/* La fila de marcar: el color con el que quedan señalados en el plano
+   (Edgar, 16/09: «que me los marques todos para ver cómo corro las tuberías»). */
+#buscaMarcar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid var(--mp-line); background: var(--mp-sky-2); }
+#buscaMarcar.oculto { display: none; }
+#buscaMarcar .swRow { display: flex; gap: 3px; flex: none; }
+#buscaMarcar .sw { width: 17px; height: 17px; border-radius: 5px; cursor: pointer; border: 2px solid transparent; }
+#buscaMarcar .sw.cur { border-color: var(--mp-ink); box-shadow: 0 0 0 2px #fff inset; }
+#buscaMarcar button.small { flex: none; }
 #buscaLista { flex: 1; overflow: auto; padding: 4px 0; }
 #buscaLista .bMuted { color: var(--mp-ink-2); font-size: 12px; padding: 12px 12px; line-height: 1.5; }
 #buscaLista .bFila { display: flex; align-items: baseline; gap: 8px; padding: 5px 10px; cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--mp-line); }

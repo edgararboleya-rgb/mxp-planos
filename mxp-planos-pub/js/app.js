@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.W';
+  var APP_VERSION = 'v32.X';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5588,6 +5588,7 @@
       p = autoStraight(p, ev);
     }
     if (drawing && drawing.mode === 'mover') return moverDown(rawP);
+    if (buscaCogiendo) return buscaCogeDelPlano(rawP);   // «Coger del plano»: el toque es para la búsqueda
     if (tool === 'pen' || tool === 'hi') return inkDown(rawP, tool, ev);
     if (tool === 'erase') return eraseDown(rawP);
     switch (tool) {
@@ -17074,6 +17075,8 @@
   var buscaCache = {};        // 'pdfId:pagina' → [{txt, x, y, w, h}] en coordenadas 0..1 de la página
   var buscaRes = [];          // resultados vivos
   var buscaIdx = -1;
+  var buscaColor = '#c62828';   // con qué color se marcan en el plano
+  var buscaCogiendo = false;    // esperando un toque sobre el plano para coger el texto
   function buscaAbierto() { var b = $('#buscaBox'); return b && !b.classList.contains('oculto'); }
 
   /* Texto de una página, normalizado a 0..1 sobre el papel: así vale para
@@ -17178,11 +17181,27 @@
       return;
     }
     var pend = hojas.length, ql = q.toLowerCase(), conTexto = 0;
+    /* «Palabra entera»: CHI-1 no puede encontrar CHI-11. Para números de
+       circuito es justo lo que hace falta (Edgar, 16/09). Se corta en
+       cualquier cosa que no sea letra, número, guion o barra, porque así se
+       escriben los circuitos: NL2-40, CHI-1, NHI-2/4. */
+    var entera = !!($('#buscaEntera') || {}).checked;
+    function casa(t) {
+      var tl = t.toLowerCase();
+      if (!entera) return tl.indexOf(ql) >= 0;
+      var i = 0;
+      while ((i = tl.indexOf(ql, i)) >= 0) {
+        var a = tl.charAt(i - 1), b = tl.charAt(i + ql.length);
+        if (!/[a-z0-9\-\/]/.test(a || ' ') && !/[a-z0-9\-\/]/.test(b || ' ')) return true;
+        i += 1;
+      }
+      return false;
+    }
     hojas.forEach(function (h) {
       textoDePagina(h.rec, function (items) {
         if (items && items.length) conTexto++;
         (items || []).forEach(function (it) {
-          if (it.txt.toLowerCase().indexOf(ql) < 0) return;
+          if (!casa(it.txt)) return;
           buscaRes.push({
             hoja: h.i, txt: it.txt,
             x: h.bg.x + it.x * h.bg.w, y: h.bg.y + it.y * h.bg.h,
@@ -17228,6 +17247,7 @@
     }
     if (!estado && !String(($('#buscaTxt') || {}).value || '').trim()) { lista.innerHTML = '<div class="bMuted">Escribe una palabra del plano: PANEL A, GFCI, 2-WAY, DISHWASHER…</div>'; if (n) n.textContent = ''; return; }
     if (n) n.textContent = buscaRes.length ? buscaRes.length + (buscaRes.length === 1 ? ' resultado' : ' resultados') : '';
+    pintaBotonesBusca();
     if (!buscaRes.length) { lista.innerHTML = '<div class="bMuted">No aparece en el texto del PDF.</div>'; return; }
     var h = '';
     buscaRes.forEach(function (r, i) {
@@ -17265,6 +17285,157 @@
     setHint('“' + r.txt.trim().slice(0, 40) + '” — ' + (buscaIdx + 1) + ' de ' + buscaRes.length +
       ' · hoja ' + ((state.sheets[r.hoja] || {}).no || (r.hoja + 1)));
   }
+
+  /* ==================================================================
+     MARCAR EN EL PLANO LO QUE DICE LA BÚSQUEDA (Edgar, 16/09):
+     «que yo pueda seleccionar todos los números de ckt, por ejemplo NL2-40,
+     y me los marques todos en rojo o en el color que yo pida, para ver cómo
+     puedo correr las tuberías y hacerme una idea».
+
+     Cada resultado de la búsqueda se convierte en un RESALTE: un rectángulo
+     con relleno traslúcido (el resaltador de septiembre, en multiply) sobre
+     el texto, en su hoja, aunque la hoja no esté abierta. Llevan la etiqueta
+     `resalte` con lo buscado para quitarlos todos de un toque. No entran al
+     takeoff (son áreas sin patrón). También se pueden pasar al Count, como
+     los de la búsqueda visual. */
+  function claveResalte(txt) { return String(txt || '').trim().toLowerCase(); }
+  function resaltesDe(txt, hoja) {
+    var k = claveResalte(txt), out = [];
+    var areas = (hoja === undefined || hoja === state.curSheet) ? state.areas : null;
+    if (!areas) { var sh = state.sheets[hoja]; try { areas = (JSON.parse(sh.data || '{}').areas) || []; } catch (e) { areas = []; } }
+    (areas || []).forEach(function (a) { if (a && a.resalte && claveResalte(a.resalte) === k) out.push(a); });
+    return out;
+  }
+  function cuentaResaltes(txt) {
+    var n = 0;
+    (state.sheets || []).forEach(function (sh, i) { n += resaltesDe(txt, i).length; });
+    return n || resaltesDe(txt).length;
+  }
+  function resaltaBusca(color) {
+    var q = String(($('#buscaTxt') || {}).value || '').trim();
+    if (!q || !buscaRes.length) return 0;
+    var col = colorSeguro(color || buscaColor);
+    pushUndo();
+    var otras = {}, n = 0;
+    buscaRes.forEach(function (r) {
+      var pad = Math.max(r.h * 0.15, 1);
+      var x0 = r.x - pad, y0 = r.y - pad, x1 = r.x + r.w + pad, y1 = r.y + r.h + pad;
+      var e = { id: uid(), pts: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], pattern: 'none', rot: 0,
+                relleno: col, rellenoOp: 0.4, color: col, lw: 0.6, resalte: q };
+      n++;
+      if (r.hoja === state.curSheet) state.areas.push(e);
+      else (otras[r.hoja] = otras[r.hoja] || []).push(e);
+    });
+    Object.keys(otras).forEach(function (k) {
+      var sh = state.sheets[+k]; if (!sh) return;
+      var o = null; try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = null; }
+      if (!o) return;
+      o.areas = (o.areas || []).concat(otras[k]);
+      sh.data = JSON.stringify(o);
+    });
+    refresh(); scheduleAutosave(); pintaBusca(''); pintaMarcasBusca();
+    setHint('✔ ' + n + ' «' + q + '» resaltados en el plano · «Quitar» los borra todos · Ctrl+Z también');
+    return n;
+  }
+  function borraResaltes(txt) {
+    var q = String(txt == null ? (($('#buscaTxt') || {}).value || '') : txt).trim(), k = claveResalte(q);
+    if (!k) return 0;
+    var n = 0;
+    pushUndo();
+    var antes = state.areas.length;
+    state.areas = state.areas.filter(function (a) { return !(a && a.resalte && claveResalte(a.resalte) === k); });
+    n += antes - state.areas.length;
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet || !sh || typeof sh.data !== 'string') return;
+      var o = null; try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = null; }
+      if (!o || !Array.isArray(o.areas)) return;
+      var m = o.areas.length;
+      o.areas = o.areas.filter(function (a) { return !(a && a.resalte && claveResalte(a.resalte) === k); });
+      if (o.areas.length !== m) { n += m - o.areas.length; sh.data = JSON.stringify(o); }
+    });
+    if (sel && sel.kind === 'area' && !state.areas.some(function (a) { return a.id === sel.id; })) sel = null;
+    refresh(); scheduleAutosave(); pintaBusca('');
+    setHint(n ? '✔ ' + n + ' resalte(s) de «' + q + '» quitados' : 'No había resaltes de «' + q + '»');
+    return n;
+  }
+  /* Al Count: cada resultado es una marca, en una categoría con el nombre de
+     lo buscado (o la activa si ya se llama así). Mismo camino que la
+     búsqueda visual. */
+  function buscaAlConteo() {
+    var q = String(($('#buscaTxt') || {}).value || '').trim();
+    if (!q || !buscaRes.length) return 0;
+    pushUndo();
+    var cat = catsCount().filter(function (c) { return String(c.nom || '').trim().toLowerCase() === q.toLowerCase(); })[0];
+    if (!cat) { cat = nuevaCatCount(q); cat.color = colorSeguro(buscaColor); }
+    catActiva = cat.id;
+    var otras = {}, n = 0;
+    buscaRes.forEach(function (r) {
+      var m = { id: uid(), x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2), cat: cat.id };
+      n++;
+      if (r.hoja === state.curSheet) state.counts.push(m); else (otras[r.hoja] = otras[r.hoja] || []).push(m);
+    });
+    Object.keys(otras).forEach(function (k) {
+      var sh = state.sheets[+k]; if (!sh) return;
+      var o = null; try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = null; }
+      if (!o) return;
+      o.counts = (o.counts || []).concat(otras[k]);
+      sh.data = JSON.stringify(o);
+    });
+    refresh(); refreshCounts(); scheduleAutosave();
+    setHint('✔ ' + n + ' marca(s) de «' + q + '» en el Count · Ctrl+Z las quita');
+    return n;
+  }
+  /* «Coger del plano»: el siguiente toque sobre un texto del PDF lo mete en
+     la casilla y busca todos los iguales. Es lo de «como hicimos con los
+     símbolos», pero con letras. */
+  function buscaCogeDelPlano(p) {
+    buscaCogiendo = false;
+    var bcg = $('#buscaCoge'); if (bcg) bcg.classList.remove('activo');
+    var hojas = hojasConPdf(false);
+    if (!hojas.length) { setHint('Esta hoja no tiene un PDF con texto debajo'); return; }
+    var h = hojas[0];
+    textoDePagina(h.rec, function (items) {
+      var mejor = null, dm = Infinity;
+      (items || []).forEach(function (it) {
+        var x = h.bg.x + it.x * h.bg.w, y = h.bg.y + it.y * h.bg.h, w = it.w * h.bg.w, hh = it.h * h.bg.h;
+        var tol = Math.max(hh, 6 / view.z);
+        if (p[0] < x - tol || p[0] > x + w + tol || p[1] < y - tol || p[1] > y + hh + tol) return;
+        var d = Math.hypot(p[0] - (x + w / 2), p[1] - (y + hh / 2));
+        if (d < dm) { dm = d; mejor = it; }
+      });
+      if (!mejor) { setHint('Ahí no hay texto del PDF. Toca encima de una letra o un número'); return; }
+      // si el texto trae varias palabras («NL2-40 NHI-2»), se coge la más cercana al dedo
+      var partes = mejor.txt.trim().split(/\s+/), pick = mejor.txt.trim();
+      if (partes.length > 1) {
+        var x0 = h.bg.x + mejor.x * h.bg.w, w0 = mejor.w * h.bg.w, f = Math.max(0, Math.min(1, (p[0] - x0) / (w0 || 1)));
+        var iP = Math.min(partes.length - 1, Math.floor(f * partes.length));
+        pick = partes[iP];
+        // una «B» o un «A» sueltos no sirven para buscar: se juntan con la palabra de al lado («PANEL B»)
+        if (pick.length < 3) pick = iP > 0 ? partes[iP - 1] + ' ' + pick : (partes[1] ? pick + ' ' + partes[1] : pick);
+      }
+      var inp = $('#buscaTxt'); if (inp) inp.value = pick;
+      var ent = $('#buscaEntera'); if (ent && /\d/.test(pick)) ent.checked = true;   // con números, palabra entera
+      buscaEnPdf();
+    });
+  }
+  function pintaBotonesBusca() {
+    var fila = $('#buscaMarcar'); if (!fila) return;
+    var q = String(($('#buscaTxt') || {}).value || '').trim();
+    var hay = cuentaResaltes(q);
+    if (!buscaRes.length && !hay) { fila.classList.add('oculto'); return; }
+    fila.classList.remove('oculto');
+    var sw = $('#buscaColor');
+    if (sw) sw.innerHTML = COLOR_PRESETS.map(function (c) {
+      return '<span class="sw' + (buscaColor === c[0] ? ' cur' : '') + '" data-c="' + c[0] + '" title="' + c[1] + '" style="background:' + c[0] + '"></span>';
+    }).join('');
+    $$('#buscaColor .sw').forEach(function (el) { el.addEventListener('click', function () { buscaColor = el.dataset.c; pintaBotonesBusca(); }); });
+    var br = $('#buscaResalta'); if (br) { br.textContent = 'Resaltar los ' + buscaRes.length; br.disabled = !buscaRes.length; }
+    var bq = $('#buscaBorra'); if (bq) { bq.textContent = hay ? 'Quitar los ' + hay : 'Quitar'; bq.disabled = !hay; }
+    var bcn = $('#buscaAlConteo'); if (bcn) bcn.disabled = !buscaRes.length;
+  }
+  // gancho de pruebas: __buscaDbg() sigue devolviendo los resultados (prueba-buscar-pdf) y gana lo de marcar
+  Object.assign(window.__buscaDbg, { resalta: resaltaBusca, borra: borraResaltes, conteo: buscaAlConteo, cuenta: cuentaResaltes, coge: buscaCogeDelPlano,
+    busca: buscaEnPdf, color: function (c) { if (c) buscaColor = c; return buscaColor; } });
   (function () {
     var vb = $('#visualBox'); if (!vb) return;
     var bc = $('#visualCerrar'); if (bc) bc.addEventListener('click', cierraVisual);
@@ -17291,6 +17462,15 @@
       });
     }
     var tt = $('#buscaTodas'); if (tt) tt.addEventListener('change', buscaEnPdf);
+    var te = $('#buscaEntera'); if (te) te.addEventListener('change', buscaEnPdf);
+    var brs = $('#buscaResalta'); if (brs) brs.addEventListener('click', function () { resaltaBusca(buscaColor); });
+    var bbo = $('#buscaBorra'); if (bbo) bbo.addEventListener('click', function () { borraResaltes(); pintaBotonesBusca(); });
+    var bac = $('#buscaAlConteo'); if (bac) bac.addEventListener('click', buscaAlConteo);
+    var bcg = $('#buscaCoge'); if (bcg) bcg.addEventListener('click', function () {
+      buscaCogiendo = !buscaCogiendo;
+      bcg.classList.toggle('activo', buscaCogiendo);
+      if (buscaCogiendo) { if (tool !== 'select') setTool('select'); setHint('Toca un texto del plano (un número de circuito, un panel…) y te busco todos los iguales'); }
+    });
     var bp = $('#buscaPrev'); if (bp) bp.addEventListener('click', function () { vaAResultado(buscaIdx - 1); });
     var bs = $('#buscaSig'); if (bs) bs.addEventListener('click', function () { vaAResultado(buscaIdx + 1); });
     arrastraPanel($('#buscaCab'), box);
