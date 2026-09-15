@@ -1075,7 +1075,12 @@ svg.tool-vsearch { cursor: crosshair; }
 #scopeCuerpo button.pri { background: linear-gradient(180deg, #2A5BD7 0%, #1B3C8C 100%); color: #fff; border-color: transparent; }
 #scopeCuerpo button[disabled] { opacity: .45; cursor: default; }
 .scSec { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--mp-teal-text); font-weight: 650; margin-top: 4px; }
-.scLista { max-height: 44vh; overflow: auto; border: 1px solid var(--mp-line); border-radius: 9px; }
+.scLista { max-height: 44vh; overflow: auto; border: 1px solid var(--mp-line); border-radius: 9px; flex: none; min-height: 60px; }
+/* (Edgar, 16/09, con captura) #scopeCuerpo es una columna flex con max-height:
+   una hija con overflow:auto se encoge a CERO en cuanto el contenido de
+   arriba (preguntas, supuestos, fuera) llena la ventana — la lista existía
+   pero no se veía. flex:none la deja con su alto y es el cuerpo el que hace
+   scroll. */
 .scFila { display: grid; grid-template-columns: 18px 1fr 64px; gap: 6px 8px; align-items: start; padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
 .scFila:last-child { border-bottom: 0; }
 .scFila.fuera { opacity: .5; }
