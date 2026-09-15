@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.X';
+  var APP_VERSION = 'v32.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2130,6 +2130,10 @@
     /* `nums` son los números de los circuitos que van por el tubo: de ahí
        salen los breakers, uno por circuito y no uno por tramo. */
     if (!d.tipo || d.tipo === 'homerun') d.tipo = 'derivado';
+    /* (16/09, Edgar) «quitarle las letras a las líneas para que no me ocupen
+       tanto espacio cuando estoy corriendo los circuitos»: los rótulos de las
+       corridas y rutas salen completos, solo con el ckt, o sin nada. */
+    if (d.rotulo !== 'ckt' && d.rotulo !== 'nada') d.rotulo = 'completo';
     if (!Array.isArray(d.nums)) d.nums = null;
     if (!(+d.num > 0)) d.num = 1;
     return d;
@@ -3911,7 +3915,10 @@
 
   // el rotulo del circuito, montado sobre la mitad del trazo y girado con el
   // tramo — como la etiqueta que Edgar pone en Bluebeam
+  function modoRotulo() { var d = state.circDefaults; return (d && (d.rotulo === 'ckt' || d.rotulo === 'nada')) ? d.rotulo : 'completo'; }
   function rotuloHomerun(a, col) {
+    var modo = modoRotulo();
+    if (modo === 'nada') return '';
     var tr = largoTramos(a.pts, false);
     if (!tr.segs.length) return '';
     var P = puntoEn(tr, tr.tot / 2); if (!P) return '';
@@ -3919,7 +3926,8 @@
     var sz = 8 * glifoK(a);
     return '<text x="0" y="' + (-(a.lw || 1.1) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
       ') rotate(' + an.toFixed(1) + ')" font-size="' + sz.toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' + (col || '#14161a') +
-      '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(rotuloCirc(a.circ)) + '</text>';
+      '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' +
+      esc(modo === 'ckt' ? (tipoCorrida(a.circ) === 'feeder' ? 'FDR #' : '#') + rotuloNums(a.circ) : rotuloCirc(a.circ)) + '</text>';
   }
   function renderAreas() {
     var out = '';
@@ -9618,6 +9626,8 @@
     return h;
   }
   function rotuloRuta(a, col) {
+    var modo = modoRotulo();
+    if (modo === 'nada') return '';
     var t = rutaTipo(a.ruta.tipo);
     var tr = largoTramos(a.pts, false);
     if (!tr.segs.length) return '';
@@ -9628,7 +9638,7 @@
     if ((+r.mult) > 1) extra += ' ×' + (+r.mult);
     var R = resumenNECRuta(a);
     var cab = R && R.tam ? (R.tam + ' ' + (t ? t.mat : '') + ' · ' + (R.h.fases + R.h.neu) + (/^#/.test(r.calibre) ? '' : '×') + r.calibre + (R.mat === 'AL' ? ' AL' : '') + (R.gnd.n ? ' + ' + R.gnd.calibre + ' G' : '') + (R.h.sets > 1 ? ' ×' + R.h.sets + ' juegos' : '')) : (t ? (t.mat || t.subj) : '?');
-    var txt = cab + ' ' + fmtFtIn(largoRuta(a)) + extra;
+    var txt = modo === 'ckt' ? (R && R.tam ? R.tam + ' ' + (t ? t.mat : '') : (t ? (t.mat || t.subj) : '?')) : cab + ' ' + fmtFtIn(largoRuta(a)) + extra;
     return '<text x="0" y="' + (-(a.lw || 1.3) * 1.5 - 1.5).toFixed(1) + '" transform="translate(' + P.x.toFixed(2) + ' ' + P.y.toFixed(2) +
       ') rotate(' + an.toFixed(1) + ')" font-size="' + (8 * glifoK(a)).toFixed(1) + '" text-anchor="middle" font-weight="bold" fill="' +
       (col || '#14161a') + '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(txt) + '</text>';
@@ -9812,7 +9822,7 @@
     resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad, factorAlias: factorAlias,
     // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
     tipo: tipoCorrida, nums: numsCirc, sincroniza: sincronizaNums, proximo: proximoCircLibre,
-    porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc, marcaCkt: marcaCktEnHoja,
+    porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc, marcaCkt: marcaCktEnHoja, modoRotulo: modoRotulo,
     breakers: breakersDeCircuitos, cuenta: cuentaCircuitos, normaliza: normalizaCirc
   };
 
@@ -20429,6 +20439,8 @@
         }).join('') + '</select></div>' +
         '<div class="row"><label>Drop (ft)</label><input id="tmCircDrop" type="number" min="0" step="1" value="' + (dC.drop == null ? 15 : dC.drop) + '"></div></div>';
       html += '<div class="tmItem" data-k="__trazar"><span><b>Trazar con esto</b> — ckt ' + esc(rotuloNums(dC)) + ' del panel ' + esc(dC.panel || '') + '</span></div>';
+      html += '<div class="row" style="padding:4px 10px"><label>Rótulos en el plano</label><select id="tmCircRot" title="Lo que se escribe encima de cada corrida y ruta. Con el plano lleno, «Solo el ckt» o «Ninguno» despejan">' +
+        [['completo', 'Completos (#2, 4 · 1/2" EMT · 4#12…)'], ['ckt', 'Solo el ckt (#2, 4)'], ['nada', 'Ninguno']].map(function (o) { return '<option value="' + o[0] + '"' + (modoRotulo() === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
       html += '<div class="tmPie">El tamaño de tubo que se ofrece es solo el que admite esos hilos (Cap. 9, Tabla 1: 40 % con 3 o más). «Portadores» son los hilos que llevan corriente — la tierra no cuenta, ni el neutro compartido de un multihilo—; con 4 a 6 la ampacidad se ajusta al 80 % (310.15(C)(1)), y de ahí no se pasa.</div>';
       html += '<div class="tmPie">Las corridas salen con <b>estos mismos números</b> hasta que los cambies: si sigues corriendo tubería del mismo circuito (switch legs, tramos entre tomas), <b>no se suman más breakers</b>. Cuando empieces otro ckt, toca «› sig.» o escribe el número.' +
         (nCkC > 1 ? ' Por ese tubo van <b>' + nCkC + ' circuitos</b>: son ' + nCkC + ' breakers y ' + nCkC + ' espacios en el panel.' : '') + '</div>';
@@ -20503,6 +20515,7 @@
           var d = circDefaults(), id = el.id;
           if (id === 'tmCircDrop') d.drop = Math.max(0, parseFloat(el.value) || 0);
           else if (id === 'tmCircTipo') aplicaCambioNEC(d, 'tipo', el.value);
+          else if (id === 'tmCircRot') { d.rotulo = el.value; refresh(); }
           else if (id === 'tmCircPanel') d.panel = String(el.value || '').trim();
           else if (el.classList.contains('tmCircN')) {
             var iN = parseInt(el.dataset.i, 10) || 0, vN = parseInt(el.value, 10), lN = numsCirc(d);
@@ -20520,6 +20533,8 @@
           showToolMenu('homerun', anchor);
         });
       });
+      var selRot = $('#tmCircRot');
+      if (selRot) selRot.addEventListener('change', function () { circDefaults().rotulo = selRot.value; refresh(); scheduleAutosave(); setHint(selRot.value === 'nada' ? 'Corridas sin rótulo: el texto sigue en Propiedades y en Materiales' : selRot.value === 'ckt' ? 'Solo el número de circuito encima de cada corrida' : 'Rótulos completos'); });
       // el color de las próximas corridas: se elige aquí y se queda
       $$('#tmCircColor .sw').forEach(function (sw) {
         sw.addEventListener('click', function () {
