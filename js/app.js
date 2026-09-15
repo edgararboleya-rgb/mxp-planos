@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.C';
+  var APP_VERSION = 'v32.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9281,6 +9281,7 @@
     if (_leyIdx) return _leyIdx;
     var idx = [], df = {};
     tlibSets().forEach(function (st) {
+      if (st.nom === 'Demolition') return;   // lo que se demuele no está en la leyenda de lo nuevo: "Receptacles" de Demolition casaba con cualquier outlet
       st.items.forEach(function (it) {
         if (it.tipo !== 'conteo' || it.descartado) return;
         // el nombre del tool y, si es distinto, el del item: se prueba con los dos y gana el mejor
@@ -9302,8 +9303,10 @@
     var qa = q.filter(function (w) { return /^\d+A$/.test(w); });
     var res = [];
     leyIndice().forEach(function (e) {
-      var mejor = 0;
+      var mejor = 0, mejorPrec = 0;
       e.vars.forEach(function (tok) {
+        // un tool de UNA palabra ("Receptacles", "Lights") casa con media leyenda: solo vale si la descripción también es corta
+        if (tok.length === 1 && q.length > 3) return;
         var inter = 0, pesoE = 0;
         tok.forEach(function (w) { var pw = leyW(w); pesoE += pw; if (q.indexOf(w) >= 0) inter += pw; });
         if (!inter || !pesoE) return;
@@ -9311,7 +9314,8 @@
         var sc = 0.65 * recall + 0.35 * prec;
         var ea = tok.filter(function (w) { return /^\d+A$/.test(w); });
         if (qa.length && ea.length && qa[0] !== ea[0]) sc -= 0.25;   // amperaje distinto = otro item
-        if (sc > mejor) mejor = sc;
+        if (leyChoca(q, tok)) sc -= 0.30;                                 // DUPLEX vs QUADRUPLEX, WALL vs CEILING…
+        if (sc > mejor) { mejor = sc; mejorPrec = prec; }
       });
       if (!mejor) return;
       var sc = mejor;
@@ -9320,12 +9324,30 @@
       var mf = leyMismaFam(familia, e.fam);
       if (mf === true) sc += 0.15; else if (mf === false) sc -= 0.20;
       if (sc <= 0.15) return;
-      res.push({ k: tlibKey(e.set.nom, e.it.subj), nom: e.it.subj, sc: sc, set: e.set.nom, it: e.it });
+      res.push({ k: tlibKey(e.set.nom, e.it.subj), nom: e.it.subj, sc: sc, prec: mejorPrec, set: e.set.nom, it: e.it });
     });
     // se ordena con el número CRUDO: si se recorta a 1 antes, dos buenos empatan
     // y gana el que esté primero en el set (así el receptáculo normal se iba al GFCI)
     res.sort(function (a, b) { return b.sc - a.sc; });
     return res.slice(0, 3).map(function (r) { r.sc = Math.max(0, Math.min(1, r.sc)); return r; });
+  }
+  /* Palabras que se EXCLUYEN entre sí: si la descripción dice una y el tool
+     dice otra del mismo grupo, no es ese item aunque todo lo demás coincida.
+     Medido (15/09): el QUADRUPLEX se iba al "20A GFCI DUPLEX RECEPTACLE" al
+     77 % y el switch de pared con sensor al "CEILING OCCUPANCY SENSOR". */
+  var LEY_EXCL = [['DUPLEX', 'QUADRUPLEX', 'SIMPLEX'], ['WALL', 'CEILING', 'FLOOR'], ['SMOKE', 'HEAT'], ['HORN', 'STROBE', 'BELL'], ['PHONE', 'DATA'], ['EMT', 'PVC', 'MC', 'ROMEX'], ['NEMA-1', 'NEMA-3R', 'NEMA-4R']];
+  function leyChoca(q, tok) {
+    for (var g = 0; g < LEY_EXCL.length; g++) {
+      var grp = LEY_EXCL[g], a = null, b = null;
+      grp.forEach(function (w) { if (q.indexOf(w) >= 0) a = a || w; if (tok.indexOf(w) >= 0) b = b || w; });
+      // solo choca si cada lado tiene UNA sola del grupo y son distintas (un
+      // "COMBINATION DATA/TELEPHONE" trae las dos y no choca con nadie)
+      if (a && b && a !== b) {
+        var qa = grp.filter(function (w) { return q.indexOf(w) >= 0; }), tb = grp.filter(function (w) { return tok.indexOf(w) >= 0; });
+        if (qa.length === 1 && tb.length === 1) return true;
+      }
+    }
+    return false;
   }
   var LEY_UMBRAL = 0.55;
 
@@ -9376,23 +9398,38 @@
     var enP = tlibEnProyecto();
     ley.lineas = Array.isArray(L.lineas) ? L.lineas.map(String).slice(0, 30) : [];
     ley.notas = String(L.notas || '');
-    ley.filas = L.simbolos.slice(0, 80).map(function (s, i) {
+    var simb = L.simbolos.slice(0, 80);
+    var asig = null;
+    try { asig = leyAsignaFilas(simb); } catch (e) { asig = null; }
+    ley.asignadas = asig ? asig.map(function (f) { return f ? f.j : -1; }) : null;
+    ley.filas = simb.map(function (s, i) {
       var desc = String((s && s.descripcion) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
       var f = {
         i: i, desc: desc, tag: String((s && s.tag) || '').trim().slice(0, 8),
         fam: LEY_FAM_NOM[s && s.familia] ? s.familia : 'other',
         mont: String((s && s.montaje) || 'unknown'), nota: String((s && s.nota) || '').slice(0, 120),
-        caja: s && s.caja, glifo: leyGlifo(s && s.caja),
+        caja: s && s.caja, glifo: leyGlifo(s && s.caja, asig ? asig[i] : null),
         parejas: desc ? leyendaCasa(desc, s && s.tag, s && s.familia) : [],
         nom: desc, fuera: !desc
       };
       // la pareja propuesta: la mejor si pasa el umbral; si no, sin pareja
-      f.sel = (f.parejas[0] && f.parejas[0].sc >= LEY_UMBRAL) ? f.parejas[0].k : '';
+      // preselecciona solo si pasa el umbral Y la descripción no es casi toda palabras que el item no tiene
+      f.sel = (f.parejas[0] && f.parejas[0].sc >= LEY_UMBRAL && f.parejas[0].prec >= 0.2) ? f.parejas[0].k : '';
       // ya está en el proyecto (por alias o por nombre): se muestra, no se repite
-      var kSel = f.sel ? f.sel.slice(f.sel.indexOf('|') + 1).toUpperCase() : '';
-      f.ya = !!(enP[desc.toUpperCase()] || (kSel && enP[kSel]));
-      if (f.ya) f.fuera = true;
       return f;
+    });
+    // dos símbolos distintos no pueden ir al MISMO item: el quadruplex se iba
+    // al duplex GFCI y al crear se perdía en silencio (15/09). Se la queda el
+    // de más parecido; el otro sale sin pareja, y se avisa en su fila.
+    var quien = {};
+    ley.filas.forEach(function (f) { if (!f.sel) return; var sc = f.parejas[0] ? f.parejas[0].sc : 0; if (!quien[f.sel] || sc > quien[f.sel].sc) quien[f.sel] = { i: f.i, sc: sc }; });
+    ley.filas.forEach(function (f) {
+      if (f.sel && quien[f.sel].i !== f.i) { f.sel = ''; f.nota = (f.nota ? f.nota + ' · ' : '') + 'misma pareja que otra fila: se dejó sin pareja para no fundir dos símbolos'; }
+    });
+    ley.filas.forEach(function (f) {
+      var kSel = f.sel ? f.sel.slice(f.sel.indexOf('|') + 1).toUpperCase() : '';
+      f.ya = !!(enP[f.desc.toUpperCase()] || (kSel && enP[kSel]));
+      if (f.ya) f.fuera = true;
     });
     pintaLey();
     setHint('Leyenda leída: ' + ley.filas.length + ' símbolo(s). Revisa la lista, quita los que no son, y crea las categorías.');
@@ -9439,25 +9476,87 @@
     ley.tabla = { filas: filas, colX: colX, rayasH: rayasH.length };
     return ley.tabla;
   }
-  function leyGlifo(caja) {
-    if (!ley || !ley.cv || !caja) return '';
-    var W = ley.w, H = ley.h;
-    var cx0 = Math.max(0, Math.min(100, +caja.x0 || 0)) / 100 * W, cx1 = Math.max(0, Math.min(100, +caja.x1 || 0)) / 100 * W;
-    var cy0 = Math.max(0, Math.min(100, +caja.y0 || 0)) / 100 * H, cy1 = Math.max(0, Math.min(100, +caja.y1 || 0)) / 100 * H;
-    var x0, y0, x1, y1, t = leyTabla();
-    var cy = (cy0 + cy1) / 2, fila = null;
-    if (t && t.filas.length >= 3) {
-      for (var i = 0; i < t.filas.length; i++) if (cy >= t.filas[i][0] && cy <= t.filas[i][1]) { fila = t.filas[i]; break; }
-      // el modelo suele errar por poco: si cayó justo en una raya, la fila más cercana
-      if (!fila) { var dm = Infinity; t.filas.forEach(function (f) { var dd = Math.min(Math.abs(cy - f[0]), Math.abs(cy - f[1])); if (dd < dm) { dm = dd; fila = f; } }); if (dm > H * 0.03) fila = null; }
+  /* Qué bandas de la tabla tienen DIBUJO en la columna del símbolo. Las
+     cabeceras de sección (ELECTRICAL DEVICES, NURSE CALL…) son bandas sin
+     símbolo: su texto va centrado y no llega a la columna de la izquierda. */
+  function leyFilasSimbolo() {
+    var t = leyTabla();
+    if (!t || t.filas.length < 3) return null;
+    if (t.filasSim) return t.filasSim;
+    var W = ley.w, ctx = ley.cv.getContext('2d', { willReadFrequently: true });
+    var xc = Math.max(8, Math.round(t.colX ? t.colX : W * 0.18));
+    // se muestrea POR DENTRO de la celda: el borde de la tabla y las rayas son
+    // tinta también, y con ellas dentro toda banda parecía una fila con dibujo
+    var mx = Math.max(4, Math.round(W * 0.006)), my = 5;
+    var out = [];
+    t.filas.forEach(function (f, j) {
+      var y0 = Math.round(f[0]) + my, h = Math.round(f[1]) - Math.round(f[0]) - 2 * my;
+      var x0 = mx, w = xc - 2 * mx;
+      if (h < 4 || w < 4) return;
+      var d; try { d = ctx.getImageData(x0, y0, w, h).data; } catch (e) { return; }
+      var n = 0;
+      for (var i = 0; i < d.length; i += 4) if ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < 150) n++;
+      if (n / (d.length / 4) > 0.003) out.push({ j: j, y0: f[0], y1: f[1], cy: (f[0] + f[1]) / 2 });
+    });
+    t.filasSim = out;
+    return out;
+  }
+  /* El modelo lee de arriba abajo y en eso SÍ es de fiar; en la posición
+     exacta no: medido con la leyenda real (15/09), la coordenada y se le va
+     comprimiendo según baja, y las seis últimas filas caían todas en la del
+     duct detector. Así que se empareja la SECUENCIA de símbolos con la
+     SECUENCIA de filas con dibujo. Si hay el mismo número, uno a uno y ya.
+     Si no, alineación monótona con la y del modelo solo como pista de
+     desempate (programación dinámica chica: 25 × 30). */
+  function leyAsignaFilas(simbolos) {
+    var filas = leyFilasSimbolo();
+    if (!filas || !filas.length) return null;
+    var N = simbolos.length, M = filas.length, i, j;
+    if (N === M) return simbolos.map(function (_, k) { return filas[k]; });
+    var H = ley.h;
+    var cy = simbolos.map(function (s) { var c = s && s.caja || {}; return (Math.max(0, Math.min(100, +c.y0 || 0)) + Math.max(0, Math.min(100, +c.y1 || 0))) / 200 * H; });
+    // la deriva del modelo es UNIFORME (se comprime según baja): se estira su
+    // escala para que el primero caiga en la primera fila y el último en la
+    // última. Lo que queda de error es local, y eso sí lo arregla la alineación.
+    var a0 = cy[0], a1 = cy[N - 1], b0 = filas[0].cy, b1 = filas[M - 1].cy;
+    if (a1 - a0 > 1) cy = cy.map(function (y) { return b0 + (y - a0) / (a1 - a0) * (b1 - b0); });
+    // dp[i][j]: mejor coste asignando los símbolos 0..i con el i-ésimo en la fila j (j no decreciente)
+    var INF = 1e18, dp = [], prev = [];
+    for (i = 0; i < N; i++) { dp.push(new Array(M).fill(INF)); prev.push(new Array(M).fill(-1)); }
+    for (j = 0; j < M; j++) dp[0][j] = Math.abs(cy[0] - filas[j].cy);
+    for (i = 1; i < N; i++) {
+      // doblar fila (dos símbolos en una) se castiga; MENOS cuanto más abajo,
+      // que es donde la posición del modelo menos vale y donde sobra lo que sobra
+      var castigo = H * 0.25 * (1.2 - i / N);
+      for (j = 0; j < M; j++) {
+        var mejor = INF, de = -1, k;
+        for (k = 0; k <= j; k++) {
+          var c = dp[i - 1][k] + (k === j ? castigo : 0);
+          if (c < mejor) { mejor = c; de = k; }
+        }
+        dp[i][j] = mejor + Math.abs(cy[i] - filas[j].cy);
+        prev[i][j] = de;
+      }
     }
+    var fin = 0; for (j = 1; j < M; j++) if (dp[N - 1][j] < dp[N - 1][fin]) fin = j;
+    var out = new Array(N);
+    for (i = N - 1, j = fin; i >= 0; i--) { out[i] = filas[j]; j = prev[i][j]; }
+    return out;
+  }
+  /* El recorte del símbolo. `fila` viene de leyAsignaFilas (por orden);
+     sin tabla, la caja del modelo con margen. 56 px de alto, JPEG chico. */
+  function leyGlifo(caja, fila) {
+    if (!ley || !ley.cv) return '';
+    var W = ley.w, H = ley.h, t = leyTabla();
+    var x0, y0, x1, y1;
     if (fila) {
-      y0 = fila[0] + 1; y1 = fila[1] - 1;
-      // la celda del símbolo: del borde izquierdo a la raya vertical; sin raya, la caja con margen
-      var bordeIzq = 0;
-      x0 = bordeIzq; x1 = t.colX ? t.colX - 1 : Math.min(W, Math.max(cx1 + (cx1 - cx0) * 0.5, W * 0.18));
+      y0 = fila.y0 + 1; y1 = fila.y1 - 1;
+      x0 = 0; x1 = (t && t.colX) ? t.colX - 1 : Math.min(W, W * 0.18);
       if (x1 - x0 < 8) { x0 = 0; x1 = Math.min(W, W * 0.18); }
     } else {
+      if (!caja) return '';
+      var cx0 = Math.max(0, Math.min(100, +caja.x0 || 0)) / 100 * W, cx1 = Math.max(0, Math.min(100, +caja.x1 || 0)) / 100 * W;
+      var cy0 = Math.max(0, Math.min(100, +caja.y0 || 0)) / 100 * H, cy1 = Math.max(0, Math.min(100, +caja.y1 || 0)) / 100 * H;
       var m = Math.max(3, (cx1 - cx0) * 0.12, (cy1 - cy0) * 0.12);
       x0 = Math.max(0, cx0 - m); y0 = Math.max(0, cy0 - m); x1 = Math.min(W, cx1 + m); y1 = Math.min(H, cy1 + m);
     }
@@ -9477,7 +9576,7 @@
     if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>'; enganchaLeyOtra(); return; }
     if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
     if (!ley || !ley.filas) {
-      c.innerHTML = '<div class="bMuted">Encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero (solo la tabla, no la hoja entera) y el cerebro te saca las categorías del Count ya nombradas.</div>';
+      c.innerHTML = '<div class="bMuted">Encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero y el cerebro te saca las categorías del Count ya nombradas.<br><br><b>Mejor una sección a la vez</b> (ELECTRICAL DEVICES, después FIRE ALARM…): con menos filas por imagen lee mejor y no se le corren los dibujitos. La hoja entera no: la letra sale ilegible.</div>';
       return;
     }
     var vivas = ley.filas.filter(function (f) { return !f.fuera; });
@@ -9537,8 +9636,10 @@
     vivas.forEach(function (f) {
       var nom = (f.nom || f.desc).trim().slice(0, 60);
       var par = f.sel ? tlibItemDe(f.sel) : null;
-      var kAlias = par ? par.it.subj.toUpperCase() : nom.toUpperCase();
-      if (enP[kAlias]) { saltadas++; return; }
+      // se salta solo lo que YA ESTABA en el proyecto antes de esta tanda (por
+      // alias o por nombre). Dos filas de esta tanda con la misma pareja se
+      // crean las dos: el usuario las vio y las dejó así.
+      if (enP[nom.toUpperCase()] || (par && enP[par.it.subj.toUpperCase()])) { saltadas++; return; }
       var c;
       if (par) c = nuevaCatCount(nom, { alias: par.it.subj, set: par.set.nom, item: par.it.item, unidad: par.it.unidad, color: par.it.color, codigo: par.it.codigo });
       else c = nuevaCatCount(nom, { codigo: LEY_FAM_CODIGO[f.fam] || CODIGO_DEFECTO });
@@ -9546,7 +9647,7 @@
       // para reconocerla en el plano y para Buscar iguales después
       if (f.glifo && f.glifo.length < 6000) c.glifo = f.glifo;
       if (f.tag) c.tag = f.tag;
-      enP[kAlias] = c; nuevas.push(c);
+      nuevas.push(c);
     });
     if (!nuevas.length) { popUndoVacio(); setHint('Esas categorías ya estaban en el proyecto'); return; }
     catActiva = nuevas[0].id;
@@ -9571,6 +9672,8 @@
     crea: leyendaCrea,
     estado: function () { return ley ? { filas: ley.filas ? ley.filas.length : null, w: ley.w, h: ley.h, rect: ley.rect } : null; },
     tabla: function () { return leyTabla(); },
+    asignadas: function () { return ley ? ley.asignadas : null; },
+    filasSimbolo: function () { var f = leyFilasSimbolo(); return f ? f.map(function (x) { return x.j; }) : null; },
     glifoDe: function (i) { return ley && ley.filas && ley.filas[i] ? ley.filas[i].glifo : ''; }
   };
 
