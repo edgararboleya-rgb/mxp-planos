@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.K';
+  var APP_VERSION = 'v32.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11594,6 +11594,252 @@
     }
     if (!sbAuth()) askLogin(go); else go();
   });
+
+  /* ==================================================================
+     E10 · ESTIMADO DESDE EL SCOPE (15/09, en azul)
+
+     El patrón es el de siempre: la IA PROPONE, el código CALCULA, Edgar
+     APRUEBA fila a fila. Aquí el cerebro recibe el scope of work y las dos
+     listas de Supabase —las RECETAS (ensambles, con sus componentes) y el
+     CATÁLOGO (nombres y unidades)— y devuelve líneas «tipo + nombre exacto +
+     cantidad + motivo + confianza», más las preguntas que hay que hacerle al
+     cliente y lo que se quedó fuera. Ni un precio viaja: el dinero lo saca el
+     estimador con el catálogo de Edgar, como con el takeoff.
+
+     Vive en Planos y no en el panel porque el panel habla con una función de
+     Supabase cuyo código no está aquí; Planos ya tiene el cerebro con su
+     token y ya crea estimados borrador (Materiales → Estimador).
+
+     Lo que sale: un estimado BORRADOR con sus `estimado_ensambles` (recetas ×
+     cantidad) y sus `estimado_items` (ítems sueltos, con código de partida),
+     en el modo que pidan las recetas elegidas (comercial → «planos»). Lo que
+     el cerebro nombró y no existe en el catálogo NO se manda: se ve en rojo
+     con tres sugerencias del catálogo para que Edgar elija, o se descarta.
+     ================================================================== */
+  var scope = null;   // { prop, filas, ens, cat, alias, aviso }
+  function scopeTexto() { return String((state.project && state.project.scope) || ''); }
+  function scopePonTexto(t) { if (!state.project) state.project = {}; state.project.scope = String(t || ''); scheduleAutosave(); }
+  function abreScope() { var b = $('#scopeBox'); if (!b) return; b.classList.remove('oculto'); pintaScope(); }
+  function cierraScope() { var b = $('#scopeBox'); if (b) b.classList.add('oculto'); }
+  /* Casar cada línea propuesta con lo que existe de verdad. Recetas por
+     nombre exacto (sin importar espacios ni mayúsculas); ítems por nombre
+     exacto o por alias, como el takeoff. Lo que no casa queda «sinPareja»
+     con hasta tres sugerencias por palabras: Edgar elige o descarta. */
+  function scopeCasa(prop, ens, cat, alias) {
+    var lineas = (prop && Array.isArray(prop.lineas)) ? prop.lineas : [];
+    var catByNorm = {}, aliasByNorm = {}, ensByNorm = {};
+    (cat || []).forEach(function (c) { if (c && c.item) catByNorm[normTxt2(c.item)] = c; });
+    (alias || []).forEach(function (a) { if (a && a.alias) aliasByNorm[normTxt2(a.alias)] = a; });
+    (ens || []).forEach(function (e) { if (e && e.nombre) ensByNorm[normTxt2(e.nombre)] = e; });
+    function sugiere(nombre) {
+      var pal = normTxt2(nombre).split(' ').filter(function (w) { return w.length > 1; });
+      if (!pal.length) return [];
+      return (cat || []).map(function (c) { var n = normTxt2(c.item); return { c: c, p: pal.filter(function (w) { return n.indexOf(w) >= 0; }).length }; })
+        .filter(function (x) { return x.p > 0; }).sort(function (a, b) { return b.p - a.p; }).slice(0, 3).map(function (x) { return x.c.item; });
+    }
+    return lineas.map(function (l, i) {
+      var tipo = l.tipo === 'ensamble' ? 'ensamble' : 'item';
+      var nombre = String(l.nombre || '').trim(), n = normTxt2(nombre);
+      var cant = Math.max(0, Number(l.cantidad) || 0);
+      var f = { i: i, tipo: tipo, nombre: nombre, cantidad: cant, motivo: String(l.motivo || ''), zona: String(l.zona || ''),
+                confianza: Math.max(0, Math.min(1, Number(l.confianza) || 0)), ok: false, marcado: false, unidad: 'EA' };
+      if (tipo === 'ensamble') {
+        var e = ensByNorm[n];
+        if (e) { f.ok = true; f.ensId = e.id; f.nombre = e.nombre; f.modo = e.modo || ''; f.unidad = 'EA'; }
+      } else {
+        var c = catByNorm[n], factor = 1;
+        if (!c && aliasByNorm[n]) { var al = aliasByNorm[n]; c = catByNorm[normTxt2(al.item)]; factor = Number(al.factor) || 1; }
+        if (c) { f.ok = true; f.item = c.item; f.unidad = c.unidad || 'E'; f.precio = c.precio; f.horas = c.horas_unidad; f.codigo = c.codigo || null; f.cantidad = cant * factor; }
+      }
+      if (!f.ok) f.sugerencias = sugiere(nombre);
+      f.marcado = f.ok && f.cantidad > 0;
+      return f;
+    });
+  }
+  /* El modo del estimado lo deciden las recetas elegidas: comercial → el
+     modo «planos» del estimador (que es donde enseña las recetas comerciales),
+     remodelación y servicio tal cual; sin recetas → planos. */
+  function scopeModo(filas) {
+    var c = {};
+    (filas || []).forEach(function (f) { if (f.marcado && f.tipo === 'ensamble' && f.modo) c[f.modo] = (c[f.modo] || 0) + 1; });
+    var top = Object.keys(c).sort(function (a, b) { return c[b] - c[a]; })[0];
+    if (!top) return 'planos';
+    return top === 'comercial' ? 'planos' : (top === 'planos' ? 'planos' : top);
+  }
+  /* Lo que se escribe en Supabase: ensambles y ítems, ya agrupados. */
+  function scopeCuerpos(filas, estId) {
+    var ens = {}, items = {}, orden = 0;
+    (filas || []).forEach(function (f) {
+      if (!f.marcado || !f.ok || !(f.cantidad > 0)) return;
+      if (f.tipo === 'ensamble') { ens[f.ensId] = (ens[f.ensId] || 0) + f.cantidad; return; }
+      var k = f.item + '|' + (f.codigo || '');
+      if (!items[k]) items[k] = { estimado_id: estId, item: f.item, unidad: f.unidad, precio: f.precio || 0, horas: f.horas || 0, cantidad: 0, origen: 'scope', codigo: esCodigo(f.codigo) ? f.codigo : CODIGO_DEFECTO, orden: ++orden };
+      items[k].cantidad += f.cantidad;
+    });
+    return {
+      ensambles: Object.keys(ens).map(function (id) { return { estimado_id: estId, ensamble_id: isNaN(+id) ? id : +id, cantidad: Math.round(ens[id] * 100) / 100 }; }),
+      items: Object.keys(items).map(function (k) { var it = items[k]; it.cantidad = Math.round(it.cantidad * 1000) / 1000; return it; })
+    };
+  }
+  function pintaScope(estado) {
+    var c = $('#scopeCuerpo'); if (!c) return;
+    if (estado) { c.innerHTML = '<div class="bMuted">' + estado + '</div>'; return; }
+    var h = '';
+    if (!scope || !scope.prop) {
+      h += '<div class="bMuted">Pega el <b>scope of work</b> del trabajo (el texto del cliente, el correo, lo que te dictaron). El cerebro propone qué recetas e ítems de TU catálogo lleva y cuántos; tú lo revisas fila a fila y sale un estimado borrador. El dinero lo pone el estimador, no la IA.</div>';
+      h += '<textarea id="scopeTxt" placeholder="Ej: Build-out de oficina de 2.400 sq ft en Tampa. 24 receptáculos 20A, 6 switches, 18 luminarias 2x4 LED (las pone el dueño), 4 salidas de datos, panel nuevo de 100A 3 fases desde el house panel a 60 pies…">' + esc(scopeTexto()) + '</textarea>';
+      h += '<div class="row" style="gap:6px"><button id="scopeIr" class="pri" style="flex:1">Proponer con el cerebro</button></div>';
+      if (scope && scope.aviso) h += '<div class="bMuted" style="color:#a33">' + esc(scope.aviso) + '</div>';
+      var nTk = 0; try { nTk = buildTakeoffEntries(true).length; } catch (e) {}
+      h += '<div class="bMuted small">Necesita el cerebro conectado (Ajustes del asistente) y tu sesión del panel. Manda el scope, tus recetas y los nombres del catálogo; no manda precios.' +
+        (nTk ? ' <b>Va también lo contado en esta hoja (' + nTk + ' renglones)</b>: esas cantidades mandan.' : ' Si antes cuentas el plano (Count, símbolos, rutas), esas cantidades viajan con el scope y mandan sobre las típicas.') + '</div>';
+    } else {
+      var P = scope.prop, F = scope.filas || [];
+      var vivas = F.filter(function (f) { return f.marcado; }), sinP = F.filter(function (f) { return !f.ok; });
+      if (P.resumen) h += '<div class="bMuted">' + esc(P.resumen) + '</div>';
+      if (P.preguntas && P.preguntas.length) {
+        h += '<div class="scSec">Antes de cerrar el número — pregúntale al cliente</div><ul class="scPreg">' + P.preguntas.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>';
+      }
+      if (P.supuestos && P.supuestos.length) h += '<div class="scSec">Se dio por hecho</div><ul class="scPreg">' + P.supuestos.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>';
+      if (P.fuera && P.fuera.length) h += '<div class="scSec">Fuera (cotízalo a mano o crea el ítem)</div><ul class="scPreg">' + P.fuera.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>';
+      h += '<div class="scSec">Propuesta · <b>' + vivas.length + '</b> de ' + F.length + ' líneas marcadas' + (sinP.length ? ' · <span style="color:#a33">' + sinP.length + ' sin pareja en el catálogo</span>' : '') + '</div>';
+      h += '<div class="scLista" id="scLista">';
+      F.forEach(function (f, i) {
+        h += '<div class="scFila' + (f.marcado ? '' : ' fuera') + (f.ok ? '' : ' sinPareja') + '" data-i="' + i + '">' +
+          '<input type="checkbox" class="scChk" data-i="' + i + '"' + (f.marcado ? ' checked' : '') + (f.ok ? '' : ' disabled') + '>' +
+          '<div><span class="scTipo' + (f.tipo === 'ensamble' ? ' ens' : '') + '">' + (f.tipo === 'ensamble' ? 'RECETA' : 'ÍTEM') + '</span><span class="scNom">' + esc(f.nombre) + '</span>' +
+          '<div class="scDet">' + (f.zona ? esc(f.zona) + ' · ' : '') + esc(f.motivo) + ' <span class="scConf" title="Confianza ' + Math.round(f.confianza * 100) + ' %: 100 = el scope lo dice con número; 50 = cantidad típica; 20 = adivinanza"><i style="width:' + Math.round(f.confianza * 100) + '%"></i></span></div>' +
+          (f.ok ? '' : '<div class="scDet" style="color:#a33">No está en tu catálogo con ese nombre.' + (f.sugerencias && f.sugerencias.length ? ' ¿Era uno de estos?' : '') + '</div>' +
+            (f.sugerencias && f.sugerencias.length ? '<select class="scSel" data-i="' + i + '"><option value="">— elegir del catálogo —</option>' + f.sugerencias.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('') + '</select>' : '')) +
+          '</div>' +
+          '<div><input class="scQty" type="number" min="0" step="any" data-i="' + i + '" value="' + f.cantidad + '"' + (f.ok ? '' : ' disabled') + '><div class="scUni">' + esc(f.unidad) + (f.unidad === 'MLF' ? ' (miles de ft)' : '') + '</div></div>' +
+          '</div>';
+      });
+      h += '</div>';
+      h += '<div class="row" style="gap:6px;margin-top:4px"><button id="scopeVolver" style="flex:1">Volver al scope</button><button id="scopeCrear" class="pri" style="flex:2"' + (vivas.length ? '' : ' disabled') + '>Crear estimado borrador (' + vivas.length + ')</button></div>';
+      h += '<div class="bMuted small">Sale en modo <b>' + esc(scopeModo(F)) + '</b> por las recetas elegidas. Después, en el panel: escenario, factor y el bid. La confianza baja es donde más vale la pena mirar.</div>';
+    }
+    c.innerHTML = h;
+    var bIr = $('#scopeIr'); if (bIr) bIr.addEventListener('click', function () { var t = $('#scopeTxt'); scopePonTexto(t ? t.value : ''); scopePide(); });
+    var bV = $('#scopeVolver'); if (bV) bV.addEventListener('click', function () { scope.prop = null; scope.filas = null; pintaScope(); });
+    var bC = $('#scopeCrear'); if (bC) bC.addEventListener('click', scopeCrea);
+    var lista = $('#scLista');
+    if (lista) {
+      lista.addEventListener('change', function (ev) {
+        var t = ev.target, i = +t.dataset.i, f = scope.filas[i]; if (!f) return;
+        if (t.classList.contains('scChk')) f.marcado = t.checked && f.ok;
+        else if (t.classList.contains('scQty')) { f.cantidad = Math.max(0, parseFloat(t.value) || 0); if (!(f.cantidad > 0)) f.marcado = false; }
+        else if (t.classList.contains('scSel') && t.value) {
+          // Edgar eligió un ítem del catálogo para la línea sin pareja: se casa con ese
+          var c2 = (scope.cat || []).filter(function (q) { return normTxt2(q.item) === normTxt2(t.value); })[0];
+          if (c2) { f.ok = true; f.tipo = 'item'; f.item = c2.item; f.nombre = c2.item; f.unidad = c2.unidad || 'E'; f.precio = c2.precio; f.horas = c2.horas_unidad; f.codigo = c2.codigo || null; f.marcado = f.cantidad > 0; }
+        }
+        pintaScope();
+      });
+    }
+  }
+  /* Pedirle la propuesta al cerebro: primero las listas de Supabase (con la
+     sesión del panel), después el worker con el token. Sin cerebro o sin
+     sesión, se dice qué falta; nada se inventa. */
+  function scopePide() {
+    var txt = scopeTexto().trim();
+    if (txt.length < 20) { scope = scope || {}; scope.aviso = 'El scope está vacío o es muy corto: pega el texto del trabajo.'; pintaScope(); return; }
+    var cc = cerebroCfg();
+    if (!cc.url) { scope = scope || {}; scope.aviso = 'Falta el cerebro: ponle la dirección y el token en Ajustes del asistente (el botón del cerebro).'; pintaScope(); return; }
+    if (!sbAuth()) { askLogin(scopePide); return; }
+    pintaScope('Leyendo tus recetas y tu catálogo…');
+    Promise.all([
+      sbFetch('/rest/v1/ensambles?select=id,nombre,modo,pies_editable,orden&order=orden'),
+      sbFetch('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad'),
+      sbFetch('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad,codigo,seccion&order=orden'),
+      sbFetch('/rest/v1/alias_takeoff?select=alias,item,factor').then(null, function () { return []; })
+    ]).then(function (res) {
+      var ens = res[0] || [], ei = res[1] || [], cat = res[2] || [], alias = res[3] || [];
+      if (!cat.length) throw new Error('el catálogo llegó vacío: entra con el usuario dueño del panel');
+      var compDe = {}; ei.forEach(function (x) { (compDe[x.ensamble_id] = compDe[x.ensamble_id] || []).push(String(x.item || '').replace(/\s+/g, ' ').trim()); });
+      // lo contado en el plano viaja con el scope: el scope dice QUÉ, el conteo dice CUÁNTOS
+      var tk = [];
+      try { tk = buildTakeoffEntries(true).map(function (e) { return { name: e.name, qty: e.qty, unit: e.unit }; }); } catch (e) { tk = []; }
+      var cuerpo = {
+        scope: txt,
+        takeoff: tk,
+        proyecto: [state.project.name, state.project.client, state.project.address].filter(Boolean).join(' · '),
+        ensambles: ens.map(function (e) { return { nombre: e.nombre, modo: e.modo, unidad: 'EA', comp: compDe[e.id] || [] }; }),
+        items: cat.map(function (c) { return { item: String(c.item || '').replace(/\s+/g, ' ').trim(), unidad: c.unidad || 'E' }; })
+      };
+      pintaScope('El cerebro está leyendo el scope… (30–90 s)');
+      return fetch(cc.url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-mxp-token': cc.tok }, body: JSON.stringify(cuerpo) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { scopeRecibe(d, ens, cat, alias); });
+    }).catch(function (e) {
+      if (e && e.message === 'login') { askLogin(scopePide); return; }
+      scope = scope || {}; scope.aviso = 'No se pudo: ' + (e && e.message ? e.message : e); pintaScope();
+    });
+  }
+  function scopeRecibe(d, ens, cat, alias) {
+    scope = scope || {};
+    if (!d || d.error || !d.propuesta) { scope.aviso = (d && d.error) ? String(d.error) : 'El cerebro no devolvió una propuesta.'; scope.prop = null; pintaScope(); return; }
+    scope.aviso = ''; scope.prop = d.propuesta; scope.ens = ens; scope.cat = cat; scope.alias = alias;
+    scope.filas = scopeCasa(d.propuesta, ens, cat, alias);
+    pintaScope();
+    var sinP = scope.filas.filter(function (f) { return !f.ok; }).length;
+    setHint('Propuesta: ' + scope.filas.length + ' líneas' + (sinP ? ' · ' + sinP + ' sin pareja en el catálogo (en rojo)' : '') + (d.uso ? ' · ' + (d.uso.input_tokens || 0) + '/' + (d.uso.output_tokens || 0) + ' tokens' : ''));
+  }
+  /* Crear el borrador con lo marcado: el estimado, sus recetas y sus ítems. */
+  function scopeCrea() {
+    if (!scope || !scope.filas) return;
+    var F = scope.filas, cuerpos = scopeCuerpos(F, null);
+    if (!cuerpos.ensambles.length && !cuerpos.items.length) { uiAlert('No hay ninguna línea marcada que exista en el catálogo.'); return; }
+    var year = new Date().getFullYear();
+    var seq = parseInt(localStorage.getItem('mxp_est_seq_' + year) || '0', 10) + 1;
+    var estId = 'EST-' + year + '-' + ('00' + seq).slice(-3);
+    var modo = scopeModo(F);
+    pintaScope('Creando el estimado borrador…');
+    sbFetch('/rest/v1/estimados', {
+      method: 'POST', prefer: 'return=representation',
+      body: [{ nombre: (state.project.name || 'Scope') + ' [' + estId + ']', cliente: state.project.client || null, direccion: state.project.address || null,
+               estado: 'borrador', modo: modo, notas: scopeTexto().slice(0, 4000) }]
+    }).then(null, function (err) {
+      // el estimador puede no tener la columna notas o modo: se manda sin ellas
+      if (!/notas|modo|column/i.test(String(err && err.message || err))) throw err;
+      return sbFetch('/rest/v1/estimados', { method: 'POST', prefer: 'return=representation',
+        body: [{ nombre: (state.project.name || 'Scope') + ' [' + estId + ']', cliente: state.project.client || null, direccion: state.project.address || null, estado: 'borrador' }] });
+    }).then(function (rows) {
+      var est = rows && rows[0]; if (!est) throw new Error('no se recibió el estimado creado');
+      var cu = scopeCuerpos(F, est.id);
+      var p1 = cu.ensambles.length ? sbFetch('/rest/v1/estimado_ensambles', { method: 'POST', body: cu.ensambles }) : Promise.resolve();
+      var p2 = cu.items.length ? sbFetch('/rest/v1/estimado_items', { method: 'POST', body: cu.items }).then(null, function (err) {
+        if (!/codigo|origen/i.test(String(err && err.message || err))) throw err;
+        var sin = cu.items.map(function (it) { var o = {}; Object.keys(it).forEach(function (q) { if (q !== 'codigo' && q !== 'origen') o[q] = it[q]; }); return o; });
+        return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: sin });
+      }) : Promise.resolve();
+      return Promise.all([p1, p2]).then(function () { return { est: est, cu: cu }; });
+    }).then(function (r) {
+      localStorage.setItem('mxp_est_seq_' + year, String(seq));
+      state.project.estimateId = estId; scheduleAutosave();
+      var P = scope.prop || {};
+      uiAlert('✔ Estimado borrador creado desde el scope.\n\n"' + r.est.nombre + '" · modo ' + modo + '\nRecetas: ' + r.cu.ensambles.length + ' · Ítems: ' + r.cu.items.length +
+        (P.preguntas && P.preguntas.length ? '\n\nAntes de cerrar el número, pregúntale al cliente:\n• ' + P.preguntas.join('\n• ') : '') +
+        (P.fuera && P.fuera.length ? '\n\nFuera de la propuesta (a mano):\n• ' + P.fuera.join('\n• ') : '') +
+        '\n\nÁbrelo en tu panel de Max Power → Estimador: escenario, factor y el bid.');
+      setHint('✔ Estimado ' + estId + ' creado como borrador desde el scope');
+      cierraScope();
+    }).catch(function (e) {
+      if (e && e.message === 'login') { askLogin(scopeCrea); return; }
+      scope.aviso = 'No se pudo crear: ' + (e && e.message ? e.message : e); pintaScope();
+    });
+  }
+  (function () {
+    var b = $('#btnScope'); if (b) b.addEventListener('click', abreScope);
+    var x = $('#scopeCerrar'); if (x) x.addEventListener('click', cierraScope);
+  })();
+  window.__scopeDbg = {
+    abre: abreScope, cierra: cierraScope, casa: scopeCasa, modo: scopeModo, cuerpos: scopeCuerpos,
+    recibe: function (d, ens, cat, alias) { scope = scope || {}; scopeRecibe(d, ens, cat, alias); },
+    filas: function () { return scope && scope.filas ? JSON.parse(JSON.stringify(scope.filas)) : null; },
+    texto: function (t) { if (t !== undefined) scopePonTexto(t); return scopeTexto(); },
+    pide: scopePide, crea: scopeCrea
+  };
 
   /* ---------------- capas ---------------- */
   var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], count: ['gCount'], grid: ['gGridBase'] };

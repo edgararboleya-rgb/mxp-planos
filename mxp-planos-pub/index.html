@@ -300,7 +300,7 @@
       </section>
 
       <section class="panel" id="matPanel">
-        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Estimador</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV</button></h3>
+        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Estimador</button> <button id="btnScope" title="Estimado desde el scope of work: el cerebro propone recetas e ítems con cantidades, el código calcula, tú apruebas fila a fila (E10)" data-ico="chat">Scope</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV</button></h3>
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
       </section>
     </aside>
@@ -322,6 +322,15 @@
       <button id="leyCerrar" title="Cerrar" data-ico="close"></button>
     </div>
     <div id="leyCuerpo"></div>
+  </div>
+
+  <!-- ======= ESTIMADO DESDE SCOPE (E10): el cerebro propone, el código calcula, Edgar aprueba ======= -->
+  <div id="scopeBox" class="oculto">
+    <div id="scopeCab">
+      <span id="scopeTit">ESTIMADO DESDE EL SCOPE</span>
+      <button id="scopeCerrar" title="Cerrar" data-ico="close"></button>
+    </div>
+    <div id="scopeCuerpo"></div>
   </div>
 
   <!-- ======= BUSCAR TEXTO EN EL PDF DEL INGENIERO (5.8) ======= -->
