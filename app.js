@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.O';
+  var APP_VERSION = 'v32.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2127,6 +2127,11 @@
     if (!d.calibre) d.calibre = '#12';
     if (!d.ckts) d.ckts = 1;
     if (!d.neutro) d.neutro = 'propio';
+    /* (15/09, Edgar) la corrida tiene TIPO: homerun abre circuito nuevo, el
+       derivado SIGUE en el mismo (A→B y luego B→C es un solo ckt) y el feeder
+       alimenta un panel. `sigue` es el número en el que va el derivado. */
+    if (!d.tipo) d.tipo = 'homerun';
+    if (d.sigue === undefined) d.sigue = null;
     return d;
   }
   /* --- el homerun EN TUBO, con el NEC delante (Edgar, 15/09) ---
@@ -2189,7 +2194,10 @@
   /* Sincroniza el texto viejo con el modelo nuevo cuando el circuito va en tubo. */
   function normalizaCirc(c) {
     if (!c) return c;
+    // planos guardados antes del 15/09 no traen tipo: todos eran homeruns
+    c.tipo = tipoCorrida(c);
     if (!c.sistema) c.sistema = esTubo(c.cable) ? 'tubo' : /^MC/i.test(c.cable || '') ? 'mc' : 'romex';
+    sincronizaNums(c, c.__id || null);
     if (c.sistema === 'tubo') {
       if (!c.tubo) { var pt0 = partesTubo(c.cable); c.tubo = pt0 && /PVC.*80/i.test(pt0.tubo) ? 'PVC80' : pt0 && /PVC/i.test(pt0.tubo) ? 'PVC40' : pt0 && /GRS|RIGID/i.test(pt0.tubo) ? 'GRS' : pt0 && /ENT/i.test(pt0.tubo) ? 'ENT' : pt0 && /FMC|FLEX/i.test(pt0.tubo) ? 'FMC' : pt0 && /IMC/i.test(pt0.tubo) ? 'IMC' : 'EMT'; }
       if (!c.calibre) { var pt1 = partesTubo(c.cable); c.calibre = pt1 ? pt1.calibre : '#12'; }
@@ -2215,13 +2223,31 @@
     var m = /THHN\s*(#\d+)\s*en\s*(.+)$/i.exec(cable || '');
     return m ? { calibre: m[1], tubo: m[2].trim() } : null;
   }
-  function nuevoCirc() {
+  /* La corrida nueva. Antes SIEMPRE abría número nuevo, y por eso trazar
+     A→B y luego B→C del MISMO circuito salía como dos circuitos y dos
+     breakers. Ahora manda el tipo: el derivado sigue en el número en curso. */
+  function nuevoCirc(tipoF) {
     var d = circDefaults();
+    var tipo = tipoF || d.tipo || 'homerun';
+    if (tipo !== 'derivado' && tipo !== 'feeder') tipo = 'homerun';
     var usados = {};
     state.areas.forEach(function (x) { if (x.circ && x.circ.num) usados[x.circ.num] = 1; });
-    var n = (d.num || 0) + 1;
-    while (usados[n]) n++;
-    var c = { panel: d.panel, num: n, desc: '', cable: d.cable, amps: d.amps, poles: d.poles, drop: d.drop, mult: 1,
+    var n = 0, sigueNums = null;
+    if (tipo === 'derivado') {
+      n = +d.sigue || 0;   // el tramo que sigue: mismo número
+      if (n && Array.isArray(d.sigueNums) && d.sigueNums.length) sigueNums = d.sigueNums.slice();
+      if (!n) {
+        // sin nada recordado, sigue el ÚLTIMO circuito trazado en el plano:
+        // es lo que Edgar tiene delante cuando encadena A→B y luego B→C
+        for (var i = (state.areas || []).length - 1; i >= 0; i--) {
+          var aU = state.areas[i];
+          if (aU && aU.circ && aU.circ.num) { n = +aU.circ.num; sigueNums = numsCirc(aU.circ).slice(); break; }
+        }
+      }
+      if (!n) n = +d.num || 0;
+    }
+    if (!n) { n = (d.num || 0) + 1; while (usados[n]) n++; }
+    var c = { tipo: tipo, panel: d.panel, num: n, nums: sigueNums, desc: '', cable: d.cable, amps: d.amps, poles: d.poles, drop: d.drop, mult: 1,
               sistema: d.sistema, tubo: d.tubo, calibre: d.calibre, ckts: d.ckts, neutro: d.neutro, tam: d.tam || null,
               gnd: d.gnd || 'si', gndCal: d.gndCal || null };
     return normalizaCirc(c);
@@ -2232,7 +2258,48 @@
     d.sistema = c.sistema || d.sistema; d.tubo = c.tubo || d.tubo; d.calibre = c.calibre || d.calibre;
     d.ckts = c.ckts || d.ckts; d.neutro = c.neutro || d.neutro; d.tam = c.tam || null;
     d.gnd = c.gnd || 'si'; d.gndCal = c.gndCal || null;
+    d.tipo = tipoCorrida(c);
+    if (c.num) { d.sigue = +c.num; d.sigueNums = numsCirc(c).slice(); }   // el circuito en curso: donde cae el próximo derivado
     if (c.num > (d.num || 0)) d.num = c.num;
+  }
+  /* LOS BREAKERS, UNA SOLA VEZ POR CIRCUITO (15/09).
+     Antes se contaba un breaker por TRAMO trazado: 33 tramos = 33 breakers,
+     aunque fueran 12 circuitos. Y un tubo con 2 circuitos contaba 1 solo.
+     Ahora: se agrupan todos los tramos de todas las hojas por panel + número
+     de circuito; cada número pide su breaker; el tramo que abre el circuito
+     (homerun o feeder) manda en amperaje y polos; las unidades (×3 pisos) se
+     toman de la mayor, no se suman. Devuelve { 'Breaker 20A 1P': 12 }. */
+  function breakersDeCircuitos(areas) {
+    var porCkt = {}, out = {};
+    (areas || []).forEach(function (ar) {
+      if (!ar || !ar.open || !ar.circ) return;
+      var c = ar.circ, pan = String(c.panel || '').trim().toUpperCase();
+      var mult = Math.max(1, (+c.mult) || 1), abre = abreCircuito(c);
+      var lista = numsCirc(c).filter(function (n) { return n > 0; });
+      // una corrida sin número: no se puede agrupar, cuenta sola (y solo si abre circuito)
+      if (!lista.length) { if (abre) lista = ['\u0001' + ar.id]; else return; }
+      lista.forEach(function (n) {
+        var k = pan + '#' + n, g = porCkt[k];
+        if (!g) { porCkt[k] = { amps: c.amps, poles: c.poles, mult: mult, abre: abre }; return; }
+        g.mult = Math.max(g.mult, mult);
+        if (!g.abre && abre) { g.amps = c.amps; g.poles = c.poles; g.abre = true; }   // manda el tramo de cabecera
+      });
+    });
+    Object.keys(porCkt).forEach(function (k) {
+      var g = porCkt[k], kb = 'Breaker ' + (g.amps || '?') + 'A ' + (g.poles || 1) + 'P';
+      out[kb] = (out[kb] || 0) + g.mult;
+    });
+    return out;
+  }
+  // cuántos circuitos distintos hay (no cuántos tramos): para el panel Materiales
+  function cuentaCircuitos(areas) {
+    var v = {}, n = 0;
+    (areas || []).forEach(function (ar) {
+      if (!ar || !ar.open || !ar.circ) return;
+      var pan = String(ar.circ.panel || '').trim().toUpperCase();
+      numsCirc(ar.circ).forEach(function (q) { if (q > 0 && !v[pan + '#' + q]) { v[pan + '#' + q] = 1; n++; } });
+    });
+    return n;
   }
   // largo de cable que se compra: (trazo por el plano + lo que baja del techo) x
   // unidades — la misma formula que la hoja 'Branch Circuits' del Excel de
@@ -2285,6 +2352,55 @@
      Sin NEC: la lista de cables de siempre. `pref` distingue Propiedades del
      menú ▾ (ids distintos, misma lógica). */
   // los tubos que Edgar compra (su catálogo, 15/09) — el IMC lo pidió igual
+  /* Las tres categorías de corrida que trabaja Edgar. El nombre de la
+     herramienta ya no es «Homerun»: es la corrida (tubo + cable), y el tipo
+     dice qué papel hace. Solo el homerun y el feeder abren circuito nuevo. */
+  var TIPO_CORRIDA = [
+    ['homerun', 'Homerun (del panel a la carga) — abre circuito nuevo'],
+    ['derivado', 'Ckt derivado (sigue el mismo circuito) — no abre número'],
+    ['feeder', 'Feeder (alimenta un panel o equipo) — abre circuito nuevo']
+  ];
+  var TIPO_CORRIDA_NOM = { homerun: 'Homerun', derivado: 'Ckt derivado', feeder: 'Feeder' };
+  function tipoCorrida(c) { var t = c && c.tipo; return (t === 'derivado' || t === 'feeder') ? t : 'homerun'; }
+  /* Los circuitos que van DENTRO de la corrida. Edgar (15/09): «si elijo una
+     tubería con más de un circuito, que me permitas seleccionar dos
+     circuitos». nums[0] es el principal (el que rotula el trazo); los demás se
+     escriben a mano y, si se dejan en blanco, salen los siguientes libres.
+     De aquí come el conteo de breakers: 2 circuitos en un tubo = 2 breakers
+     (antes salía 1: el tubo se cobraba bien y el panel se quedaba corto). */
+  function numsCirc(c) {
+    if (!c) return [];
+    var k = Math.max(1, Math.min(6, +c.ckts || 1)), a = Array.isArray(c.nums) ? c.nums : [];
+    var out = [+c.num || 0];
+    for (var i = 1; i < k; i++) out.push(+a[i] || 0);
+    return out;
+  }
+  function numsUsados(excluirId) {
+    var u = {};
+    ((state && state.areas) || []).forEach(function (x) {
+      if (!x || !x.circ || (excluirId && x.id === excluirId)) return;
+      numsCirc(x.circ).forEach(function (n) { if (n) u[n] = 1; });
+    });
+    return u;
+  }
+  function sincronizaNums(c, excluirId) {
+    if (!c) return c;
+    var out = numsCirc(c), usados = null, vistos = {};
+    for (var i = 0; i < out.length; i++) {
+      var n = out[i];
+      if (n > 0 && !vistos[n]) { vistos[n] = 1; continue; }
+      if (usados === null) usados = numsUsados(excluirId);
+      var m = Math.max(+c.num || 0, 0) + 1;
+      while (usados[m] || vistos[m]) m++;
+      out[i] = m; vistos[m] = 1;
+    }
+    c.nums = out;
+    if (out[0]) c.num = out[0];
+    return c;
+  }
+  function rotuloNums(c) { return numsCirc(c).filter(function (n) { return n > 0; }).join(', ') || '?'; }
+  /* El breaker lo pide el circuito, NO cada tramo. */
+  function abreCircuito(c) { return tipoCorrida(c) !== 'derivado'; }
   var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['ENT', 'ENT (Smurf tube)'], ['FMC', 'Flex metal conduit'], ['IMC', 'IMC']];
   var CALIBRE_OPC = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0'];
   var NEUTRO_OPC = [['propio', 'Neutro propio (uno por circuito)'], ['compartido', 'Neutro compartido (multihilo 120/240)'], ['ninguno', 'Sin neutro (240 V puro)']];
@@ -2348,6 +2464,7 @@
   /* Los cambios del selector, para Propiedades (escriben en el circuito
      seleccionado) y para el menú ▾ (escriben en los valores por defecto). */
   function aplicaCambioNEC(c, campo, valor) {
+    if (campo === 'tipo') { c.tipo = (valor === 'derivado' || valor === 'feeder') ? valor : 'homerun'; return normalizaCirc(c); }
     if (campo === 'sistema') {
       c.sistema = valor;
       if (valor === 'romex') c.cable = /^MC|THHN/.test(c.cable || '') ? '12/2' : (c.cable || '12/2');
@@ -2356,7 +2473,7 @@
     } else if (campo === 'cable') c.cable = valor;
     else if (campo === 'tubo') { c.tubo = valor; c.tam = null; }
     else if (campo === 'calibre') { c.calibre = valor; c.tam = null; }
-    else if (campo === 'ckts') { c.ckts = Math.max(1, Math.min(6, parseInt(valor, 10) || 1)); c.tam = null; }
+    else if (campo === 'ckts') { c.ckts = Math.max(1, Math.min(6, parseInt(valor, 10) || 1)); c.tam = null; sincronizaNums(c, c.__id || null); }
     else if (campo === 'neutro') { c.neutro = valor; c.tam = null; }
     else if (campo === 'gnd') {
       if (valor === 'no') c.gnd = 'no';
@@ -2379,7 +2496,9 @@
     var cab = r ? (r.tam + ' ' + ({ EMT: 'EMT', PVC40: 'PVC', PVC80: 'PVC80', GRS: 'GRS', IMC: 'IMC', ENT: 'ENT', FMC: 'FMC' }[c.tubo || 'EMT'] || c.tubo) +
                    ' · ' + (r.h.hot + r.h.neu) + (c.calibre || '#12') + (r.gnd.n ? ' + ' + r.gnd.calibre + ' G' : '') + (c.ckts > 1 ? ' (' + c.ckts + ' ckts)' : ''))
                 : (c.cable || '');
-    return '#' + (c.num || '?') + ' · ' + cab + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
+    // el derivado se marca con ↳: se lee «sigue en el #5», no «otro circuito»
+    var tp = tipoCorrida(c), pre = tp === 'derivado' ? '\u21b3 #' : tp === 'feeder' ? 'FDR #' : '#';
+    return pre + rotuloNums(c) + ' · ' + cab + ' · ' + (c.amps || '') + 'A' + (c.poles > 1 ? '/' + c.poles + 'P' : '') +
       (c.desc ? ' · ' + c.desc : '');
   }
   var GLIFO_ALTO = 30;
@@ -5112,7 +5231,7 @@
     pline: 'POLILÍNEA: clic en cada punto · doble clic o Enter para terminar · SHIFT = tramos rectos',
     ruta: 'RUTA DE CONDUIT: clic en cada quiebre del recorrido · doble clic o Enter para terminar · el ▾ elige el tipo de tubo',
     line: 'LÍNEA: clic en el inicio y clic en el final · SHIFT = recta a 0/45/90 · el tipo de línea y la punta se eligen en el ▾ o en Propiedades',
-    homerun: 'HOMERUN: clic en el PANEL y sigue marcando por donde va el cable hasta el cuarto · doble clic o Enter termina · después llenas circuito, cable, breaker y drop en Propiedades',
+    homerun: 'CORRIDA: clic donde empieza y sigue marcando por donde va el tubo · doble clic o Enter termina · el ▾ elige si es HOMERUN (circuito nuevo), CKT DERIVADO (sigue el mismo) o FEEDER',
     cloud: 'NUBE DE REVISIÓN: clic en una esquina y clic en la opuesta · combínala con Callout para la nota',
     wire: 'CABLEADO / TUBERÍA: elige el material arriba en Propiedades (EMT, PVC, underground, recta o en L) y luego clic en el primer equipo y clic en el segundo',
     leader: 'NOTA: clic donde apunta la flecha · clic donde va el texto · escribe la nota (ej: GFI, Fridge Outlet)',
@@ -6906,7 +7025,9 @@
         d.pts = d.pts.map(function (q) { return [q[0] + dx, q[1] + dy]; });
         // un homerun pegado es OTRO circuito: número nuevo, mismo cable/breaker
         // (antes había dos #3 y el takeoff contaba el cable dos veces)
-        if (d.circ) { var nc = nuevoCirc(); d.circ = Object.assign({}, d.circ, { num: nc.num }); recuerdaCirc(d.circ); }
+        // un homerun/feeder pegado es OTRO circuito; un DERIVADO pegado sigue
+        // siendo un tramo del mismo (si no, se contaban dos breakers)
+        if (d.circ && abreCircuito(d.circ)) { var nc = nuevoCirc(tipoCorrida(d.circ)); d.circ = Object.assign({}, d.circ, { num: nc.num, nums: null }); sincronizaNums(d.circ, d.id); recuerdaCirc(d.circ); }
         state.areas.push(d); newRefs.push({ kind: 'area', id: d.id });
       }
     });
@@ -8086,9 +8207,16 @@
     } else if (sel.kind === 'area') {
       if (e.open && e.circ) {
         var c = e.circ;
-        html += '<div><b>⚡ Circuito #' + esc(String(c.num || '')) + '</b> · trazo ' + fmtFtIn(perimDe(e)) + ' + drop ' + (c.drop || 0) + '\' = <b>' + fmtFtIn(largoHomerun(e)) + '</b> de ' + esc(c.cable || '') + '</div>';
+        var tpP = tipoCorrida(c), nCk = Math.max(1, +c.ckts || 1);
+        html += '<div><b>⚡ ' + esc(TIPO_CORRIDA_NOM[tpP]) + ' · ckt ' + esc(rotuloNums(c)) + '</b> · trazo ' + fmtFtIn(perimDe(e)) + ' + drop ' + (c.drop || 0) + '\' = <b>' + fmtFtIn(largoHomerun(e)) + '</b> de ' + esc(c.cable || '') + '</div>';
+        html += '<div class="row"><label>Tipo</label><select id="prCircTipo" title="Homerun y feeder abren circuito nuevo; el ckt derivado es OTRO TRAMO del mismo circuito — no pide otro breaker">' +
+          TIPO_CORRIDA.map(function (o) { return '<option value="' + o[0] + '"' + (tpP === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>';
         html += '<div class="row"><label>Panel</label><input id="prCircPanel" value="' + esc(c.panel || '') + '" placeholder="MSP, A, B…"></div>';
-        html += '<div class="row"><label>Circuito #</label><input id="prCircNum" type="number" min="1" max="84" value="' + esc(String(c.num || '')) + '"></div>';
+        html += '<div class="row"><label>Circuito #</label><input id="prCircNum" type="number" min="1" max="84" value="' + esc(String(c.num || '')) + '" title="' + (tpP === 'derivado' ? 'Ponle el MISMO número del homerun que continúa' : 'El número de este circuito en el panel') + '"></div>';
+        if (nCk > 1) {
+          // los demás circuitos del tubo: se escriben separados por coma
+          html += '<div class="row"><label>Los ' + nCk + ' del tubo</label><input id="prCircNums" value="' + esc(numsCirc(c).filter(function (q) { return q > 0; }).join(', ')) + '" placeholder="5, 7" title="Qué circuitos van dentro de este tubo. Cada uno pide su breaker"></div>';
+        }
         html += '<div class="row"><label>Cuarto / carga</label><input id="prCircDesc" value="' + esc(c.desc || '') + '" placeholder="Master bedroom, Range, A/C…"></div>';
         html += filasCircuitoNEC(c);
         html += '<div class="row"><label>Breaker</label><select id="prCircAmps">' + BREAKERS.map(function (am) {
@@ -8102,7 +8230,8 @@
         if (esTubo(c.cable) && !esTuboCirc(c)) {
           html += '<div class="row"><label>Hilos (sin tierra)</label><input id="prCircHilos" type="number" min="1" max="6" step="1" value="' + hilosDe(c) + '" title="Conductores de fase/neutro dentro del tubo; la tierra se suma sola"></div>';
         }
-        html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo. Cambia el color o el grosor abajo para distinguir circuitos.</div>';
+        html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo.' +
+          (tpP === 'derivado' ? ' <b>Este tramo NO pide breaker</b>: el del ckt ' + esc(rotuloNums(c)) + ' ya está contado en su homerun.' : ' Pide <b>' + nCk + ' breaker' + (nCk === 1 ? '' : 's') + '</b> de ' + (c.amps || '?') + ' A.') + '</div>';
       } else if (esRuta(e) || (e.open && e.ruta)) {
         var r = e.ruta, tR = rutaTipo(r.tipo);
         html += '<div><b>Ruta' + (tR ? ' · ' + esc(tR.nom) : ' sin tipo') + '</b> · trazo ' + fmtFtIn(perimDe(e)) +
@@ -8126,7 +8255,7 @@
           (state.bg && !state.bg.cal ? ' <b>Este plano no está calibrado</b>: los pies son los del dibujo, no los de la obra.' : '') + '</div>';
       } else if (e.open) {
         html += '<div><b>Length: ' + fmtFtIn(perimDe(e)) + '</b></div>';
-        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">' + ICO.svg('homerun') + ' Convertir en circuito (homerun)</button>';
+        html += '<button id="prToCirc" style="width:100%;margin:4px 0 6px" title="Esta línea es un homerun: le pone panel, circuito, cable, breaker y drop, y entra al takeoff de cable">' + ICO.svg('homerun') + ' Convertir en corrida de circuito</button>';
         html += '<button id="prToRuta" style="width:100%;margin:0 0 6px" title="Esta línea es una corrida de conduit: le pone tipo de tubo, zona, drop y unidades, y su largo entra al takeoff lineal por tipo">' + ICO.svg('ruta') + ' Convertir en ruta de conduit</button>';
       } else {
         html += '<div><b>Area: ' + (areaDe(e) / 144).toFixed(1) + ' sq ft</b> · Perimeter: ' + fmtFtIn(perimDe(e)) + '</div>';
@@ -8563,8 +8692,31 @@
       var et = findSel(); if (!et || !et.circ) return;
       pushUndo(); aplicaCambioNEC(et.circ, campo, v); recuerdaCirc(et.circ); refresh(); showProps();
     }
+    on('prCircTipo', 'change', function (n) { circNEC('tipo', n.value); });
     on('prCircPanel', 'change', function (n) { circSet('panel', n.value.trim()); });
-    on('prCircNum', 'change', function (n) { circSet('num', n.value, true); });
+    on('prCircNum', 'change', function (n) {
+      var et = findSel(); if (!et || !et.circ) return;
+      pushUndo();
+      et.circ.num = parseInt(n.value, 10) || 0;
+      if (Array.isArray(et.circ.nums)) et.circ.nums[0] = et.circ.num;
+      sincronizaNums(et.circ, et.id); recuerdaCirc(et.circ); refresh(); showProps();
+    });
+    /* «Si elijo una tubería con más de un circuito, que me permitas
+       seleccionar dos circuitos» (Edgar, 15/09): se escriben separados por
+       coma; el primero es el que rotula el trazo y cada uno pide su breaker. */
+    on('prCircNums', 'change', function (n) {
+      var et = findSel(); if (!et || !et.circ) return;
+      var k = Math.max(1, +et.circ.ckts || 1), vistos = {}, lista = [];
+      String(n.value || '').split(/[^0-9]+/).forEach(function (t) {
+        var q = parseInt(t, 10);
+        if (q > 0 && q <= 84 && !vistos[q] && lista.length < k) { vistos[q] = 1; lista.push(q); }
+      });
+      pushUndo();
+      while (lista.length < k) lista.push(0);
+      et.circ.nums = lista;
+      if (lista[0]) et.circ.num = lista[0];
+      sincronizaNums(et.circ, et.id); recuerdaCirc(et.circ); refresh(); showProps();
+    });
     on('prCircDesc', 'change', function (n) { circSet('desc', n.value.trim()); });
     on('prCircCable', 'change', function (n) { circNEC('cable', n.value); });
     on('prCircSis', 'change', function (n) { circNEC('sistema', n.value); });
@@ -9555,9 +9707,13 @@
     hilos: hilosRuta, resumen: resumenNECRuta, partidas: partidasRuta, filas: filasRutaNEC, rotulo: rotuloRuta
   };
   /* el homerun en tubo, para probarlo sin clics: defaults, cambios con el NEC delante, partidas, rótulo */
+  window.__panelSchDbg = function () { return circuitosAlPanel(); };   // gancho de pruebas
   window.__homerunDbg = {
     defaults: circDefaults, cambia: aplicaCambioNEC, nuevo: nuevoCirc, partidas: partidasHomerun,
-    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad
+    resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad,
+    // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
+    tipo: tipoCorrida, abre: abreCircuito, nums: numsCirc, sincroniza: sincronizaNums,
+    breakers: breakersDeCircuitos, cuenta: cuentaCircuitos, normaliza: normalizaCirc
   };
 
   /* ==================================================================
@@ -10774,7 +10930,7 @@
     var n = 0, avisos = [];
     state.areas.forEach(function (ar) {
       if (!ar.open || !ar.circ || !ar.circ.num) return;
-      var nom = (ar.circ.panel || '').trim(), p = null;
+      var nom = (ar.circ.panel || '').trim(), p = null;   // (el tramo derivado comparte panel y número con su homerun)
       if (nom) p = state.panels.filter(function (q) { return (q.name || '').trim().toUpperCase() === nom.toUpperCase(); })[0];
       if (!p) {
         var p0 = curPanel();
@@ -10782,17 +10938,23 @@
         else if (nom && state.panels.length < 8) { p = defaultPanel(); p.name = nom; state.panels.push(p); }
         else p = p0;
       }
-      var num = +ar.circ.num, poles = +ar.circ.poles || 1;
-      var ultimo = num + (poles - 1) * 2;
-      if (ultimo > (p.spaces || 30)) { p.spaces = Math.ceil(ultimo / 2) * 2; avisos.push((p.name || 'Panel') + ' creció a ' + p.spaces + ' espacios por el #' + num); }
-      var k = String(num);
-      p.circuits[k] = Object.assign(p.circuits[k] || {}, { desc: ar.circ.desc || ar.circ.cable, trip: String(ar.circ.amps || ''), poles: String(poles) });
-      for (var e2 = 1; e2 < poles; e2++) {
-        var k2 = String(num + e2 * 2);
-        if (p.circuits[k2] && !p.circuits[k2].ocupadoPor) avisos.push((p.name || 'Panel') + ': el #' + k2 + ' choca con el ' + poles + 'P del #' + num);
-        p.circuits[k2] = { desc: '— (' + poles + 'P del #' + num + ')', trip: '', poles: '', ocupadoPor: num };
-      }
-      n++;
+      var poles = +ar.circ.poles || 1, derivado = !abreCircuito(ar.circ);
+      // TODOS los circuitos que van en el tubo, no solo el principal, y el
+      // tramo derivado no pisa lo que ya escribió su homerun
+      numsCirc(ar.circ).forEach(function (num) {
+        if (!(num > 0)) return;
+        var ultimo = num + (poles - 1) * 2;
+        if (ultimo > (p.spaces || 30)) { p.spaces = Math.ceil(ultimo / 2) * 2; avisos.push((p.name || 'Panel') + ' creció a ' + p.spaces + ' espacios por el #' + num); }
+        var k = String(num), yaEsta = !!p.circuits[k];
+        if (derivado && yaEsta) return;
+        p.circuits[k] = Object.assign(p.circuits[k] || {}, { desc: ar.circ.desc || ar.circ.cable, trip: String(ar.circ.amps || ''), poles: String(poles) });
+        for (var e2 = 1; e2 < poles; e2++) {
+          var k2 = String(num + e2 * 2);
+          if (p.circuits[k2] && !p.circuits[k2].ocupadoPor) avisos.push((p.name || 'Panel') + ': el #' + k2 + ' choca con el ' + poles + 'P del #' + num);
+          p.circuits[k2] = { desc: '— (' + poles + 'P del #' + num + ')', trip: '', poles: '', ocupadoPor: num };
+        }
+        if (!yaEsta) n++;
+      });
     });
     if (avisos.length) setTimeout(function () { setHint('⚠ ' + avisos.join(' · ')); }, 50);
     return n;
@@ -10846,16 +11008,16 @@
       });
     }
     // CIRCUITOS / HOMERUNS: cable por tipo (trazo + drop) y breakers
-    var cabPorTipo = {}, brk = {}, nCirc = 0;
+    var cabPorTipo = {}, nTramos = 0;
     state.areas.forEach(function (ar) {
       if (!ar.open || !ar.circ) return;
-      nCirc++;
+      nTramos++;
       partidasHomerun(ar).forEach(function (q) { cabPorTipo[q.item] = (cabPorTipo[q.item] || 0) + q.ft; });
-      var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
-      brk[kb] = (brk[kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // × unidades también en el breaker
     });
-    if (nCirc) {
-      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Homeruns (' + nCirc + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">' + ICO.svg('panelsch') + ' → Panel Schedule</button></td></tr>';
+    // el breaker es del CIRCUITO, no del tramo: se cuenta una vez por número
+    var brk = breakersDeCircuitos(state.areas), nCirc = cuentaCircuitos(state.areas);
+    if (nTramos) {
+      rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Conduit runs (' + nCirc + ' ckt' + (nCirc === 1 ? '' : 's') + ' en ' + nTramos + ' tramo' + (nTramos === 1 ? '' : 's') + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">' + ICO.svg('panelsch') + ' → Panel Schedule</button></td></tr>';
       Object.keys(cabPorTipo).forEach(function (k) {
         rows += '<tr><td>' + esc(k) + ' <span class="muted small">(trazo + drop)</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
       });
@@ -11168,7 +11330,7 @@
   })();
 
   /* ---------------- exportar lista de materiales (estilo Markups List) ---------------- */
-  function exportTakeoffCsv() {
+  function exportTakeoffCsv(soloTexto) {
     var rows = [['Category', 'Item', 'Label', 'Qty', 'Length (ft)', 'Length (ft-in)', 'Area (sq ft)']];
     var byCat = {};
     state.symbols.forEach(function (s) {
@@ -11188,18 +11350,17 @@
       var L = wireLen(w);
       rows.push(['Wiring', WIRE_STYLE_NAMES[w.style || 'dashed'] || 'Cableado', w.label || '', 1, (L / 12).toFixed(2), fmtFtIn(L), '']);
     });
-    // circuitos: una fila por homerun (con su drop sumado) y los breakers agrupados
-    var brkCsv = {};
+    // circuitos: una fila por tramo (con su drop sumado) y los breakers por circuito
     state.areas.forEach(function (ar) {
       if (!ar.open || !ar.circ) return;
-      var etq = (ar.circ.panel || '') + ' #' + (ar.circ.num || '') + (ar.circ.desc ? ' ' + ar.circ.desc : '') + ' (' + (ar.circ.amps || '') + 'A/' + (ar.circ.poles || 1) + 'P, drop ' + (ar.circ.drop || 0) + ' ft' + ((ar.circ.mult || 1) > 1 ? ', ×' + ar.circ.mult : '') + ')';
+      var etq = (ar.circ.panel || '') + ' #' + rotuloNums(ar.circ) + ' ' + (TIPO_CORRIDA_NOM[tipoCorrida(ar.circ)] || '') + (ar.circ.desc ? ' ' + ar.circ.desc : '') + ' (' + (ar.circ.amps || '') + 'A/' + (ar.circ.poles || 1) + 'P, drop ' + (ar.circ.drop || 0) + ' ft' + ((ar.circ.mult || 1) > 1 ? ', ×' + ar.circ.mult : '') + ')';
       partidasHomerun(ar).forEach(function (q) {
         rows.push(['Circuits', q.item, etq, 1, (q.ft / 12).toFixed(2), fmtFtIn(q.ft), '']);
       });
-      var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
-      brkCsv[kb] = (brkCsv[kb] || 0) + Math.max(1, +ar.circ.mult || 1);
     });
-    Object.keys(brkCsv).forEach(function (k) { rows.push(['Circuits', k, '', brkCsv[k], '', '', '']); });
+    // un breaker por circuito, no por tramo (y uno por cada ckt del tubo)
+    var brkCsv = breakersDeCircuitos(state.areas);
+    Object.keys(brkCsv).sort().forEach(function (k) { rows.push(['Circuits', k, '', brkCsv[k], '', '', '']); });
     var wallLen = {};
     state.walls.forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wallLen[w.type] = (wallLen[w.type] || 0) + lnW; });
     Object.keys(wallLen).forEach(function (k) {
@@ -11212,9 +11373,11 @@
     var csv = '﻿' + rows.map(function (r) {
       return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',');
     }).join('\r\n');
+    if (soloTexto) return csv;   // gancho de pruebas: el CSV sin bajarlo
     saveFile((state.project.name || 'proyecto') + '_materiales.csv', csv);
     setHint('Lista de materiales exportada a CSV (se abre en Excel)');
   }
+  window.__csvDbg = function () { return exportTakeoffCsv(true); };   // gancho de pruebas
 
   /* ---------------- puente al estimador de Max Power (Fase 3) ----------------
      El plano dice CUÁNTO · el estimador dice A CÓMO · el proyecto dice CÓMO SALIÓ.
@@ -11445,7 +11608,7 @@
     syncSheet();
     var out = [];
     function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {};   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
+    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {}, circAreas = [];   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -11475,8 +11638,7 @@
       (d.areas || []).forEach(function (ar) {
         if (!ar.open || !ar.circ) return;
         partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; });
-        var kb = 'Breaker ' + (ar.circ.amps || '?') + 'A ' + (ar.circ.poles || 1) + 'P';
-        byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + Math.max(1, +ar.circ.mult || 1);   // 3 pisos = 3 breakers
+        circAreas.push(ar);   // los breakers se cuentan al final, por circuito y no por tramo
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
       // el Count: cada marca suma 1 a su categoría; al estimador va con el
@@ -11493,6 +11655,11 @@
         areaSumE[nomA] = (areaSumE[nomA] || 0) + areaDe(a);   // se agrupa y se redondea la SUMA
       });
     });
+    /* Los breakers, con TODOS los tramos del set delante: un circuito trazado
+       en dos tramos (A→B y B→C) pide UN breaker, y un tubo con 2 circuitos
+       pide DOS. Antes salía uno por tramo y uno por tubo. */
+    var brkT = breakersDeCircuitos(circAreas);
+    Object.keys(brkT).forEach(function (kb) { byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + brkT[kb]; });
     // cada renglón sale con su código de partida (contrato §4): breakers y
     // equipo → 05-PANEL, cable → 08-ROUGH, luz por pie → 11-LIGHT, lo demás
     // hereda del símbolo o de la categoría de conteo; paredes y superficies → 20-MISC
@@ -16515,7 +16682,7 @@
     view.tx = cx - wx * view.z; view.ty = cy - wy * view.z;
     applyView();
   }
-  $('#btnCsv').addEventListener('click', exportTakeoffCsv);
+  $('#btnCsv').addEventListener('click', function () { exportTakeoffCsv(); });
   $('#btnUndo').addEventListener('click', undo);
   $('#btnRedo').addEventListener('click', redo);
 
@@ -19070,7 +19237,7 @@
     { id: 'trim', grp: 'shape', ico: 'trim', nom: 'Trim', key: 'G', tip: 'Trim / Extend / Break (G): recorta lo que sobra de una pared, cable o línea contra lo que se cruza · alárgala hasta que toque · pártela en dos. El ▾ elige cuál de las tres.', menu: 'trim', menuTip: 'Recortar, alargar o partir' },
     { id: 'cloud', grp: 'shape', ico: 'cloud', nom: 'Cloud', tip: 'Nube de revisión (2 clics)', menu: 'cloud', menuTip: 'Tamaño de la vuelta: chica, normal o grande' },
     { id: 'ruta', grp: 'elec', ico: 'ruta', nom: 'Ruta', key: 'U', tip: 'RUTA DE CONDUIT (U): traza el recorrido sobre el plano YA CALIBRADO y el largo se suma por TIPO de tubo — EMT, PVC, MC, GRS, ENT, Romex…— separando Feeders de Branch Circuits. Es el takeoff lineal que sale a CSV para Excel y al estimador.', menu: 'ruta', menuTip: 'Elegir el tipo de tubo o cable' },
-    { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Homerun', tip: 'HOMERUN: traza el circuito del panel al cuarto y ponle circuito, cable, breaker y drop — entra al takeoff de cable y al Panel Schedule', menu: 'homerun', menuTip: 'Antes de trazar: qué tubo, qué calibre, cuántos circuitos — con el llenado y el 80 % del NEC delante' },
+    { id: 'homerun', grp: 'elec', ico: 'homerun', nom: 'Conduit', tip: 'CORRIDA DE CONDUIT / CABLE: traza el tramo y dile qué es — HOMERUN (del panel a la carga, abre circuito), CKT DERIVADO (otro tramo del MISMO circuito: no abre número ni pide otro breaker) o FEEDER. Ponle tubo, calibre, cuántos circuitos, breaker y drop — entra al takeoff y al Panel Schedule', menu: 'homerun', menuTip: 'Antes de trazar: homerun o derivado, qué tubo, qué calibre, cuántos circuitos — con el llenado y el 80 % del NEC delante' },
     { id: 'wire', grp: 'elec', ico: 'wire', nom: 'Wire', key: 'X', tip: 'Cableado / línea de circuito curva (X)' },
     { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
     { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
@@ -19897,15 +20064,22 @@
          aquí es lo que sale en el próximo homerun; el menú se queda abierto
          mientras se ajusta. */
       var dC = circDefaults();
-      html += '<div class="tmHead">El próximo homerun sale así</div>';
+      html += '<div class="tmHead">La próxima corrida sale así</div>';
       var wrapC = document.createElement('div'); wrapC.innerHTML = filasCircuitoNEC(dC, 'tmCirc');
-      html += '<div class="tmForm">' + wrapC.innerHTML +
+      var tipoC = tipoCorrida(dC), sigC = +dC.sigue || 0;
+      var filaTipo = '<div class="row"><label>Tipo</label><select id="tmCircTipo" title="El homerun y el feeder abren circuito nuevo; el ckt derivado sigue en el que ya estás trazando (A→B y luego B→C es UN circuito, UN breaker)">' +
+        TIPO_CORRIDA.map(function (o) { return '<option value="' + o[0] + '"' + (tipoC === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
+        (tipoC === 'derivado'
+          ? '<div class="row"><label>Sigue en el ckt #</label><input id="tmCircSigue" type="number" min="1" max="84" value="' + (sigC || '') + '" placeholder="el último" title="En qué circuito cae el próximo tramo. Se rellena solo con el último que trazaste"></div>'
+          : '');
+      html += '<div class="tmForm">' + filaTipo + wrapC.innerHTML +
         '<div class="row"><label>Breaker</label><select id="tmCircAmps">' + BREAKERS.map(function (am) { return '<option value="' + am + '"' + (+dC.amps === am ? ' selected' : '') + '>' + am + ' A</option>'; }).join('') + '</select></div>' +
         '<div class="row"><label>Polos</label><select id="tmCircPoles">' + [1, 2, 3].map(function (pl) {
           return '<option value="' + pl + '"' + (+dC.poles === pl ? ' selected' : '') + '>' + pl + (pl === 1 ? ' polo (120 V)' : pl === 2 ? ' polos (240 V)' : ' polos (3Ø)') + '</option>';
         }).join('') + '</select></div>' +
         '<div class="row"><label>Drop (ft)</label><input id="tmCircDrop" type="number" min="0" step="1" value="' + (dC.drop == null ? 15 : dC.drop) + '"></div></div>';
-      html += '<div class="tmItem" data-k="__trazar"><span><b>Trazar con esto</b> — clic en el panel, clic en la carga</span></div>';
+      html += '<div class="tmItem" data-k="__trazar"><span><b>Trazar con esto</b> — ' + (tipoC === 'derivado' ? 'sigue el ckt #' + (sigC || '?') + ': clic en el punto A, clic en el punto B' : 'clic en el panel, clic en la carga') + '</span></div>';
+      if ((+dC.ckts || 1) > 1) html += '<div class="tmPie">Van <b>' + (+dC.ckts) + ' circuitos</b> en ese tubo: salen con los siguientes números libres y se cambian uno por uno en Propiedades. Son <b>' + (+dC.ckts) + ' breakers</b>, no uno.</div>';
       html += '<div class="tmPie">El tamaño de tubo que se ofrece es solo el que admite esos hilos (Cap. 9, Tabla 1: 40 % con 3 o más). «Portadores» son los hilos que llevan corriente — la tierra no cuenta, ni el neutro compartido de un multihilo—; con 4 a 6 la ampacidad se ajusta al 80 % (310.15(C)(1)), y de ahí no se pasa.</div>';
     } else if (kind === 'ruta') {
       var tipos = rutaTipos();
@@ -19977,6 +20151,8 @@
         el.addEventListener('change', function () {
           var d = circDefaults(), id = el.id;
           if (id === 'tmCircDrop') d.drop = Math.max(0, parseFloat(el.value) || 0);
+          else if (id === 'tmCircTipo') aplicaCambioNEC(d, 'tipo', el.value);
+          else if (id === 'tmCircSigue') { var sg = parseInt(el.value, 10); d.sigue = (sg > 0) ? sg : null; }
           else if (id === 'tmCircPoles') aplicaCambioNEC(d, 'poles', el.value);
           else {
             var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircGnd: 'gnd', tmCircTam: 'tam', tmCircAmps: 'amps' }[id];
@@ -20075,7 +20251,15 @@
           refreshCounts();
           setHint('Contando ' + (cSel ? cSel.nom : '') + ' — toca cada uno en el plano · Esc para salir');
         } else if (kind === 'homerun') {
-          if (k === '__trazar') { tm.hidden = true; setTool('homerun'); setHint('HOMERUN: clic en el panel, clic en la carga · sale ' + (resumenNEC(circDefaults()) ? rotuloCirc(Object.assign({}, circDefaults(), { num: '' })).replace(/^#\?? · /, '') : circDefaults().cable)); return; }
+          if (k === '__trazar') {
+            tm.hidden = true; setTool('homerun');
+            var dT = circDefaults(), tpT = tipoCorrida(dT);
+            var resT = resumenNEC(dT) ? rotuloCirc(Object.assign({}, dT, { num: '', nums: null })).replace(/^[^·]*· /, '') : dT.cable;
+            setHint((TIPO_CORRIDA_NOM[tpT] || 'Corrida').toUpperCase() + ': ' +
+              (tpT === 'derivado' ? 'sigue el ckt #' + (+dT.sigue || '?') + ' — clic en el punto A, clic en el punto B' : 'clic en el panel, clic en la carga') +
+              ' · sale ' + resT);
+            return;
+          }
         } else if (kind === 'ruta') {
           if (k === '__zona') {
             tm.hidden = true;
