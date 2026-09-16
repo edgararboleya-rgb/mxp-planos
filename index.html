@@ -300,7 +300,7 @@
       </section>
 
       <section class="panel" id="matPanel">
-        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Estimador</button> <button id="btnScope" title="Estimado desde el scope of work: el cerebro propone recetas e ítems con cantidades, el código calcula, tú apruebas fila a fila (E10)" data-ico="chat">Scope</button> <button id="btnCuadre" title="Cuadre: lo que trazaste y contaste contra lo que dice el panel schedule o el documento — circuitos por panel, breakers y conteo, con la diferencia en rojo" data-ico="ok">Cuadre</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV</button></h3>
+        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Estimador</button> <button id="btnScope" title="Estimado desde el scope of work: el cerebro propone recetas e ítems con cantidades, el código calcula, tú apruebas fila a fila (E10)" data-ico="chat">Scope</button> <button id="btnDoc" title="Leer un conteo de un documento: pega la tabla tal cual y la app saca cada renglón con su cantidad y te propone la receta" data-ico="lista">Conteo</button> <button id="btnCuadre" title="Cuadre: lo que trazaste y contaste contra lo que dice el panel schedule o el documento — circuitos por panel, breakers y conteo, con la diferencia en rojo" data-ico="ok">Cuadre</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV</button></h3>
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
       </section>
     </aside>
@@ -331,6 +331,15 @@
       <button id="scopeCerrar" title="Cerrar" data-ico="close"></button>
     </div>
     <div id="scopeCuerpo"></div>
+  </div>
+
+  <!-- ======= LEER UN CONTEO DE UN DOCUMENTO (17/09) ======= -->
+  <div id="docBox" class="oculto">
+    <div id="docCab">
+      <span id="docTit">CONTEO DESDE UN DOCUMENTO</span>
+      <button id="docCerrar" title="Cerrar" data-ico="close"></button>
+    </div>
+    <div id="docCuerpo"></div>
   </div>
 
   <!-- ======= CUADRE: lo del plano contra lo del schedule / documento (17/09) ======= -->

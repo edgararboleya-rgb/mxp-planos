@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v33.G';
+  var APP_VERSION = 'v34.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -12623,6 +12623,216 @@
   })();
   window.__cuadreDbg = { abre: abreCuadre, cierra: cierraCuadre, datos: cuadreDatos, lee: cuadreLee, ref: cuadreRef, dosPaneles: pareceDosPaneles, pinta: pintaCuadre, areas: todasLasAreas };
 
+  /* ================= LEER UN CONTEO DE UN DOCUMENTO (Edgar, 17/09) =================
+     «los automáticos, la lista que te mandé de los conteos que salió en el
+      chat, eso es lo que necesito que hagas desde la app tú… y quedamos en que
+      habías entendido y eso iba a funcionar así.»
+     Tenía razón: lo que le di antes era una lista que ÉL tenía que armar a
+     mano (nombre | cantidad | receta). Esto es lo acordado: pega el documento
+     tal cual —su takeoff del hospital, la tabla del ingeniero, lo que sea—, la
+     app saca cada renglón con su cantidad, le PROPONE la receta de las que
+     existen de verdad en su estimador, y él aprueba o corrige fila a fila.
+     Nada se crea sin que lo vea: una receta mal puesta entra al bid en
+     silencio, y de eso ya llevamos tres. */
+  var docC = null;   // { filas:[{desc,qty,cat,receta,tubo,ok,marcado,sug:[]}], recetas:[], aviso }
+  /* Sinónimos: el documento está en inglés y las recetas en español. Sin esto
+     «HG duplex ivory» no casa con «RECEPTÁCULO 20A HOSPITAL GRADE TR — EMT». */
+  var DOC_SIN = {
+    receptacle: 'receptaculo', rcpt: 'receptaculo', outlet: 'salida', dup: 'duplex', dpl: 'duplex',
+    hg: 'hospital', hosp: 'hospital', 'tr': 'tamper', red: 'rojo', ivory: 'marfil',
+    data: 'datos', telephone: 'telefono', tel: 'telefono', camera: 'camara', cam: 'camara',
+    speaker: 'speaker', wap: 'wap', wireless: 'wap', 'access': 'wap', point: 'wap',
+    card: 'lector', reader: 'lector', relay: 'rele', emergency: 'emergencia',
+    switch: 'switch', dimmer: 'dimmer', occupancy: 'ocupacion', sensor: 'sensor',
+    troffer: 'luminaria', fixture: 'luminaria', downlight: 'downlight', recessed: 'recessed',
+    exit: 'exit', sign: 'exit', box: 'caja', 'j-box': 'caja', jbox: 'caja', junction: 'caja',
+    door: 'puerta', release: 'boton', button: 'boton', multigang: 'multigang', tv: 'tv',
+    critical: 'critica', branch: 'rama', gang: 'gang', double: 'doble', single: 'sencillo',
+    pole: 'sencillo', stub: 'stub', conduit: 'tubo', empty: 'vacio', control: 'control',
+    hvac: 'hvac', gfci: 'gfci', gfr: 'gfci', combination: 'combinacion', combo: 'combinacion'
+  };
+  function docTok(t) {
+    var u = String(t || '').toLowerCase();
+    try { u = u.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) {}
+    u = u.replace(/[^a-z0-9\/\-\s"]/g, ' ');
+    var out = {};
+    u.split(/[\s\/\-]+/).forEach(function (w) {
+      w = w.replace(/^"+|"+$/g, ''); if (!w || w.length < 2) return;
+      if (/^(the|and|de|del|la|el|los|las|con|por|para|en|un|una|of|for|in|to|w|a)$/.test(w)) return;
+      out[DOC_SIN[w] || w] = 1;
+      if (/^\d+a$/.test(w)) out[w.replace('a', '') + 'a'] = 1;
+    });
+    return out;
+  }
+  /* Puntúa 0..1 cuánto se parece una descripción a un nombre de receta: cuántas
+     de las palabras que IMPORTAN de la receta aparecen en la descripción. */
+  function docPunt(desc, receta) {
+    var a = docTok(desc), b = docTok(receta), kb = Object.keys(b);
+    if (!kb.length) return 0;
+    var hay = 0, peso = 0;
+    kb.forEach(function (w) {
+      // el método (EMT/MC/ROMEX) y las palabras de relleno pesan menos
+      var pe = /^(emt|mc|romex|rough|solo|20a|1|2|4|924)$/.test(w) ? 0.4 : 1;
+      peso += pe; if (a[w]) hay += pe;
+    });
+    var base = hay / peso;
+    // que la descripción no traiga MUCHO de más (un «Nurse call patient station»
+    // no es un receptáculo por compartir una palabra)
+    var ka = Object.keys(a), comunes = ka.filter(function (w) { return b[w]; }).length;
+    return base * (0.5 + 0.5 * (comunes / Math.max(1, ka.length)));
+  }
+  /* Saca del texto pegado cada renglón que parezca «algo … cantidad». Se salta
+     cabeceras, totales, subtotales, notas de código (NEC 517.31) y las filas
+     donde la cantidad es parte del nombre (20A, 2x4, 1/2"). */
+  function docLee(txt) {
+    var out = [], vistos = {};
+    String(txt || '').split(/\r?\n/).forEach(function (ln) {
+      var raw = ln.replace(/\s+$/, ''); if (!raw.trim()) return;
+      if (/^\s*#{1,6}\s/.test(raw)) return;                       // título markdown
+      if (/^\s*\|?\s*[-:]{2,}/.test(raw)) return;                 // separador de tabla
+      if (/^\s*[-*]\s/.test(raw) && raw.indexOf('|') < 0) return; // viñeta de texto
+      var celdas = raw.indexOf('|') >= 0
+        ? raw.split('|').map(function (c) { return c.trim(); })
+        : raw.split(/\t|\s{3,}/).map(function (c) { return c.trim(); });
+      celdas = celdas.filter(function (c) { return c !== ''; });
+      if (celdas.length < 2) {
+        var m = raw.trim().match(/^(.{4,80}?)[\s:.]+(\d{1,4})\s*$/);
+        if (!m) return; celdas = [m[1].trim(), m[2]];
+      }
+      var desc = celdas[0].replace(/[*`_]/g, '').replace(/^\s*\d+[.)]\s*/, '').trim();
+      if (!desc || desc.length < 4) return;
+      if (/^(item|qty|cant|categor|nombre|type|catalog|room|cuarto|panel|plate|system|device|what|total|subtotal|sub-?total)/i.test(desc)) return;
+      if (/^(nec|nfpa|fbc|ul)\s|^detail|^key ?note|^note\b|^plan note|^e-?\d|^ed-?\d/i.test(desc)) return;
+      var qty = null;
+      for (var i = celdas.length - 1; i >= 1; i--) {
+        var cel = celdas[i].replace(/[*`~]/g, '').replace(/,/g, '').trim();
+        var mm = cel.match(/^(?:~|≈|approx\.?\s*)?(\d{1,4})$/i);
+        if (mm) { qty = parseInt(mm[1], 10); break; }
+      }
+      if (qty == null || qty <= 0 || qty > 5000) return;
+      var k = normTxt2(desc);
+      if (vistos[k]) return; vistos[k] = 1;
+      out.push({ desc: desc.slice(0, 60), qty: qty });
+    });
+    return out;
+  }
+  /* A cada renglón, la receta que más se le parece de las que EXISTEN. */
+  function docPropone(filas, recetas) {
+    var cats = catsCount();
+    return filas.map(function (f) {
+      var pun = (recetas || []).map(function (r) { return { r: r, p: docPunt(f.desc, r) }; })
+        .sort(function (a, b) { return b.p - a.p; });
+      var mejor = pun[0] || { r: '', p: 0 };
+      var yaCat = null;
+      cats.forEach(function (c) { if (!yaCat && normTxt2(c.nom) === normTxt2(f.desc)) yaCat = c; });
+      return {
+        desc: f.desc, qty: f.qty,
+        receta: mejor.p >= 0.45 ? mejor.r : '',
+        conf: Math.round(mejor.p * 100),
+        sug: pun.slice(0, 4).filter(function (x) { return x.p > 0.15; }).map(function (x) { return x.r; }),
+        tubo: /stub|vac[ií]o|empty|solo rough \(stub/i.test(mejor.p >= 0.45 ? mejor.r : ''),
+        marcado: true, existe: !!yaCat
+      };
+    });
+  }
+  function abreDoc() { var b = $('#docBox'); if (!b) return; b.classList.remove('oculto'); pintaDoc(); }
+  function cierraDoc() { var b = $('#docBox'); if (b) b.classList.add('oculto'); }
+  function pintaDoc(estado) {
+    var c = $('#docCuerpo'); if (!c) return;
+    if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
+    var h = '';
+    if (!docC || !docC.filas) {
+      h += '<div class="bMuted">Pega el <b>documento tal cual</b> — tu takeoff del hospital, la tabla del ingeniero, lo que te mandaron. La app saca cada renglón con su cantidad y te <b>propone la receta</b> de las que existen en tu estimador. Tú apruebas o corriges fila a fila; nada se crea sin que lo veas.</div>';
+      h += '<textarea id="docTxt" placeholder="| 20A 125V HG TR duplex, ivory | 63 | [EXACT] |&#10;| 20A 125V HG TR GFCI, ivory | 14 | [EXACT] |&#10;| Data outlet | 30 | 4S + 1G ring + 1\" EC stub | [EXACT] |&#10;Occupancy sensor wall switch   9&#10;…"></textarea>';
+      h += '<div class="row" style="gap:6px"><button id="docIr" class="pri" style="flex:1">Leer el documento</button></div>';
+      if (docC && docC.aviso) h += '<div class="bMuted" style="color:#a33">' + esc(docC.aviso) + '</div>';
+      h += '<div class="bMuted small">No hace falta formato: entiende tablas de markdown, columnas separadas por tabs y líneas «descripción  cantidad». Se salta cabeceras, totales y notas de código. Necesita tu sesión del panel para leer la lista de recetas.</div>';
+    } else {
+      var F = docC.filas, viv = F.filter(function (f) { return f.marcado; });
+      var sinR = viv.filter(function (f) { return !f.receta; }).length;
+      h += '<div class="bMuted">' + F.length + ' renglones leídos · <b>' + viv.length + ' marcados</b> · ' +
+        viv.reduce(function (a, f) { return a + f.qty; }, 0) + ' piezas' +
+        (sinR ? ' · <span style="color:#a33">' + sinR + ' sin receta (van como pieza suelta)</span>' : '') + '</div>';
+      h += '<div class="scLista"><table class="cdTabla"><tr><th></th><th>Del documento</th><th class="n">Cant.</th><th>Receta (punto completo)</th><th class="n">✓</th></tr>';
+      F.forEach(function (f, i) {
+        var col = f.conf >= 70 ? 'cdOk' : (f.conf >= 45 ? '' : 'cdMal');
+        h += '<tr' + (f.marcado ? '' : ' style="opacity:.45"') + '>' +
+          '<td><input type="checkbox" class="dcOn" data-i="' + i + '"' + (f.marcado ? ' checked' : '') + '></td>' +
+          '<td>' + esc(f.desc) + (f.existe ? '<div class="muted small">ya tienes una categoría con ese nombre: se actualiza</div>' : '') + '</td>' +
+          '<td class="n"><input class="dcQ" data-i="' + i + '" type="number" min="0" step="1" value="' + f.qty + '"></td>' +
+          '<td><input class="dcR" data-i="' + i + '" list="askLista" value="' + esc(f.receta) + '" placeholder="— pieza suelta —" style="width:100%;text-align:left">' +
+          (f.receta && f.tubo ? '<div class="muted small">☑ con su tubo (el stub ES el punto)</div>' : '') +
+          (f.sug.length > 1 ? '<div class="muted small">' + f.sug.slice(0, 3).map(function (r, j) { return '<button class="cdCkt dcS" data-i="' + i + '" data-r="' + esc(r) + '">' + esc(r.length > 34 ? r.slice(0, 34) + '…' : r) + '</button>'; }).join(' ') + '</div>' : '') +
+          '</td>' +
+          '<td class="n"><span class="' + col + '">' + (f.receta ? f.conf + '%' : '—') + '</span></td></tr>';
+      });
+      h += '</table></div>';
+      h += '<div class="row" style="gap:6px"><button id="docCrear" class="pri" style="flex:1">Crear las ' + viv.length + ' categorías</button><button id="docVolver">Volver a pegar</button></div>';
+      h += '<div class="bMuted small">Verde = la receta casa bien. Rojo = míralo. Los botoncitos son las otras recetas que se parecen. Sin receta, esa categoría manda la pieza suelta como siempre. La cantidad entra <b>a mano</b>: se suma a las marcas que toques en el plano.</div>';
+    }
+    c.innerHTML = h;
+    var bIr = $('#docIr'); if (bIr) bIr.addEventListener('click', docPide);
+    var bV = $('#docVolver'); if (bV) bV.addEventListener('click', function () { docC.filas = null; pintaDoc(); });
+    $$('#docCuerpo .dcOn').forEach(function (n) { n.addEventListener('change', function () { docC.filas[+n.dataset.i].marcado = n.checked; pintaDoc(); }); });
+    $$('#docCuerpo .dcQ').forEach(function (n) { n.addEventListener('change', function () { docC.filas[+n.dataset.i].qty = Math.max(0, parseInt(n.value, 10) || 0); }); });
+    $$('#docCuerpo .dcR').forEach(function (n) { n.addEventListener('change', function () {
+      var f = docC.filas[+n.dataset.i], t = String(n.value).trim();
+      var ex = docC.recetas.length ? nombreExacto(t, docC.recetas) : { nombre: t, existe: true };
+      f.receta = t ? ex.nombre : ''; f.conf = t ? (ex.existe ? 100 : 0) : 0;
+      f.tubo = /stub|vac[ií]o|empty/i.test(f.receta); pintaDoc();
+    }); });
+    $$('#docCuerpo .dcS').forEach(function (n) { n.addEventListener('click', function () {
+      var f = docC.filas[+n.dataset.i]; f.receta = n.dataset.r; f.conf = 100;
+      f.tubo = /stub|vac[ií]o|empty/i.test(f.receta); pintaDoc();
+    }); });
+    var bC = $('#docCrear'); if (bC) bC.addEventListener('click', docCrea);
+  }
+  function docPide() {
+    var txt = ($('#docTxt') || {}).value || '';
+    if (txt.trim().length < 10) { docC = docC || {}; docC.aviso = 'Pega el documento primero.'; pintaDoc(); return; }
+    pintaDoc('Leyendo tus recetas del estimador…');
+    listaDe('recetas').then(function (recetas) {
+      var filas = docLee(txt);
+      if (!filas.length) { docC = { aviso: 'No encontré ningún renglón con cantidad. Cada línea tiene que traer una descripción y un número: una tabla de markdown, columnas con tabs, o «Data outlet 30».' }; pintaDoc(); return; }
+      docC = { filas: docPropone(filas, recetas), recetas: recetas, aviso: null };
+      // la lista para los datalist de la tabla
+      var dl = document.getElementById('askLista');
+      if (dl) dl.innerHTML = recetas.slice(0, 3000).map(function (t) { return '<option value="' + esc(t) + '"></option>'; }).join('');
+      pintaDoc();
+    });
+  }
+  function docCrea() {
+    var viv = (docC.filas || []).filter(function (f) { return f.marcado && f.qty > 0; });
+    if (!viv.length) { setHint('Nada marcado.'); return; }
+    pushUndo();
+    var creadas = 0, act = 0, sinRec = [];
+    viv.forEach(function (f) {
+      var c = null, n = normTxt2(f.desc);
+      catsCount().forEach(function (k) { if (!c && normTxt2(k.nom) === n) c = k; });
+      if (c) act++; else { c = nuevaCatCount(f.desc); creadas++; }
+      c.manual = f.qty;
+      if (f.receta) {
+        c.receta = f.receta.slice(0, 80);
+        if (f.tubo) c.recetaFull = true; else delete c.recetaFull;
+        if (docC.recetas.length && !nombreExacto(f.receta, docC.recetas).existe) sinRec.push(f.receta);
+      } else { delete c.receta; delete c.recetaFull; }
+    });
+    refreshCounts(); scheduleAutosave(); cierraDoc();
+    var conR = viv.filter(function (f) { return f.receta; }).length;
+    uiAlert('✔ ' + creadas + ' categoría(s) creada(s) y ' + act + ' actualizada(s).\n\n' +
+      viv.reduce(function (a, f) { return a + f.qty; }, 0) + ' piezas en total, ' + conR + ' categoría(s) como PUNTO COMPLETO (receta) y ' + (viv.length - conR) + ' como pieza suelta.\n\n' +
+      'Ya están en Materiales y ya viajan al estimador: de cada punto salen su caja, anillo, tapa, conectores, wirenuts y pigtail. El tubo y el cable NO — esos los mides tú sobre el plano.' +
+      (sinRec.length ? '\n\n⚠ Estas recetas no existen en tu estimador y al mandar saldrán en «recetas que no existen»:\n• ' + sinRec.join('\n• ') : '') +
+      '\n\nAhora toca Materiales → Cuadre para comparar esto contra el schedule.');
+  }
+  (function () {
+    var b = $('#btnDoc'); if (b) b.addEventListener('click', abreDoc);
+    var x = $('#docCerrar'); if (x) x.addEventListener('click', cierraDoc);
+  })();
+  window.__docDbg = { abre: abreDoc, cierra: cierraDoc, lee: docLee, propone: docPropone, punt: docPunt,
+    pon: function (filas, recetas) { docC = { filas: docPropone(filas, recetas), recetas: recetas || [] }; pintaDoc(); return docC.filas; },
+    filas: function () { return docC && docC.filas ? JSON.parse(JSON.stringify(docC.filas)) : null; }, crea: docCrea };
+
   /* ---------------- capas ---------------- */
   var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], count: ['gCount'], grid: ['gGridBase'] };
   /* NOMBRES DEL EQUIPO DEL RISER (Edgar, 31/08). Es una casilla, no una
@@ -19191,10 +19401,31 @@
       sh.data = JSON.stringify(o);
     });
     var n = ponen.length;
-    var nom = (catCount(catId) || {}).nom || '';
+    var cAdd = catCount(catId) || {}, nom = cAdd.nom || '';
     cierraVisual();
     refresh(); refreshCounts(); scheduleAutosave();
     setHint('✔ ' + n + ' marca(s) añadidas al conteo de ' + nom + ' · revísalas y borra las que no sean · Ctrl+Z las quita todas');
+    /* Y AQUÍ el punto completo, solo (17/09): contar desde el plano no sirve de
+       nada si después hay que ir a decirle a mano de qué receta es. Con el
+       nombre de la categoría se busca la receta que más se le parece entre las
+       que EXISTEN de verdad; si es clara se pone y se dice, y si no, se
+       ofrecen las que se parecen. Nunca se pone una que no exista. */
+    if (!cAdd.id || cAdd.receta) return;
+    listaDe('recetas').then(function (recetas) {
+      if (!recetas.length) return;
+      var pun = recetas.map(function (r) { return { r: r, p: docPunt(nom, r) }; }).sort(function (a, b) { return b.p - a.p; });
+      var mejor = pun[0];
+      if (!mejor || mejor.p < 0.45) {
+        var cerca = pun.slice(0, 3).filter(function (x) { return x.p > 0.15; });
+        if (cerca.length) setHint('✔ ' + n + ' en «' + nom + '». Para que salga el PUNTO COMPLETO dile de qué receta es: Count ▾ → punto completo. Se parecen: ' + cerca.map(function (x) { return x.r; }).join(' · '));
+        return;
+      }
+      var c2 = catCount(cAdd.id); if (!c2 || c2.receta) return;
+      c2.receta = mejor.r.slice(0, 80);
+      if (/stub|vac[ií]o|empty/i.test(c2.receta)) c2.recetaFull = true;
+      refreshCounts(); scheduleAutosave();
+      setHint('✔ ' + n + ' en «' + nom + '», y solo: cada uno es un PUNTO COMPLETO de «' + mejor.r + '» (' + Math.round(mejor.p * 100) + '% de parecido)' + (c2.recetaFull ? ', CON su tubo' : ', sin tubo ni cable') + ' — si no es esa, cámbiala en Count ▾');
+    });
   }
   function relanzaVisual() {
     if (!visual || !visual.ctx0) return;
@@ -20840,7 +21071,8 @@
       if (catsM.length) {
         html += '<div class="tmHead">Categorías</div>';
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
-        html += '<div class="tmItem" data-k="__lista"><span>Crear categorías <b>desde una lista pegada</b>… <span class="muted">· nombre | cantidad | receta | tubo</span></span></div>';
+        html += '<div class="tmItem" data-k="__doc"><span><b>Leer un conteo de un documento</b>… <span class="muted">· pega la tabla tal cual y la app propone las recetas</span></span></div>';
+        html += '<div class="tmItem" data-k="__lista"><span>Crear categorías desde una lista pegada… <span class="muted">· nombre | cantidad | receta | tubo</span></span></div>';
         html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
         html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
         html += '<div class="tmItem" data-k="__codigo"><span>Código de partida de la activa… <span class="muted">· ' + esc(codigoDeCat(catCount(catActiva) || catsM[0])) + '</span></span></div>';
@@ -21074,6 +21306,7 @@
           if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
+          if (k === '__doc') { tm.hidden = true; abreDoc(); return; }
           if (k === '__lista') { tm.hidden = true; pideCategoriasLista(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
           if (k === '__alias') { tm.hidden = true; itemDeCat(catActivaSegura().id); return; }
