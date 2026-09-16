@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v33.A';
+  var APP_VERSION = 'v33.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -100,6 +100,14 @@
     if (ar) ar.style.display = (opts.input && opts.area) ? '' : 'none';
     inp.value = opts.area ? '' : (opts.def || '');
     if (ar) ar.value = opts.area ? (opts.def || '') : '';
+    // (17/09) una LISTA para elegir: el nombre exacto de una receta o de una fila
+    // del catálogo no se teclea, se escoge. Sin lista, el cuadro es el de siempre.
+    var dl = document.getElementById('askLista');
+    if (dl) {
+      var lista = Array.isArray(opts.lista) ? opts.lista : [];
+      dl.innerHTML = lista.slice(0, 3000).map(function (t) { return '<option value="' + esc(String(t)) + '"></option>'; }).join('');
+      if (lista.length) inp.setAttribute('list', 'askLista'); else inp.removeAttribute('list');
+    }
     document.getElementById('askCancel').style.display = opts.alert ? 'none' : '';
     document.getElementById('askCancel').textContent = opts.cancelTxt || 'Cancelar';
     document.getElementById('askOk').textContent = opts.okTxt || 'OK';
@@ -119,6 +127,11 @@
   }
   function uiPrompt(title, def, cb) {
     uiDialog(title, { input: true, def: def }, function (ok) {
+      cb(ok ? document.getElementById('askInput').value : null);
+    });
+  }
+  function uiPromptLista(title, def, lista, cb) {
+    uiDialog(title, { input: true, def: def, lista: lista }, function (ok) {
       cb(ok ? document.getElementById('askInput').value : null);
     });
   }
@@ -2210,6 +2223,8 @@
     if (!c) return c;
     // planos guardados antes del 15/09 no traen tipo: todos eran homeruns
     c.tipo = tipoCorrida(c);
+    // «el breaker ya está en el panel» es sí o no, nunca un texto de un JSON viejo
+    if (c.spare) c.spare = true; else delete c.spare;
     if (!c.sistema) c.sistema = esTubo(c.cable) ? 'tubo' : /^MC/i.test(c.cable || '') ? 'mc' : 'romex';
     sincronizaNums(c, c.__id || null);
     if (c.sistema === 'tubo') {
@@ -2288,8 +2303,15 @@
       if (!lista.length) lista = ['\u0001' + ar.id];
       lista.forEach(function (n) {
         var k = pan + '#' + n, g = porCkt[k];
-        if (!g) { porCkt[k] = { amps: c.amps, poles: c.poles, mult: mult }; return; }
+        /* SPARE: el circuito es nuevo pero el breaker YA ESTÁ en el panel. En
+           Nicklaus son 47 circuitos nuevos y solo ~12 breakers nuevos: los
+           otros 35 entran en spares existentes. Cobrarlos igual es inflar el
+           bid por 35 breakers en un hospital que se licita. Un tramo que diga
+           «spare» no compra breaker; si CUALQUIER tramo del mismo circuito
+           dice que es nuevo, se compra (el que sabe manda sobre el que calla). */
+        if (!g) { porCkt[k] = { amps: c.amps, poles: c.poles, mult: mult, spare: !!c.spare }; return; }
         g.mult = Math.max(g.mult, mult);   // 3 pisos iguales son 3, no 3 por tramo
+        if (!c.spare) g.spare = false;
       });
     });
     Object.keys(porCkt).forEach(function (k) {
@@ -2298,7 +2320,8 @@
          breakers de la E-2.2 llegaron al estimador SIN MAPEAR, en silencio.
          Un 3P de rama todavía no existe en el catálogo: saldrá sin mapear, que
          es la verdad, hasta que Edgar lo dé de alta. */
-      var g = porCkt[k], kb = 'BREAKER ' + (g.poles || 1) + 'P ' + (g.amps || '?') + 'A';
+      var g = porCkt[k]; if (g.spare) return;            // va en un spare del panel: no se compra
+      var kb = 'BREAKER ' + (g.poles || 1) + 'P ' + (g.amps || '?') + 'A';
       out[kb] = (out[kb] || 0) + g.mult;
     });
     return out;
@@ -8330,13 +8353,20 @@
         html += '<div class="row"><label>Polos</label><select id="prCircPoles">' + [1, 2, 3].map(function (pl) {
           return '<option value="' + pl + '"' + (+c.poles === pl ? ' selected' : '') + '>' + pl + (pl === 1 ? ' polo (120V)' : pl === 2 ? ' polos (240V)' : ' polos (3Ø)') + '</option>';
         }).join('') + '</select></div>';
+        /* El circuito es nuevo, el breaker NO: entra en un spare que ya está en
+           el panel. En Nicklaus son 47 circuitos y ~12 breakers nuevos — los 35
+           restantes en spares. Sin esto el bid lleva 35 breakers de más. */
+        html += '<div class="row"><label title="Marca esto si el circuito entra en un espacio libre que YA tiene breaker. El circuito se cuenta igual; el breaker no se compra">Breaker existente</label>' +
+          '<input id="prCircSpare" type="checkbox"' + (c.spare ? ' checked' : '') + ' title="Va en un spare del panel: el breaker no se compra"></div>';
         html += '<div class="row"><label>Drop (ft)</label><input id="prCircDrop" type="number" min="0" step="1" value="' + (c.drop == null ? 15 : c.drop) + '" title="Lo que baja el cable del techo a las cajas: con techos de 10\' se calculan 10–15 ft por circuito"></div>';
         html += '<div class="row"><label>× Unidades</label><input id="prCircMult" type="number" min="1" step="1" value="' + (c.mult || 1) + '" title="El mismo recorrido repetido: 3 pisos iguales = 3. Como el # of Units del Excel"></div>';
         if (esTubo(c.cable) && !esTuboCirc(c)) {
           html += '<div class="row"><label>Hilos (sin tierra)</label><input id="prCircHilos" type="number" min="1" max="6" step="1" value="' + hilosDe(c) + '" title="Conductores de fase/neutro dentro del tubo; la tierra se suma sola"></div>';
         }
         html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo.' +
-          ' Los ckt <b>' + esc(rotuloNums(c)) + '</b> piden <b>' + nCk + ' breaker' + (nCk === 1 ? '' : 's') + '</b> de ' + (c.amps || '?') + ' A. ' +
+          (c.spare
+            ? ' Los ckt <b>' + esc(rotuloNums(c)) + '</b> van en <b>spares que ya están en el panel</b>: se cuentan como circuitos pero NO se compra breaker.'
+            : ' Los ckt <b>' + esc(rotuloNums(c)) + '</b> piden <b>' + nCk + ' breaker' + (nCk === 1 ? '' : 's') + '</b> de ' + (c.amps || '?') + ' A. ') +
           'Otro tramo con estos mismos números NO suma más breakers: es el mismo circuito.</div>';
       } else if (esRuta(e) || (e.open && e.ruta)) {
         var r = e.ruta, tR = rutaTipo(r.tipo);
@@ -8801,7 +8831,12 @@
       pushUndo(); aplicaCambioNEC(et.circ, campo, v); recuerdaCirc(et.circ); refresh(); showProps();
     }
     on('prCircTipo', 'change', function (n) { circNEC('tipo', n.value); });
-    on('prCircPanel', 'change', function (n) { circSet('panel', n.value.trim()); });
+    on('prCircPanel', 'change', function (n) {
+      circSet('panel', n.value.trim());
+      // «CL1 y CL2» son dos paneles: el cuadre lo contaría como un tercero y
+      // sus ckts saldrían dos veces (pasó en Nicklaus, 17/09)
+      if (pareceDosPaneles(n.value)) setHint('⚠ «' + n.value.trim() + '» parece DOS paneles. Un tramo lleva UN panel: ponle el que alimenta este circuito, o el cuadre lo contará como un panel más');
+    });
     /* Una casilla por circuito del tubo. Cada número es un breaker y un
        espacio en el panel; repetir uno no suma otro breaker. */
     $$('#propsBody .prCircN').forEach(function (inp) {
@@ -8839,6 +8874,7 @@
     on('prCircTam', 'change', function (n) { circNEC('tam', n.value); });
     on('prCircAmps', 'change', function (n) { circNEC('amps', n.value); });   // repinta: la tierra por el breaker cambia
     on('prCircPoles', 'change', function (n) { circNEC('poles', n.value); });
+    on('prCircSpare', 'change', function (n) { circSet('spare', !!n.checked); });
     on('prCircDrop', 'change', function (n) { circSet('drop', n.value, true); });
     on('prCircMult', 'change', function (n) { circSet('mult', Math.max(1, parseInt(n.value, 10) || 1), true); });
     on('prCircHilos', 'change', function (n) { circSet('hilos', Math.max(1, parseInt(n.value, 10) || 2), true); });
@@ -9076,9 +9112,31 @@
       if (!o || !Array.isArray(o.counts)) return;
       o.counts.forEach(function (c) { if (c && c.cat) m[c.cat] = (m[c.cat] || 0) + 1; });
     });
+    /* Lo puesto A MANO (Edgar, 17/09): los conteos que ya tiene hechos —el
+       documento del hospital, el chat— entran como cantidad directa de la
+       categoría, sin tocar 300 veces el plano. Es del PLANO, no de una hoja:
+       se suma una sola vez, aquí y en el takeoff. */
+    catsCount().forEach(function (c) { if (c.manual > 0) m[c.id] = (m[c.id] || 0) + c.manual; });
     m.__rotas = rotas;
     return m;
   }
+  function manualDeCat(id) {
+    var c = catCount(id); if (!c) return;
+    uiPrompt('¿Cuántos «' + c.nom + '» pones A MANO?\n\n' +
+      'Se SUMAN a las marcas que toques en el plano y van al estimador igual.\n' +
+      'Sirve para meter un conteo que ya tienes hecho (el documento del hospital,\n' +
+      'la hoja del ingeniero) sin volver a tocar cada pieza.\n\n' +
+      'Vacío o 0 = quitar.',
+      c.manual > 0 ? String(c.manual) : '', function (v) {
+        if (v == null) return;
+        var n = parseInt(String(v).replace(/[^\d]/g, ''), 10);
+        pushUndo();
+        if (n > 0) c.manual = n; else delete c.manual;
+        refreshCounts(); scheduleAutosave();
+        setHint(c.manual ? '«' + c.nom + '»: ' + c.manual + ' a mano, más las marcas del plano' : '«' + c.nom + '» vuelve a contar solo las marcas');
+      });
+  }
+  window.__catManualDbg = manualDeCat;
 
   /* --- colocar una marca --- */
   function countDown(p) {
@@ -9115,6 +9173,58 @@
       setHint('Contando ' + c.nom + ' — toca cada uno en el plano');
     });
   }
+  /* CATEGORÍAS DESDE UNA LISTA PEGADA (17/09). Las 17 del hospital, de una
+     vez: una línea por categoría — «nombre | cantidad | receta | tubo» —, y
+     salen creadas con su cantidad a mano, su receta (llevada al nombre exacto
+     de la lista del estimador) y la bandera «con su tubo» si la línea lo dice.
+     Una que ya exista con ese nombre se ACTUALIZA, no se duplica. Lo que no se
+     entiende se devuelve. */
+  function categoriasDesdeLista(txt, recetas) {
+    var out = { creadas: 0, actualizadas: 0, sin: [] }, lista = Array.isArray(recetas) ? recetas : [];
+    String(txt || '').split(/\r?\n/).forEach(function (ln) {
+      var raw = ln.trim(); if (!raw || /^\|?\s*-{2,}/.test(raw)) return;
+      var celdas = raw.indexOf('|') >= 0 ? raw.split('|').map(function (c) { return c.trim(); }).filter(Boolean) : raw.split(/\t|\s{2,}/).map(function (c) { return c.trim(); }).filter(Boolean);
+      if (celdas.length === 1) { var m1 = raw.match(/^(.*?)\s+(\d+)\s*$/); if (m1) celdas = [m1[1].trim(), m1[2]]; }
+      if (celdas.length < 2 || /^(categor|nombre|item|qty)/i.test(celdas[0])) { if (celdas.length >= 2) return; out.sin.push(raw); return; }
+      var nom = celdas[0].replace(/^\*+|\*+$/g, '').replace(/`/g, '').trim().slice(0, 60), qty = null, receta = '', tubo = false;
+      for (var i = 1; i < celdas.length; i++) {
+        var cel = celdas[i].replace(/\*/g, '').trim();
+        if (qty == null && /^\d+$/.test(cel)) { qty = parseInt(cel, 10); continue; }
+        if (/^(con )?(su )?tubo( y (su )?cable)?$|^stub$|^full$/i.test(cel)) { tubo = true; continue; }
+        if (!receta && cel.length > 2) receta = cel;
+      }
+      if (!nom || qty == null) { out.sin.push(raw); return; }
+      var c = null, n = normTxt2(nom);
+      catsCount().forEach(function (k) { if (!c && normTxt2(k.nom) === n) c = k; });
+      if (c) out.actualizadas++; else { c = nuevaCatCount(nom); out.creadas++; }
+      if (qty > 0) c.manual = qty; else delete c.manual;
+      if (receta) { var ex = lista.length ? nombreExacto(receta, lista) : { nombre: receta, existe: true }; c.receta = ex.nombre.slice(0, 80); if (!ex.existe) out.sin.push('receta «' + receta + '» no existe en tu estimador (se guardó tal cual)'); }
+      if (c.receta && tubo) c.recetaFull = true; else if (!tubo) delete c.recetaFull;
+    });
+    return out;
+  }
+  function pideCategoriasLista() {
+    setHint('Leyendo tus recetas…');
+    listaDe('recetas').then(function (lista) {
+      setHint('');
+      uiPromptArea('Crear categorías desde una lista — una por línea:\n' +
+        'nombre | cantidad | receta | tubo\n\n' +
+        'La cantidad entra A MANO (se suma a las marcas). La receta es opcional y se\n' +
+        'lleva al nombre exacto de tu estimador. Pon «tubo» al final en los stubs\n' +
+        'vacíos, donde el tubo ES el punto. Una categoría que ya exista se actualiza.\n\n' +
+        'Ej: HG duplex ivory | 40 | RECEPTÁCULO 20A HOSPITAL GRADE TR — EMT\n' +
+        '    Data outlet | 39 | SALIDA DE DATOS — SOLO ROUGH (STUB 1" EMT) | tubo',
+        '', function (v) {
+          if (v == null) return;
+          pushUndo();
+          var r = categoriasDesdeLista(v, lista);
+          refreshCounts(); scheduleAutosave();
+          setHint('Categorías: ' + r.creadas + ' creada(s), ' + r.actualizadas + ' actualizada(s)' + (r.sin.length ? ' · ' + r.sin.length + ' aviso(s): ' + r.sin.slice(0, 3).join(' | ') : ''));
+          if (r.sin.length > 3) uiAlert('Avisos al leer la lista:\n\n• ' + r.sin.join('\n• '));
+        });
+    });
+  }
+  window.__catListaDbg = categoriasDesdeLista;
   function renombraCat(id) {
     var c = catCount(id); if (!c) return;
     uiPrompt('Nombre de la categoría', c.nom, function (v) {
@@ -9129,24 +9239,110 @@
      ($16,90) y no el comercial ($1,44). El precio no se puede cambiar en el
      catálogo —rompe todos los bids comerciales— así que se cambia AQUÍ: esta
      categoría, en ESTE plano, va a esa fila. Viaja con el proyecto. */
+  var _listas = { recetas: null, catalogo: null };
+  window.__listasDbg = null;   // gancho de pruebas: { recetas: [...], catalogo: [...] } en vez de ir a Supabase
+  function listaDe(cual) {
+    if (window.__listasDbg && Array.isArray(window.__listasDbg[cual])) return Promise.resolve(window.__listasDbg[cual].slice());
+    if (_listas[cual]) return Promise.resolve(_listas[cual]);
+    var ruta = cual === 'recetas' ? '/rest/v1/ensambles?select=nombre&order=orden' : '/rest/v1/catalogo_items?select=item&order=orden';
+    // sin sesión del estimador no se va a la red: el cuadro es el de siempre, al instante
+    var pr; try { pr = (SB && typeof fetch !== 'undefined' && sbAuth()) ? sbFetchTodo(ruta) : Promise.resolve([]); } catch (e) { pr = Promise.resolve([]); }
+    return pr.then(function (rows) {
+      var out = (Array.isArray(rows) ? rows : []).map(function (r) { return String(r.nombre || r.item || '').trim(); }).filter(Boolean);
+      if (out.length) _listas[cual] = out;
+      return out;
+    }, function () { return []; });
+  }
+  /* Lo escrito, llevado al nombre EXACTO de la lista: «receptaculo gfci 20a emt»
+     casa con «RECEPTÁCULO GFCI 20A — EMT». Si no casa con nada, se devuelve tal
+     cual (y se avisa), nunca se inventa. */
+  function nombreExacto(txt, lista) {
+    var n = normTxt2(txt); if (!n) return { nombre: '', existe: false };
+    for (var i = 0; i < lista.length; i++) if (normTxt2(lista[i]) === n) return { nombre: lista[i], existe: true };
+    // sin acentos, sin rayas, sin dobles espacios: «receptaculo gfci 20a emt» es «RECEPTÁCULO GFCI 20A — EMT»
+    function llano(t) { var u = normTxt2(t); try { u = u.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {} return u.replace(/[—–-]/g, ' ').replace(/\s+/g, ' ').trim(); }
+    var nl = llano(n);
+    for (var j = 0; j < lista.length; j++) if (llano(lista[j]) === nl) return { nombre: lista[j], existe: true };
+    return { nombre: String(txt).trim(), existe: false };
+  }
+  window.__nombreExactoDbg = nombreExacto;
   function itemDeCat(id) {
     var c = catCount(id); if (!c) return;
-    uiPrompt('¿A qué ítem del catálogo va «' + c.nom + '»?\n\n' +
+    setHint('Leyendo tu catálogo…');
+    listaDe('catalogo').then(function (lista) { setHint(''); itemDeCat2(c, lista); });
+  }
+  function itemDeCat2(c, lista) {
+    uiPromptLista('¿A qué ítem del catálogo va «' + c.nom + '»?\n\n' +
       'Escribe el nombre EXACTO de la fila de tu catálogo. Es lo que se manda al\n' +
       'estimador en vez del nombre de la categoría. Vacío = va con su propio nombre.\n\n' +
       'Sirve para lo mismo con distinto grado: en un hospital el dupléx es\n' +
       '«20A HOSPITAL GRADE TR RECEPTACLE» y en una oficina «20A DUPLEX RECEPTACLE».\n' +
-      'Si el nombre no existe, saldrá en la lista de SIN MAPEAR al mandar.',
-      c.alias || c.nom, function (v) {
+      (lista.length ? 'Escribe dos o tres letras y ELIGE de la lista (son tus ' + lista.length + ' filas).' : 'Si el nombre no existe, saldrá en la lista de SIN MAPEAR al mandar.'),
+      c.alias || c.nom, lista, function (v) {
         if (v == null) return;
         pushUndo();
-        var t = String(v).trim().slice(0, 80);
-        if (!t || t === c.nom) delete c.alias; else c.alias = t;
+        var t = String(v).trim().slice(0, 80), ex = lista.length ? nombreExacto(t, lista) : { nombre: t, existe: true };
+        if (!t || t === c.nom) delete c.alias; else c.alias = ex.nombre.slice(0, 80);
         refreshCounts(); scheduleAutosave();
-        setHint(c.alias ? '«' + c.nom + '» se manda al estimador como «' + c.alias + '»' : '«' + c.nom + '» se manda con su propio nombre');
+        setHint(c.alias ? '«' + c.nom + '» se manda al estimador como «' + c.alias + '»' + (ex.existe ? '' : ' — ⚠ ese nombre NO está en tu catálogo: saldrá SIN MAPEAR') : '«' + c.nom + '» se manda con su propio nombre');
       });
   }
   window.__catItemDbg = itemDeCat;
+  /* QUE EL CONTEO SEA UN PUNTO COMPLETO, NO UNA PIEZA (Edgar, 16/09):
+     «la idea mía siempre fue que la otra parte fuera automática… pero cuando
+     importamos el takeoff prácticamente fue sin nada de eso, solo lo que yo
+     estimé, y esa nunca fue la idea».
+     Con una receta puesta, contar 100 receptáculos no manda 100 receptáculos
+     pelados: manda 100 PUNTOS, y de cada uno salen su caja, su anillo, su
+     tapa, sus conectores, sus wirenuts y su pigtail, con sus horas. El tubo y
+     el cable de la receta NO vienen, porque esos los mide él sobre el plano y
+     ya entran por su lado. */
+  function recetaDeCat(id) {
+    var c = catCount(id); if (!c) return;
+    setHint('Leyendo tus recetas…');
+    listaDe('recetas').then(function (lista) { setHint(''); recetaDeCat2(c, lista); });
+  }
+  function recetaDeCat2(c, lista) {
+    uiPromptLista('¿Qué receta es un «' + c.nom + '»?\n\n' +
+      'Escribe el nombre EXACTO de una de tus recetas del estimador. Entonces\n' +
+      'cada marca deja de ser una pieza suelta y pasa a ser un PUNTO COMPLETO:\n' +
+      'caja, anillo, tapa, conectores, wirenuts, pigtail… con sus horas.\n\n' +
+      'El tubo y el cable de la receta NO se mandan: esos los mides tú sobre el\n' +
+      'plano y entran por su lado, así que no se pagan dos veces.\n\n' +
+      'OJO con los puntos donde el TUBO ES EL PUNTO (un stub vacío de 1" para\n' +
+      'datos, un conduit vacío): ahí el tubo no lo mides tú, es la receta. Para\n' +
+      'esos, después marca «que la receta venga CON su tubo y su cable».\n\n' +
+      (lista.length ? 'Escribe dos o tres letras y ELIGE de la lista (son tus ' + lista.length + ' recetas).\n' : 'Ejemplos: RECEPTÁCULO GFCI 20A — EMT  ·  SWITCH SENCILLO — ROMEX\n') +
+      'Vacío = vuelve a mandar solo la pieza.',
+      c.receta || '', lista, function (v) {
+        if (v == null) return;
+        pushUndo();
+        var t = String(v).trim().slice(0, 80), ex = lista.length ? nombreExacto(t, lista) : { nombre: t, existe: true };
+        if (!t) { delete c.receta; delete c.recetaFull; } else c.receta = ex.nombre.slice(0, 80);
+        refreshCounts(); scheduleAutosave();
+        setHint(c.receta
+          ? '«' + c.nom + '» se manda como PUNTO COMPLETO: la receta «' + c.receta + '»' + (c.recetaFull ? ', CON su tubo y su cable' : ', sin su tubo ni su cable') + (ex.existe ? '' : ' — ⚠ esa receta NO existe en tu estimador: al mandar saldrá en «recetas que no existen»')
+          : '«' + c.nom + '» vuelve a mandar solo la pieza');
+      });
+  }
+  window.__catRecetaDbg = recetaDeCat;
+  /* LA EXCEPCIÓN, que salió del takeoff del hospital (Nicklaus, 16/09): en 44
+     de las 61 salidas de bajo voltaje el alcance de Max Power es «caja +
+     anillo + tubo vacío de 1" con su pull string, y el cable lo pone el IT del
+     hospital». Ahí el tubo NO lo mide Edgar sobre el plano: el tubo ES el
+     punto. Quitárselo por la bandera general le borraría del bid los 44 stubs
+     en silencio — otra vez el mismo fallo de los breakers y de los MLF.
+     Así que la decisión es POR CATEGORÍA, no una sola para todo el plano. */
+  function recetaFullDeCat(id) {
+    var c = catCount(id); if (!c || !c.receta) return;
+    pushUndo();
+    if (c.recetaFull) delete c.recetaFull; else c.recetaFull = true;
+    refreshCounts(); scheduleAutosave();
+    setHint(c.recetaFull
+      ? 'La receta «' + c.receta + '» se manda COMPLETA, con su tubo y su cable — para eso el tubo tiene que ser parte del punto (un stub vacío), no el homerun que mides tú'
+      : 'La receta «' + c.receta + '» se manda SIN su tubo ni su cable: esos los mides tú sobre el plano');
+  }
+  window.__catRecetaFullDbg = recetaFullDeCat;
   function borraCat(id) {
     var c = catCount(id); if (!c) return;
     var enHoja = conteoDeHoja()[id] || 0, enSet = conteoDelProyecto()[id] || 0;
@@ -9198,11 +9394,12 @@
       }
       return m;
     });
-    var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set', 'Código de partida'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['Total'])];
+    var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set', 'Código de partida'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['A mano', 'Total'])];
     cats.forEach(function (c) {
       var tot = 0;
       var fila = [c.nom, c.alias || c.nom, c.item || '', c.set || '', codigoDeCat(c)].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
-      fila.push(tot);
+      var mano = c.manual > 0 ? c.manual : 0; tot += mano;
+      fila.push(mano); fila.push(tot);
       rows.push(fila);
     });
     return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
@@ -9227,9 +9424,10 @@
         (c.item ? ' <span class="muted small" title="Item del catálogo del estimador">· catálogo</span>' : (c.alias ? ' <span class="muted small" title="Tool de Bluebeam sin item en el catálogo: al estimador llega por alias">· sin item</span>' : '')) +
         ' <span class="cntCod' + (c.codigo ? '' : ' def') + '" title="' + (c.codigo ? 'Código de partida' : 'Sin código propio: sale como ' + CODIGO_DEFECTO + '. Cámbialo en Count ▾ → Código de partida') + '">' + esc(codigoDeCat(c)) + '</span>' +
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
-        '<td class="n">' + nh + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
+        '<td class="n">' + nh + (c.manual > 0 ? ' <span class="muted small" title="Cantidad puesta a mano (Count ▾): se suma a las marcas y va al estimador">+ ' + c.manual + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     });
-    h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
+    var totMano = cats.reduce(function (a, c) { return a + (c.manual > 0 ? c.manual : 0); }, 0);
+    h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (totMano ? ' <span class="muted small">+ ' + totMano + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
     if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
     h += '<tr><td colspan="2" style="padding-top:6px">' +
       '<button id="cntNueva" style="width:100%;margin-bottom:4px" title="Crear otra categoría de conteo">Nueva categoría de conteo</button>' +
@@ -11849,6 +12047,8 @@
     /* Los breakers, con TODOS los tramos del set delante: un circuito trazado
        en dos tramos (A→B y B→C) pide UN breaker, y un tubo con 2 circuitos
        pide DOS. Antes salía uno por tramo y uno por tubo. */
+    // lo puesto a mano en cada categoría entra una vez, sea la hoja o el set
+    catsCount().forEach(function (c) { if (c.manual > 0) cnt[c.id] = (cnt[c.id] || 0) + c.manual; });
     var brkT = breakersDeCircuitos(circAreas);
     Object.keys(brkT).forEach(function (kb) { byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + brkT[kb]; });
     // cada renglón sale con su código de partida (contrato §4): breakers y
@@ -11869,8 +12069,23 @@
     // las rutas con hilos: el tubo exacto y el conductor, con el código de su grupo (feeder → 06-FEED)
     Object.keys(rp).forEach(function (k) { var i = k.indexOf('\u0001'); add(k.slice(i + 1), Math.ceil(rp[k] / 12), 'FT', k.slice(0, i)); });
     var cntNom = {};
-    Object.keys(cnt).forEach(function (id) { var c = catCount(id); var nm = c ? (c.alias || c.nom) : null; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
+    Object.keys(cnt).forEach(function (id) { var c = catCount(id); if (!c || c.receta) return; var nm = c.alias || c.nom; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
     Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
+    /* Las categorías que son un PUNTO COMPLETO salen aparte, como receta: no
+       son un renglón de catálogo, son una receta × cantidad. */
+    var recetas = {};
+    Object.keys(cnt).forEach(function (id) {
+      var c = catCount(id); if (!c || !c.receta) return;
+      /* la receta COMPLETA y la receta sin lineal son dos filas distintas: si
+         se sumaran, 30 stubs de datos y 63 receptáculos irían con la misma
+         bandera y una de las dos cosas saldría mal */
+      var kR = c.receta + '\u0001' + (c.recetaFull ? '1' : '0');
+      recetas[kR] = (recetas[kR] || 0) + cnt[id];
+    });
+    Object.keys(recetas).forEach(function (kR) {
+      var i = kR.lastIndexOf('\u0001'), nmR = kR.slice(0, i);
+      out.push({ receta: nmR, qty: recetas[kR], full: kR.slice(i + 1) === '1', unit: 'EA', codigo: CODIGO_DEFECTO, name: nmR });
+    });
     return out;
   }
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
@@ -11891,15 +12106,18 @@
     entries = buildTakeoffEntries(true);
     if (!entries.length) { uiAlert('El plano no tiene nada que contar todavía — coloca símbolos, paredes o cableado primero.'); return; }
     function go() {
-      var sinColumnaCodigo = false;
+      var sinColumnaCodigo = false, sinColumnaLineal = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
         sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad&order=orden'),
         sbFetchTodo('/rest/v1/alias_takeoff?select=alias,item,factor&order=alias'),
+        // las recetas, para las categorías que son un PUNTO COMPLETO
+        sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden').then(null, function () { return []; }),
         // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
         sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; })
       ]).then(function (res) {
-        var cat = res[0] || [], alias = res[1] || [];
+        var cat = res[0] || [], alias = res[1] || [], ensL = res[2] || [];
+        var ensByNorm2 = {}; ensL.forEach(function (e) { ensByNorm2[normTxt2(e.nombre)] = e; });
         if (!cat.length) {
           uiAlert('El catálogo del estimador llegó vacío.\nEntra con el usuario DUEÑO del panel de Max Power (el mismo de la app operativa) y vuelve a intentar.');
           sbOlvida();
@@ -11907,8 +12125,18 @@
         }
         var catByNorm = {}; cat.forEach(function (c) { catByNorm[normTxt2(c.item)] = c; });
         var aliasByNorm = {}; alias.forEach(function (a) { aliasByNorm[normTxt2(a.alias)] = a; });
-        var mapped = {}, unmapped = [];
+        var mapped = {}, unmapped = [], recetas = {}, recSin = [];
         entries.forEach(function (e) {
+          // PUNTO COMPLETO: no es un renglón del catálogo, es una receta × cantidad
+          if (e.receta) {
+            var en = ensByNorm2[normTxt2(e.receta)];
+            if (!en) { recSin.push(e.receta + ' (' + e.qty + ' puntos)'); return; }
+            // la clave lleva la bandera: la misma receta completa y sin lineal
+            // son dos filas, no una suma que perdería una de las dos
+            var kE = en.id + '\u0001' + (e.full ? '1' : '0');
+            recetas[kE] = (recetas[kE] || 0) + e.qty;
+            return;
+          }
           var n = normTxt2(e.name), target = null, factor = 1;
           var al = aliasByNorm[n];
           // por ALIAS. La auditoría del catálogo (16/09) pilló que esta ruta no
@@ -11927,7 +12155,13 @@
           mapped[k].cantidad += e.qty * factor;
         });
         var items = Object.keys(mapped).sort().map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
-        if (!items.length) {
+        var ensRows = Object.keys(recetas).map(function (kE) {
+          var i = kE.lastIndexOf('\u0001'), id = kE.slice(0, i), full = kE.slice(i + 1) === '1';
+          return { ensamble_id: isNaN(+id) ? id : +id, cantidad: recetas[kE], sin_lineales: !full };
+        });
+        var nPuntos = Object.keys(recetas).reduce(function (a, k) { return a + recetas[k]; }, 0);
+        var nFull = ensRows.filter(function (r) { return !r.sin_lineales; }).reduce(function (a, r) { return a + r.cantidad; }, 0);
+        if (!items.length && !ensRows.length) {
           uiAlert('Ninguna pieza del plano coincide todavía con el catálogo del estimador.\n\nSIN MAPEAR:\n• ' + unmapped.join('\n• ') + '\n\nAgrega esos nombres en la tabla de alias del estimador (alias_takeoff) y vuelve a intentar.');
           setHint(''); return;
         }
@@ -11948,7 +12182,18 @@
           var est = rows && rows[0];
           if (!est) throw new Error('no se recibió el estimado creado');
           items.forEach(function (it) { it.estimado_id = est.id; });
-          return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }).then(function () { return est; }, function (err) {
+          ensRows.forEach(function (r) { r.estimado_id = est.id; });
+          var pEns = ensRows.length
+            ? sbFetch('/rest/v1/estimado_ensambles', { method: 'POST', body: ensRows }).then(null, function (err) {
+                // el estimador aún no tiene la columna sin_lineales: se manda sin ella y se avisa
+                if (!/sin_lineales|column/i.test(String(err && err.message || err))) throw err;
+                sinColumnaLineal = true;
+                return sbFetch('/rest/v1/estimado_ensambles', { method: 'POST',
+                  body: ensRows.map(function (r) { return { estimado_id: r.estimado_id, ensamble_id: r.ensamble_id, cantidad: r.cantidad }; }) });
+              })
+            : Promise.resolve();
+          if (!items.length) return pEns.then(function () { return est; });
+          return pEns.then(function () { return sbFetch('/rest/v1/estimado_items', { method: 'POST', body: items }); }).then(function () { return est; }, function (err) {
             // el estimador todavía no tiene la columna codigo (SQL en docs/takeoff/sql): se manda sin ella y se avisa
             if (!/codigo/i.test(String(err && err.message || err))) throw err;
             sinColumnaCodigo = true;
@@ -11961,8 +12206,13 @@
           scheduleAutosave();
           var porCod = resumenPorPartida(items.map(function (it) { return { codigo: it.codigo, qty: it.cantidad }; }));
           uiAlert('✔ Takeoff enviado al estimador de Max Power.\n\nEstimado: "' + est.nombre + '" — BORRADOR\nRenglones enviados: ' + items.length +
+            (ensRows.length ? '\nPuntos completos (recetas): ' + nPuntos + ' en ' + ensRows.length + ' receta(s) — de cada punto salen su caja, anillo, tapa, conectores, wirenuts y pigtail'
+              + (nFull ? ', y ' + nFull + ' de ellos CON su tubo y su cable (los marcaste como stub)' : '')
+              + (nPuntos - nFull ? '. Los otros ' + (nPuntos - nFull) + ' van SIN tubo ni cable: esos los mediste tú sobre el plano' : '') : '') +
             '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
+            (sinColumnaLineal ? '\n\n⚠ El estimador aún no tiene la columna "sin_lineales" en estimado_ensambles: las recetas fueron CON su tubo y su cable, así que ese material está DOS VECES. SQL listo en docs/sql/e17-punto-completo.sql.' : '') +
+            (recSin.length ? '\n\n⚠ RECETAS QUE NO EXISTEN (no se enviaron):\n• ' + recSin.join('\n• ') : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
             '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
           setHint('✔ Estimado ' + estId + ' creado como borrador en el estimador');
@@ -12223,6 +12473,155 @@
     texto: function (t) { if (t !== undefined) scopePonTexto(t); return scopeTexto(); },
     pide: scopePide, crea: scopeCrea
   };
+
+  /* ================= CUADRE — lo que trazaste y contaste contra lo que dice el plano =================
+     (Edgar, 17/09: «ya toda la tubería está medida… yo no quiero que lo hagas
+     por mí, yo quiero que funcione en la app… contrarresta lo otro con los
+     conteos».) Dos columnas: lo que HAY en el plano (circuitos por panel
+     trazados, marcas + cantidades a mano por categoría, breakers) y lo que
+     DICE el schedule o el documento (se pega o se escribe). La diferencia en
+     rojo. Y lo que huele a error, dicho: un panel escrito como dos («CL1 y
+     CL2»), un panel del schedule sin un solo tramo, un ckt de más.
+     Lo esperado vive en state.project.cuadre y se guarda con el plano. */
+  function pareceDosPaneles(nombre) {
+    var t = ' ' + String(nombre || '').trim().toUpperCase() + ' ';
+    return /\s(Y|AND|O)\s|[\/&+]/.test(t);
+  }
+  function todasLasAreas() {
+    syncSheet();
+    if (!(state.sheets || []).length) return state.areas || [];
+    var out = [];
+    state.sheets.forEach(function (sh) { var d = null; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} if (d && Array.isArray(d.areas)) out = out.concat(d.areas); });
+    return out;
+  }
+  function cuadreRef() {
+    if (!state.project) state.project = {};
+    var q = state.project.cuadre;
+    if (!q || typeof q !== 'object') q = state.project.cuadre = { paneles: {}, cats: {}, brk: null };
+    if (!q.paneles || typeof q.paneles !== 'object') q.paneles = {};
+    if (!q.cats || typeof q.cats !== 'object') q.cats = {};
+    return q;
+  }
+  function cuadreDatos() {
+    var q = cuadreRef(), areas = todasLasAreas();
+    var por = circuitosPorPanel(areas), brk = breakersDeCircuitos(areas);
+    var nombres = {}; Object.keys(por).forEach(function (p) { nombres[p] = 1; }); Object.keys(q.paneles).forEach(function (p) { nombres[String(p).toUpperCase()] = 1; });
+    var paneles = Object.keys(nombres).sort().map(function (pan) {
+      var lst = por[pan] || [], esp = q.paneles[pan];
+      if (esp == null) Object.keys(q.paneles).forEach(function (k) { if (k.toUpperCase() === pan) esp = q.paneles[k]; });
+      var n = lst.length, e = (esp == null ? null : +esp);
+      return { pan: pan, nums: lst.map(function (x) { return x.num; }), n: n, esperado: e, dif: e == null ? null : n - e,
+        dosPaneles: pareceDosPaneles(pan), enSchedule: e != null, trazado: n > 0 };
+    });
+    var comprar = Object.keys(brk).reduce(function (a, k) { return a + brk[k]; }, 0);
+    var totalCkt = Object.keys(por).reduce(function (a, p) { return a + por[p].length; }, 0);
+    var totalEsp = paneles.reduce(function (a, p) { return a + (p.esperado || 0); }, 0);
+    var set = conteoDelProyecto();
+    var cats = catsCount().map(function (c) {
+      var tot = set[c.id] || 0, mano = c.manual > 0 ? c.manual : 0, esp = q.cats[c.id];
+      var e = (esp == null ? null : +esp);
+      return { id: c.id, nom: c.nom, marcas: tot - mano, mano: mano, total: tot, esperado: e, dif: e == null ? null : tot - e };
+    });
+    return { paneles: paneles, totalCkt: totalCkt, totalEsp: totalEsp, hayEsp: paneles.some(function (p) { return p.esperado != null; }),
+      breakers: { comprar: comprar, spares: totalCkt - comprar, esperados: q.brk == null ? null : +q.brk }, cats: cats,
+      sinTrazar: paneles.filter(function (p) { return p.enSchedule && !p.trazado; }).map(function (p) { return p.pan; }),
+      fueraSchedule: paneles.filter(function (p) { return p.trazado && !p.enSchedule; }).map(function (p) { return p.pan; }),
+      dosPaneles: paneles.filter(function (p) { return p.dosPaneles && p.trazado; }).map(function (p) { return p.pan; }) };
+  }
+  /* Leer lo pegado: «NL1 10» por línea, o las filas de una tabla de markdown
+     (| NL1 | Normal | 120/208… | 10 | Main electrical room |). El nombre es la
+     primera celda; la cantidad, la ÚLTIMA celda que sea un entero solo. Si el
+     nombre es una categoría del Count (o su alias), va a categorías; si no, a
+     paneles. Lo que no se entiende se devuelve, no se traga. */
+  function cuadreLee(txt) {
+    var q = cuadreRef(), out = { paneles: 0, cats: 0, sin: [] };
+    var cats = catsCount();
+    function catPor(nombre) {
+      var n = normTxt2(nombre); if (!n) return null;
+      for (var i = 0; i < cats.length; i++) { var c = cats[i]; if (normTxt2(c.nom) === n || (c.alias && normTxt2(c.alias) === n)) return c; }
+      for (var j = 0; j < cats.length; j++) { var c2 = cats[j]; var nn = normTxt2(c2.nom); if (nn && n.length >= 4 && (nn.indexOf(n) === 0 || n.indexOf(nn) === 0)) return c2; }
+      return null;
+    }
+    String(txt || '').split(/\r?\n/).forEach(function (ln) {
+      var raw = ln.trim(); if (!raw || /^\|?\s*-{2,}/.test(raw)) return;
+      var celdas = raw.indexOf('|') >= 0 ? raw.split('|').map(function (c) { return c.trim(); }).filter(Boolean) : raw.split(/\s{2,}|\t|,|:/).map(function (c) { return c.trim(); }).filter(Boolean);
+      if (celdas.length === 1) { var m1 = raw.match(/^(.*?)\s+(\d+)\s*$/); if (m1) celdas = [m1[1].trim(), m1[2]]; }
+      if (celdas.length < 2) { out.sin.push(raw); return; }
+      var nombre = celdas[0].replace(/^\*+|\*+$/g, '').replace(/`/g, '').trim(), qty = null;
+      for (var i = celdas.length - 1; i >= 1; i--) { if (/^\*{0,2}\d+\*{0,2}$/.test(celdas[i])) { qty = parseInt(celdas[i].replace(/\*/g, ''), 10); break; } }
+      if (/^(panel|categor|item|qty|room|cuarto)/i.test(nombre)) return;              // la cabecera de la tabla
+      if (!nombre || qty == null || /^(total|subtotal)/i.test(nombre)) { out.sin.push(raw); return; }
+      var c = catPor(nombre);
+      if (c) { q.cats[c.id] = qty; out.cats++; return; }
+      var pan = nombre.toUpperCase().slice(0, 20);
+      if (/^[A-Z][A-Z0-9 \-\/.]*$/.test(pan) && pan.length <= 12) { q.paneles[pan] = qty; out.paneles++; return; }
+      out.sin.push(raw);
+    });
+    scheduleAutosave();
+    return out;
+  }
+  function abreCuadre() { var b = $('#cuadreBox'); if (!b) return; b.classList.remove('oculto'); pintaCuadre(); }
+  function cierraCuadre() { var b = $('#cuadreBox'); if (b) b.classList.add('oculto'); }
+  function pintaCuadre() {
+    var c = $('#cuadreCuerpo'); if (!c) return;
+    var D = cuadreDatos(), q = cuadreRef(), h = '';
+    function dif(d) { if (d == null) return '<span class="muted">—</span>'; if (d === 0) return '<span class="cdOk">✓</span>'; return '<span class="cdMal">' + (d > 0 ? '+' : '') + d + '</span>'; }
+    h += '<div class="bMuted">Izquierda, lo que <b>hay en el plano</b> (todas las hojas). Derecha, lo que <b>dice el schedule o el documento</b>: escríbelo o pégalo abajo. La diferencia en rojo es lo que hay que mirar.</div>';
+    h += '<div class="scSec">Circuitos por panel · ' + D.totalCkt + ' trazados' + (D.hayEsp ? ' / ' + D.totalEsp + ' esperados' : '') + '</div>';
+    h += '<div class="scLista"><table class="cdTabla"><tr><th>Panel</th><th class="n">Trazados</th><th class="n">Esperados</th><th class="n">Dif.</th></tr>';
+    D.paneles.forEach(function (p) {
+      var aviso = p.dosPaneles && p.trazado ? ' <span class="cdMal" title="Un tramo lleva UN panel: sus ckts se están contando como un panel más">⚠ ¿dos paneles?</span>' : (!p.trazado ? ' <span class="cdMal">sin trazar</span>' : (!p.enSchedule && D.hayEsp ? ' <span class="muted small">no está en el schedule</span>' : ''));
+      h += '<tr><td><b>' + esc(p.pan) + '</b>' + aviso + (p.nums.length ? '<div class="muted small">' + p.nums.map(function (n) { return '<button class="cdCkt" data-pan="' + esc(p.pan) + '" data-num="' + n + '" title="Ver sus tramos en el plano">' + n + '</button>'; }).join(' ') + '</div>' : '') +
+        (p.dosPaneles && p.trazado ? '<div><button class="small cdRen" data-pan="' + esc(p.pan) + '">✎ renombrar sus tramos</button></div>' : '') + '</td>' +
+        '<td class="n">' + p.n + '</td><td class="n"><input class="cdEsp" data-pan="' + esc(p.pan) + '" type="number" min="0" step="1" value="' + (p.esperado == null ? '' : p.esperado) + '" placeholder="—"></td><td class="n">' + dif(p.dif) + '</td></tr>';
+    });
+    h += '<tr><td class="muted small">Otro panel del schedule</td><td></td><td class="n"><input class="cdEspNuevo" placeholder="NH1 2" title="Nombre y cantidad, y Enter: NH1 2"></td><td></td></tr>';
+    h += '</table></div>';
+    h += '<div class="scSec">Breakers</div>';
+    h += '<div class="bMuted"><b>' + D.breakers.comprar + '</b> a comprar · <b>' + D.breakers.spares + '</b> en spares del panel (☑ Breaker existente en Propiedades) · esperados nuevos: <input id="cdBrk" type="number" min="0" step="1" style="width:56px" value="' + (D.breakers.esperados == null ? '' : D.breakers.esperados) + '" placeholder="—"> ' +
+      (D.breakers.esperados != null ? dif(D.breakers.comprar - D.breakers.esperados) : '') +
+      (D.breakers.esperados != null && D.breakers.comprar > D.breakers.esperados ? '<div class="cdMal small">Sobran ' + (D.breakers.comprar - D.breakers.esperados) + ' breakers: los circuitos que entran en spares hay que marcarlos con ☑ Breaker existente, si no se compran.</div>' : '') + '</div>';
+    h += '<div class="scSec">Conteo por categoría</div>';
+    if (!D.cats.length) h += '<div class="bMuted">Sin categorías de Count todavía.</div>';
+    else {
+      h += '<div class="scLista"><table class="cdTabla"><tr><th>Categoría</th><th class="n">Contado</th><th class="n">Esperado</th><th class="n">Dif.</th></tr>';
+      D.cats.forEach(function (k) {
+        h += '<tr><td>' + esc(k.nom) + (k.mano ? '<div class="muted small">' + k.marcas + ' marcas + ' + k.mano + ' a mano</div>' : '') + '</td><td class="n">' + k.total + '</td>' +
+          '<td class="n"><input class="cdEspCat" data-cat="' + esc(k.id) + '" type="number" min="0" step="1" value="' + (k.esperado == null ? '' : k.esperado) + '" placeholder="—"></td><td class="n">' + dif(k.dif) + '</td></tr>';
+      });
+      h += '</table></div>';
+    }
+    h += '<div class="scSec">Pegar el schedule o el documento</div>';
+    h += '<textarea id="cdTxt" placeholder="Una línea por panel o categoría, o las filas de la tabla tal cual:\nNL1 10\nNL2 9\n| CL2-Sect 2 | Critical | 120/208 3ø 4W, 100A bus | 14 | Main electrical room |\nHG duplex ivory 56"></textarea>';
+    h += '<div class="row" style="gap:6px"><button id="cdLeer" class="pri" style="flex:1">Leer y cuadrar</button><button id="cdBorrar" title="Quitar todo lo esperado">Limpiar esperados</button></div>';
+    if (D.sinTrazar.length) h += '<div class="cdMal small">Sin un solo tramo: <b>' + esc(D.sinTrazar.join(', ')) + '</b>. Si el schedule les da circuitos nuevos, falta trazarlos.</div>';
+    if (D.dosPaneles.length) h += '<div class="cdMal small">Escrito como dos paneles: <b>' + esc(D.dosPaneles.join(', ')) + '</b>. Sus circuitos se cuentan aparte y los breakers salen dobles: renómbralos al panel que los alimenta.</div>';
+    c.innerHTML = h;
+    $$('#cuadreCuerpo .cdEsp').forEach(function (inp) { inp.addEventListener('change', function () { var v = parseInt(inp.value, 10); if (v >= 0 && inp.value !== '') q.paneles[inp.dataset.pan] = v; else delete q.paneles[inp.dataset.pan]; scheduleAutosave(); pintaCuadre(); }); });
+    $$('#cuadreCuerpo .cdEspCat').forEach(function (inp) { inp.addEventListener('change', function () { var v = parseInt(inp.value, 10); if (v >= 0 && inp.value !== '') q.cats[inp.dataset.cat] = v; else delete q.cats[inp.dataset.cat]; scheduleAutosave(); pintaCuadre(); }); });
+    var nuevo = $('#cuadreCuerpo .cdEspNuevo'); if (nuevo) nuevo.addEventListener('keydown', function (ev) { if (ev.key !== 'Enter') return; ev.preventDefault(); var r = cuadreLee(nuevo.value); if (r.paneles || r.cats) pintaCuadre(); else setHint('No entendí «' + nuevo.value + '»: escribe NOMBRE y cantidad, como NH1 2'); });
+    var bk = $('#cdBrk'); if (bk) bk.addEventListener('change', function () { var v = parseInt(bk.value, 10); q.brk = (v >= 0 && bk.value !== '') ? v : null; scheduleAutosave(); pintaCuadre(); });
+    var bl = $('#cdLeer'); if (bl) bl.addEventListener('click', function () {
+      var r = cuadreLee(($('#cdTxt') || {}).value || '');
+      pintaCuadre();
+      setHint('Cuadre: ' + r.paneles + ' panel(es) y ' + r.cats + ' categoría(s) leídos' + (r.sin.length ? ' · ' + r.sin.length + ' línea(s) sin entender: ' + r.sin.slice(0, 3).join(' | ') : ''));
+    });
+    var bb = $('#cdBorrar'); if (bb) bb.addEventListener('click', function () { q.paneles = {}; q.cats = {}; q.brk = null; scheduleAutosave(); pintaCuadre(); });
+    $$('#cuadreCuerpo .cdCkt').forEach(function (bt) { bt.addEventListener('click', function () { marcaCktEnHoja(bt.dataset.pan || '', parseInt(bt.dataset.num, 10) || 0); }); });
+    $$('#cuadreCuerpo .cdRen').forEach(function (bt) { bt.addEventListener('click', function () {
+      var pan = bt.dataset.pan || '';
+      uiPrompt('«' + pan + '» parece dos paneles. ¿A qué panel van TODOS sus tramos?\n\nUn tramo lleva UN panel. Si unos van a uno y otros a otro, cancela y cámbialos uno a uno en Propiedades.', pan.split(/\s+(?:Y|AND|O)\s+|[\/&+]/i)[0].trim(), function (v) {
+        if (v === null) return; var nuevo = String(v).trim(); if (!nuevo) return;
+        pushUndo(); var k = renombraPanelCirc(pan, nuevo); refresh(); refreshCounts(); scheduleAutosave(); pintaCuadre();
+        setHint(k + ' tramo(s) pasan al panel ' + nuevo + ' — los circuitos y los breakers se recuentan');
+      });
+    }); });
+  }
+  (function () {
+    var b = $('#btnCuadre'); if (b) b.addEventListener('click', abreCuadre);
+    var x = $('#cuadreCerrar'); if (x) x.addEventListener('click', cierraCuadre);
+  })();
+  window.__cuadreDbg = { abre: abreCuadre, cierra: cierraCuadre, datos: cuadreDatos, lee: cuadreLee, ref: cuadreRef, dosPaneles: pareceDosPaneles, pinta: pintaCuadre, areas: todasLasAreas };
 
   /* ---------------- capas ---------------- */
   var LAYER_GROUPS = { background: ['gBackground'], architecture: ['gWalls'], areas: ['gAreas'], furniture: ['gFurniture'], electrical: ['gElectrical'], annotation: ['gAnnot'], count: ['gCount'], grid: ['gGridBase'] };
@@ -14429,8 +14828,15 @@
       o.color = colorSeguro(o.color, '#d62828');
       if (!COUNT_FORMAS[o.forma]) o.forma = 'circ';
       o.num = o.num === false ? false : true;
-      ['alias', 'set', 'item', 'unidad', 'codigo'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
+      ['alias', 'set', 'item', 'unidad', 'codigo', 'receta'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
+      if (o.receta && o.recetaFull) o.recetaFull = true; else delete o.recetaFull;
+      var mn = parseInt(o.manual, 10); if (mn > 0) o.manual = mn; else delete o.manual;
     });
+    // el cuadre (17/09): paneles y categorías esperados con enteros ≥ 0, nada más
+    if (state.project && state.project.cuadre && typeof state.project.cuadre === 'object') {
+      var qc = state.project.cuadre, lim = function (o) { var r = {}; Object.keys(o || {}).slice(0, 200).forEach(function (k) { var v = parseInt(o[k], 10); if (v >= 0) r[String(k).slice(0, 40)] = v; }); return r; };
+      qc.paneles = lim(qc.paneles); qc.cats = lim(qc.cats); var vb = parseInt(qc.brk, 10); qc.brk = vb >= 0 ? vb : null;
+    } else if (state.project) delete state.project.cuadre;
     ['bg', 'bg2'].forEach(function (k) {
       var b = state[k]; if (!b || typeof b !== 'object') { state[k] = null; return; }
       if (!urlFondoSegura(b.url)) { state[k] = null; return; }
@@ -20434,12 +20840,19 @@
       if (catsM.length) {
         html += '<div class="tmHead">Categorías</div>';
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
+        html += '<div class="tmItem" data-k="__lista"><span>Crear categorías <b>desde una lista pegada</b>… <span class="muted">· nombre | cantidad | receta | tubo</span></span></div>';
         html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
         html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
         html += '<div class="tmItem" data-k="__codigo"><span>Código de partida de la activa… <span class="muted">· ' + esc(codigoDeCat(catCount(catActiva) || catsM[0])) + '</span></span></div>';
         var cAl = catCount(catActiva) || catsM[0];
         html += '<div class="tmItem" data-k="__alias"><span>A qué ítem del catálogo va…' +
           (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
+        html += '<div class="tmItem" data-k="__receta"><span>Que sea un <b>punto completo</b> (receta)…' +
+          (cAl && cAl.receta ? ' <span class="muted">· ' + esc(cAl.receta) + '</span>' : ' <span class="muted">· hoy manda solo la pieza</span>') + '</span></div>';
+        if (cAl && cAl.receta) html += '<div class="tmItem" data-k="__recetafull"><span>' + (cAl.recetaFull ? '☑' : '☐') +
+          ' Que la receta venga <b>con su tubo y su cable</b> <span class="muted">· para stubs vacíos, donde el tubo ES el punto</span></span></div>';
+        html += '<div class="tmItem" data-k="__manual"><span>Poner <b>cantidad a mano</b>…' +
+          (cAl && cAl.manual > 0 ? ' <span class="muted">· ' + cAl.manual + ' a mano + las marcas</span>' : ' <span class="muted">· para un conteo que ya tienes hecho</span>') + '</span></div>';
         html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
       }
@@ -20661,10 +21074,14 @@
           if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
+          if (k === '__lista') { tm.hidden = true; pideCategoriasLista(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
           if (k === '__alias') { tm.hidden = true; itemDeCat(catActivaSegura().id); return; }
+          if (k === '__receta') { tm.hidden = true; recetaDeCat(catActivaSegura().id); return; }
+          if (k === '__recetafull') { tm.hidden = true; recetaFullDeCat(catActivaSegura().id); showToolMenu('count', anchor); return; }
           if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
           if (k === '__codigo') { tm.hidden = true; catActivaSegura(); showToolMenu('countcodigo', anchor); return; }
+          if (k === '__manual') { tm.hidden = true; manualDeCat(catActivaSegura().id); return; }
           if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
           if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
           catActiva = k;
