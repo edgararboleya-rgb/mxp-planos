@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.Z';
+  var APP_VERSION = 'v33.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9124,6 +9124,29 @@
       refresh(); refreshCounts();
     });
   }
+  /* A QUÉ ÍTEM DEL CATÁLOGO VA ESTA CATEGORÍA (Edgar, 16/09).
+     Su estimado es de un hospital, y allí el receptáculo es hospital grade
+     ($16,90) y no el comercial ($1,44). El precio no se puede cambiar en el
+     catálogo —rompe todos los bids comerciales— así que se cambia AQUÍ: esta
+     categoría, en ESTE plano, va a esa fila. Viaja con el proyecto. */
+  function itemDeCat(id) {
+    var c = catCount(id); if (!c) return;
+    uiPrompt('¿A qué ítem del catálogo va «' + c.nom + '»?\n\n' +
+      'Escribe el nombre EXACTO de la fila de tu catálogo. Es lo que se manda al\n' +
+      'estimador en vez del nombre de la categoría. Vacío = va con su propio nombre.\n\n' +
+      'Sirve para lo mismo con distinto grado: en un hospital el dupléx es\n' +
+      '«20A HOSPITAL GRADE TR RECEPTACLE» y en una oficina «20A DUPLEX RECEPTACLE».\n' +
+      'Si el nombre no existe, saldrá en la lista de SIN MAPEAR al mandar.',
+      c.alias || c.nom, function (v) {
+        if (v == null) return;
+        pushUndo();
+        var t = String(v).trim().slice(0, 80);
+        if (!t || t === c.nom) delete c.alias; else c.alias = t;
+        refreshCounts(); scheduleAutosave();
+        setHint(c.alias ? '«' + c.nom + '» se manda al estimador como «' + c.alias + '»' : '«' + c.nom + '» se manda con su propio nombre');
+      });
+  }
+  window.__catItemDbg = itemDeCat;
   function borraCat(id) {
     var c = catCount(id); if (!c) return;
     var enHoja = conteoDeHoja()[id] || 0, enSet = conteoDelProyecto()[id] || 0;
@@ -20414,6 +20437,9 @@
         html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
         html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
         html += '<div class="tmItem" data-k="__codigo"><span>Código de partida de la activa… <span class="muted">· ' + esc(codigoDeCat(catCount(catActiva) || catsM[0])) + '</span></span></div>';
+        var cAl = catCount(catActiva) || catsM[0];
+        html += '<div class="tmItem" data-k="__alias"><span>A qué ítem del catálogo va…' +
+          (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
         html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
       }
@@ -20636,6 +20662,7 @@
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__renombra') { tm.hidden = true; renombraCat(catActivaSegura().id); return; }
+          if (k === '__alias') { tm.hidden = true; itemDeCat(catActivaSegura().id); return; }
           if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
           if (k === '__codigo') { tm.hidden = true; catActivaSegura(); showToolMenu('countcodigo', anchor); return; }
           if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
