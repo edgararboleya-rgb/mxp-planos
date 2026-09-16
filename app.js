@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v32.Y';
+  var APP_VERSION = 'v32.Z';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2293,7 +2293,12 @@
       });
     });
     Object.keys(porCkt).forEach(function (k) {
-      var g = porCkt[k], kb = 'Breaker ' + (g.amps || '?') + 'A ' + (g.poles || 1) + 'P';
+      /* El nombre EXACTO del catálogo: 'BREAKER 1P 20A'. Hasta el 16/09 salía
+         'Breaker 20A 1P' —los polos y los amperios al revés— y por eso los 49
+         breakers de la E-2.2 llegaron al estimador SIN MAPEAR, en silencio.
+         Un 3P de rama todavía no existe en el catálogo: saldrá sin mapear, que
+         es la verdad, hasta que Edgar lo dé de alta. */
+      var g = porCkt[k], kb = 'BREAKER ' + (g.poles || 1) + 'P ' + (g.amps || '?') + 'A';
       out[kb] = (out[kb] || 0) + g.mult;
     });
     return out;
