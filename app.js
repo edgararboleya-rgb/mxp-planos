@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.A';
+  var APP_VERSION = 'v34.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10276,30 +10276,403 @@
   function leyendaFin(a, b) {
     var r = { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
     if (leyEnVuelo) { setHint('Ya hay una leyenda leyéndose — espera a que termine'); return; }
-    var c = cerebroCfg();
-    if (!c.url) { uiAlert('El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
     abreLey();
     pintaLey('Recortando la tabla…');
     recorteFondo(r, function (rec, err) {
       if (!rec) { pintaLey(null, err); return; }
-      ley = { cv: rec.cv, w: rec.w, h: rec.h, rect: rec.rect, filas: null };
-      leyEnVuelo = true;
-      var hoja = state.curSheet;
-      pintaLey('Leyendo la leyenda con el cerebro… (30-60 s). Puedes seguir trabajando.');
-      setHint('Leyendo la leyenda del plano…');
-      pideCerebro({ imagen: { b64: rec.b64, tipo: 'image/jpeg' }, leyenda: true }).then(function (d) {
-        leyEnVuelo = false;
-        if (hoja !== state.curSheet || !ley) return;          // cambió de hoja o cerró: no se pinta encima de otra cosa
-        leyendaRecibe(d);
-      }).catch(function (e) {
-        leyEnVuelo = false;
-        if (!ley) return;
-        pintaLey(null, 'No hubo respuesta del cerebro (' + (e && e.message ? e.message : 'red') + '). Revisa la conexión en Ajustes del asistente.');
+      ley = { cv: rec.cv, w: rec.w, h: rec.h, rect: rec.rect, filas: null, hoja: state.curSheet, b64: rec.b64 };
+      /* (17/09) LOCAL, sin cerebro. Edgar: «la app no lo puede ver pero sí
+         identifica los receptacles como yo hice: fui a la tabla de símbolos y
+         los seleccioné y tú los bajaste y los identificaste. ¿Eso mismo no
+         puede hacer la IA de la app? y una vez identificados, extraerlos de
+         los planos». Sí puede, y sin IA: la tabla tiene el dibujo AL LADO de
+         su texto. Las rayas dan las filas y la columna; el texto sale del PDF
+         si lo trae, y si las letras están en curvas (su ED-0.1), se LEE con
+         OCR en el navegador. El cerebro queda como segunda opinión. */
+      leyLocal(rec);
+    });
+  }
+  /* Pedirle al cerebro la misma tabla (segunda opinión, opcional). */
+  function leyConCerebro() {
+    if (!ley || !ley.cv || !ley.b64) return;
+    var c = cerebroCfg();
+    if (!c.url) { uiAlert('El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    leyEnVuelo = true;
+    var hoja = state.curSheet;
+    pintaLey('Leyendo la leyenda con el cerebro… (30-60 s). Puedes seguir trabajando.');
+    pideCerebro({ imagen: { b64: ley.b64, tipo: 'image/jpeg' }, leyenda: true }).then(function (d) {
+      leyEnVuelo = false;
+      if (hoja !== state.curSheet || !ley) return;
+      leyendaRecibe(d);
+    }).catch(function (e) {
+      leyEnVuelo = false;
+      if (!ley) return;
+      pintaLey(null, 'No hubo respuesta del cerebro (' + (e && e.message ? e.message : 'red') + '). Revisa la conexión en Ajustes del asistente.');
+    });
+  }
+
+  /* ================= OCR EN EL NAVEGADOR (tesseract.js, vendorizado) =================
+     9,5 MB en js/vendor/tesseract que se cargan SOLO la primera vez que hacen
+     falta (leer una leyenda con letras en curvas o escaneada). Nada sale a la
+     red: core wasm, worker e idioma inglés viven en el mismo sitio que la app.
+     Medido sobre la ED-0.1 real de Nicklaus (17/09): carga 0,6-1,1 s, lectura
+     de la tabla entera 1,8 s, 80-94 % de confianza por renglón. */
+  var ocrWorker = null, ocrCargando = null;
+  window.__ocrFalso = null;   // gancho de pruebas: function (canvas) → { lineas:[{t,c,x0,y0,x1,y1}], conf }
+  function ocrBase() { try { return new URL('js/vendor/tesseract/', document.baseURI).href; } catch (e) { return 'js/vendor/tesseract/'; } }
+  function ocrCarga() {
+    if (ocrWorker) return Promise.resolve(ocrWorker);
+    if (ocrCargando) return ocrCargando;
+    ocrCargando = new Promise(function (res, rej) {
+      function crea() {
+        if (!window.Tesseract || !window.Tesseract.createWorker) { rej(new Error('tesseract no cargó')); return; }
+        var B = ocrBase();
+        window.Tesseract.createWorker('eng', 1, { workerPath: B + 'worker.min.js', corePath: B, langPath: B, gzip: true, logger: function () {} })
+          .then(function (w) { ocrWorker = w; res(w); }, rej);
+      }
+      if (window.Tesseract) { crea(); return; }
+      var sc = document.createElement('script');
+      sc.src = ocrBase() + 'tesseract.min.js';
+      sc.onload = crea; sc.onerror = function () { rej(new Error('no se pudo cargar js/vendor/tesseract/tesseract.min.js')); };
+      document.head.appendChild(sc);
+    });
+    ocrCargando.catch(function () { ocrCargando = null; });
+    return ocrCargando;
+  }
+  /* Lee un canvas. Devuelve renglones con su caja EN PÍXELES DE ESE CANVAS. */
+  var ocrPsm = null;   // el modo de segmentación que tiene puesto el worker ahora
+  /* psm: 6 = un bloque de texto (la celda de la descripción, con sus renglones);
+     7 = un solo renglón (cabeceras y tags). tesseract.js arranca en 6, y en 6
+     una columna entera de tabla se lee MAL (se saltaba filas): por eso se lee
+     celda a celda. */
+  function ocrLee(cv, psm) {
+    if (typeof window.__ocrFalso === 'function') { try { return Promise.resolve(window.__ocrFalso(cv, psm)); } catch (e) { return Promise.reject(e); } }
+    var p = String(psm || '6');
+    return ocrCarga().then(function (w) {
+      if (p === ocrPsm) return w;
+      return w.setParameters({ tessedit_pageseg_mode: p }).then(function () { ocrPsm = p; return w; });
+    }).then(function (w) { return w.recognize(cv); }).then(function (r) {
+      var d = r && r.data || {};
+      return { conf: +d.confidence || 0, lineas: (d.lines || []).map(function (l) {
+        return { t: String(l.text || '').replace(/\s+/g, ' ').trim(), c: Math.round(+l.confidence || 0), x0: l.bbox.x0, y0: l.bbox.y0, x1: l.bbox.x1, y1: l.bbox.y1 };
+      }).filter(function (l) { return l.t; }) };
+    });
+  }
+  function ocrRecorte(cv, x0, y0, x1, y1, k) {
+    var c2 = document.createElement('canvas'); k = k || 1;
+    c2.width = Math.max(1, Math.round((x1 - x0) * k)); c2.height = Math.max(1, Math.round((y1 - y0) * k));
+    var ctx = c2.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c2.width, c2.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(cv, x0, y0, x1 - x0, y1 - y0, 0, 0, c2.width, c2.height);
+    return c2;
+  }
+
+  /* ================= LA LEYENDA, LEÍDA EN LOCAL =================
+     Filas y columna: leyTabla (rayas). Texto de cada fila: primero el del PDF
+     (exacto y gratis, si el export trae fuentes); si no hay, OCR de la columna
+     de texto de una vez y cada renglón a su fila por la y. Las bandas SIN
+     dibujo son cabeceras de sección (WIRING DEVICES, FIRE ALARM…) y dan la
+     familia. Sale el MISMO {leyenda:{simbolos}} que devolvía el cerebro, así
+     que la revisión, la pareja con la biblioteca y la creación son las de
+     siempre (probadas). Además, cada símbolo lleva la caja de su dibujo en
+     coordenadas DEL PLANO: es el molde para buscarlo después en las hojas. */
+  var LEY_FAM_CAB = [
+    [/FIRE\s*ALARM/i, 'fire_alarm'], [/COMM?UNICATION|DATA|TELE|VOICE|LOW\s*VOLT/i, 'data_comm'], [/LIGHT|LUMINAIR|FIXTURE/i, 'lighting'],
+    [/SECURITY|ACCESS\s*CONTROL|CCTV/i, 'security_cctv'], [/NURSE|SOUND|AUDIO|A\/V|SPEAKER|INTERCOM/i, 'av_sound'], [/POWER\s*DISTRIB|EQUIPMENT|PANEL/i, 'panel_equipment'],
+    [/MECHANICAL|MOTOR|HVAC/i, 'motor_mech'], [/GROUND/i, 'grounding'], [/WIRING\s*DEVICE|DEVICE|RECEPT|OUTLET|SWITCH/i, 'receptacle']
+  ];
+  function leyFamiliaDe(cab, desc) {
+    var d = String(desc || '');
+    if (/EXIT\s*SIGN|EXIT\s*LIGHT|EMERGENCY\s*(LIGHT|BATTERY)/i.test(d)) return 'exit_emergency';
+    if (/SMOKE|STROBE|HORN|PULL\s*STATION|FIRE\s*ALARM|DETECTOR|F\.?A\.?\s/i.test(d)) return 'fire_alarm';
+    if (/JUNCTION\s*BOX|J-?BOX/i.test(d)) return 'junction_box';
+    if (/DATA|TELEPHONE|TELE\/|VOICE|CAT ?6|WIRELESS|ACCESS POINT|WAP/i.test(d)) return 'data_comm';
+    if (/CAMERA|CARD READER|DOOR RELEASE|SECURITY/i.test(d)) return 'security_cctv';
+    if (/SPEAKER|NURSE|INTERCOM|CLOCK/i.test(d)) return 'av_sound';
+    if (/DISCONNECT|MOTOR|STARTER|VFD|EQUIPMENT CONNECTION/i.test(d)) return 'motor_mech';
+    if (/SWITCH|DIMMER|SENSOR/i.test(d) && !/DISCONNECT/i.test(d)) return 'switch';
+    if (/RECEPT|DUPLEX|QUAD|OUTLET/i.test(d)) return 'receptacle';
+    if (/LIGHT|LUMINAIR|FIXTURE|TROFFER|DOWNLIGHT|CAN\b/i.test(d)) return 'lighting';
+    if (/PANEL|TRANSFORMER|GENERATOR|ATS/i.test(d)) return 'panel_equipment';
+    for (var i = 0; i < LEY_FAM_CAB.length; i++) if (LEY_FAM_CAB[i][0].test(cab || '')) return LEY_FAM_CAB[i][1];
+    return 'other';
+  }
+  /* El texto del PDF que cae dentro del recorte de la leyenda, en píxeles de
+     ley.cv. items = los de textoDePagina (fracciones de la página). PURA. */
+  function leyTextoPdfARect(items, rect, bg, w, h) {
+    var out = [], kx = w / (rect.x1 - rect.x0), ky = h / (rect.y1 - rect.y0);
+    (items || []).forEach(function (it) {
+      var X = bg.x + it.x * bg.w, Y = bg.y + it.y * bg.h, Wd = it.w * bg.w, Hd = it.h * bg.h;   // a mundo
+      if (X + Wd < rect.x0 || X > rect.x1 || Y + Hd < rect.y0 || Y > rect.y1) return;
+      out.push({ t: String(it.txt || '').trim(), c: 100, x0: (X - rect.x0) * kx, y0: (Y - rect.y0) * ky, x1: (X + Wd - rect.x0) * kx, y1: (Y + Hd - rect.y0) * ky });
+    });
+    return out.filter(function (l) { return l.t; });
+  }
+  function leyLimpia(t) {
+    var s2 = String(t || '').replace(/\s+/g, ' ').replace(/[|_]+/g, ' ').trim();
+    // la letra suelta al final es el borde de la tabla o la primera columna de la tabla vecina
+    s2 = s2.replace(/(\.|\)|[A-Z]{3,})\s+[A-Z¢©®®°]$/g, '$1').trim();
+    // y los garabatos del principio o del final: palabras sin una sola letra ni número («[©]», «/», «©)»)
+    var pal = s2.split(' ');
+    while (pal.length > 1 && !/[A-Za-z0-9]/.test(pal[0])) pal.shift();
+    while (pal.length > 1 && !/[A-Za-z0-9]/.test(pal[pal.length - 1])) pal.pop();
+    return pal.join(' ').trim();
+  }
+  /* La tinta de una celda, SIN las rayas de la tabla: una fila o columna de
+     píxeles con más de la mitad oscura es raya (o borde), no dibujo. Con las
+     rayas dentro, el molde de cada símbolo salía como la celda entera y el
+     barrido no encontraba nada (17/09). Devuelve la caja de la tinta con 3 px
+     de aire y el perfil por columnas, para separar el dibujo del tag que va a
+     su lado. null si la celda está vacía. */
+  function leyTintaCelda(cv, x0, y0, x1, y1) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+    var w = x1 - x0, h = y1 - y0; if (w < 4 || h < 4) return null;
+    var d; try { d = cv.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, w, h).data; } catch (e) { return null; }
+    var osc = new Uint8Array(w * h), porFila = new Int32Array(h), porCol = new Int32Array(w), x, y, i;
+    for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+      i = (y * w + x) * 4;
+      if ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < 150) { osc[y * w + x] = 1; porFila[y]++; porCol[x]++; }
+    }
+    var rayaF = new Uint8Array(h), rayaC = new Uint8Array(w);
+    for (y = 0; y < h; y++) rayaF[y] = porFila[y] > w * 0.5 ? 1 : 0;
+    for (x = 0; x < w; x++) rayaC[x] = porCol[x] > h * 0.5 ? 1 : 0;
+    var perfil = new Int32Array(w), n = 0;
+    for (y = 0; y < h; y++) { if (rayaF[y]) continue; for (x = 0; x < w; x++) if (!rayaC[x] && osc[y * w + x]) { n++; perfil[x]++; } }
+    if (n < 8) return null;
+    var t = { x0: x0, y0: y0, w: w, h: h, osc: osc, rayaF: rayaF, rayaC: rayaC, perfil: perfil, n: n };
+    t.caja = leyCajaEn(t, x0, x0 + w);
+    return t;
+  }
+  /* La caja de la tinta entre dos columnas [xa, xb) del canvas, sin rayas. */
+  function leyCajaEn(t, xa, xb) {
+    var bx0 = t.w, by0 = t.h, bx1 = -1, by1 = -1, x, y, xi = Math.max(0, Math.round(xa) - t.x0), xf = Math.min(t.w, Math.round(xb) - t.x0);
+    for (y = 0; y < t.h; y++) { if (t.rayaF[y]) continue; for (x = xi; x < xf; x++) {
+      if (t.rayaC[x] || !t.osc[y * t.w + x]) continue;
+      if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+    } }
+    if (bx1 < bx0) return null;
+    return { x0: t.x0 + Math.max(0, bx0 - 3), y0: t.y0 + Math.max(0, by0 - 3), x1: t.x0 + Math.min(t.w, bx1 + 4), y1: t.y0 + Math.min(t.h, by1 + 4) };
+  }
+  /* Los grupos de columnas con tinta, separados por huecos de `hueco` px o más. En px del canvas. */
+  function leyGrupos(t, hueco) {
+    var out = [], en = false, ini = 0, fin = 0, vacio = 0, x;
+    for (x = 0; x <= t.w; x++) {
+      var hay = x < t.w && t.perfil[x] > 0;
+      if (hay) { if (!en) { en = true; ini = x; } fin = x; vacio = 0; }
+      else if (en && (++vacio >= hueco || x === t.w)) { out.push({ x0: t.x0 + ini, x1: t.x0 + fin + 1 }); en = false; vacio = 0; }
+    }
+    return out;
+  }
+  /* ¿Lo que leyó el OCR es un tag (75 CD, 3 X/NF, AP, S…) o es el dibujo leído como letras? */
+  function leyEsTag(r) {
+    if (!r || !r.lineas || !r.lineas.length) return '';
+    var t = r.lineas.map(function (l) { return l.t; }).join(' ').replace(/[^A-Za-z0-9\/\-.,'" ]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+    var c = Math.round(r.lineas.reduce(function (a, l) { return a + l.c; }, 0) / r.lineas.length);
+    if (!t || t.length > 10 || !/[A-Z0-9]/.test(t) || c < 65) return '';
+    if (t.replace(/[^A-Z0-9]/g, '').length < 2 && c < 90) return '';   // una letra sola casi siempre es el dibujo
+    return t.slice(0, 8);
+  }
+  function leyLocal(rec) {
+    var hoja = state.curSheet, t = leyTabla();
+    if (!t || t.filas.length < 2) {
+      pintaLey(null, 'No veo la cuadrícula de la tabla: hacen falta las rayas horizontales entre filas para leerla en local.\nEncierra la tabla con su borde. Si la leyenda no tiene rayas, prueba el cerebro.');
+      return;
+    }
+    var W = ley.w, H = ley.h, colX = t.colX || Math.round(W * 0.18);
+    var conDibujo = leyFilasSimbolo() || [];
+    var esSim = {}; conDibujo.forEach(function (f) { esSim[f.j] = 1; });
+    var k = (ley.rect.x1 - ley.rect.x0) / W, ky = (ley.rect.y1 - ley.rect.y0) / H;   // px del canvas → mundo
+    var aMundo = function (c) { return c ? { x0: ley.rect.x0 + c.x0 * k, y0: ley.rect.y0 + c.y0 * ky, x1: ley.rect.x0 + c.x1 * k, y1: ley.rect.y0 + c.y1 * ky } : null; };
+    var cx0 = Math.max(0, Math.round(W * 0.006)), N = t.filas.length;
+    var vivo = function () { return hoja === state.curSheet && !!ley && ley.cv === rec.cv; };
+    var celdaDibujo = function (f) { return { x0: cx0, y0: Math.round(f[0]) + 2, x1: colX - 2, y1: Math.round(f[1]) - 2 }; };
+    var junta = function (ls) { return leyLimpia(ls.slice().sort(function (a, b2) { return a.y0 - b2.y0 || a.x0 - b2.x0; }).map(function (l) { return l.t; }).join(' ')); };
+    var confDe = function (ls) { return ls.length ? Math.round(ls.reduce(function (a, l) { return a + l.c; }, 0) / ls.length) : 0; };
+    pintaLey('Leyendo el texto de la tabla…');
+
+    /* Con las bandas leídas ({j, desc, tag, conf, dibujo}) se arma el MISMO
+       {leyenda:{simbolos}} que devolvía el cerebro: la revisión, la pareja con
+       la biblioteca y la creación son las de siempre. Las bandas sin dibujo son
+       cabeceras de sección y dan la familia a las filas que siguen. */
+    function arma(bandas, fuente, conf) {
+      if (!vivo()) return;
+      var cab = '', simb = [], porJ = {};
+      bandas.forEach(function (b2) { porJ[b2.j] = b2; });
+      t.filas.forEach(function (f, j) {
+        var b2 = porJ[j] || { desc: '', tag: '', conf: 0, dibujo: null };
+        if (!esSim[j]) { if (b2.desc && b2.desc.length <= 40) cab = b2.desc; return; }
+        var c = celdaDibujo(f);
+        simb.push({ descripcion: b2.desc, tag: b2.tag || '', familia: leyFamiliaDe(cab, b2.desc), montaje: 'unknown',
+          nota: fuente === 'pdf' ? 'texto del PDF' : ('OCR ' + b2.conf + '%'),
+          caja: { x0: c.x0 / W * 100, y0: f[0] / H * 100, x1: c.x1 / W * 100, y1: f[1] / H * 100 },
+          moldeRect: aMundo(b2.dibujo), moldeHoja: hoja });
       });
+      ley.bandas = bandas;
+      leyendaRecibe({ leyenda: { simbolos: simb, lineas: [], notas: (fuente === 'pdf' ? 'Texto tomado del PDF. ' : 'Texto leído con OCR en tu aparato (' + conf + '% de confianza). ') + simb.length + ' fila(s) con dibujo, ' + (N - simb.length) + ' cabecera(s).' } });
+      if (ley) { ley.local = true; leyProponeRecetas(); }
+    }
+    /* El dibujo y el tag dentro de la celda del símbolo. Si el texto viene del
+       PDF ya se sabe dónde está el tag (tagPdf = {texto, items:[{x0,x1}]}); si
+       no, se separa la tinta por huecos y se le pregunta al OCR qué grupo es
+       letra. Si nada es letra y hay dos grupos (⊕ / ⊙), el dibujo es el primero. */
+    function dibujoYTag(f, tagPdf) {
+      var c = celdaDibujo(f), tinta = leyTintaCelda(ley.cv, c.x0, c.y0, c.x1, c.y1);
+      if (!tinta) return Promise.resolve({ dibujo: null, tag: '' });
+      var gr = leyGrupos(tinta, Math.max(5, Math.round(tinta.w * 0.04)));
+      var primero = function (gs) {
+        if (gs.length < 2) return tinta.caja;
+        var A = leyCajaEn(tinta, gs[0].x0, gs[0].x1), total = gs[gs.length - 1].x1 - gs[0].x0;
+        return (A && (A.x1 - A.x0) >= total * 0.35) ? A : tinta.caja;
+      };
+      if (tagPdf) {
+        var sinTag = gr.filter(function (g) { return !tagPdf.items.some(function (it) { return g.x0 < it.x1 && g.x1 > it.x0; }); });
+        var caja = sinTag.length === gr.length ? primero(gr) : (sinTag.length ? leyCajaEn(tinta, sinTag[0].x0, sinTag[sinTag.length - 1].x1) : tinta.caja);
+        return Promise.resolve({ dibujo: caja || tinta.caja, tag: tagPdf.texto });
+      }
+      if (gr.length < 2) return Promise.resolve({ dibujo: tinta.caja, tag: '' });
+      var A = leyCajaEn(tinta, gr[0].x0, gr[0].x1), B = leyCajaEn(tinta, gr[1].x0, gr[gr.length - 1].x1);
+      if (!A || !B) return Promise.resolve({ dibujo: tinta.caja, tag: '' });
+      var kA = Math.min(4, Math.max(1, 48 / (A.y1 - A.y0))), kB = Math.min(4, Math.max(1, 48 / (B.y1 - B.y0)));
+      return ocrLee(ocrRecorte(ley.cv, A.x0, A.y0, A.x1, A.y1, kA), '7').then(function (rA) {
+        return ocrLee(ocrRecorte(ley.cv, B.x0, B.y0, B.x1, B.y1, kB), '7').then(function (rB) {
+          var tA = leyEsTag(rA), tB = leyEsTag(rB);
+          if (tB && !tA) return { dibujo: A, tag: tB };
+          if (tA && !tB) return { dibujo: B, tag: tA };
+          if (tA && tB) return (A.x1 - A.x0) >= (B.x1 - B.x0) ? { dibujo: A, tag: tB } : { dibujo: B, tag: tA };
+          return { dibujo: primero(gr), tag: '' };
+        });
+      });
+    }
+    /* OCR celda a celda, en orden: la descripción (un bloque, PSM 6) y el
+       dibujo/tag de cada fila con dibujo; la cabecera entera (un renglón, PSM 7)
+       de las que no. La letra se lleva a ~2200 px de ancho de celda. */
+    function porOcr() {
+      pintaLey('Leyendo la tabla con OCR en tu aparato… (la primera vez carga 10 MB)');
+      var bandas = [], sumaC = 0, nC = 0;
+      var leeTexto = function (f) {
+        var kT = Math.min(3, Math.max(1, 2200 / Math.max(1, W - 2 - (colX + 3))));
+        return ocrLee(ocrRecorte(ley.cv, colX + 3, Math.round(f[0]) + 3, W - 2, Math.round(f[1]) - 3, kT), '6').then(function (r) { return { desc: junta(r.lineas), conf: confDe(r.lineas) }; });
+      };
+      var leeCabecera = function (f) {
+        var kC = Math.min(3, Math.max(1, 2200 / W));
+        return ocrLee(ocrRecorte(ley.cv, 2, Math.round(f[0]) + 3, W - 2, Math.round(f[1]) - 3, kC), '7').then(function (r) { return { desc: junta(r.lineas), conf: confDe(r.lineas) }; });
+      };
+      var paso = function (j) {
+        if (j >= N || !vivo()) return Promise.resolve();
+        var f = t.filas[j];
+        pintaLey('Leyendo la tabla con OCR en tu aparato… fila ' + (j + 1) + ' de ' + N);
+        var pr = esSim[j]
+          ? leeTexto(f).then(function (tx) { return dibujoYTag(f, null).then(function (dt) { sumaC += tx.conf; nC++; bandas.push({ j: j, desc: tx.desc, conf: tx.conf, tag: dt.tag, dibujo: dt.dibujo }); }); })
+          : leeCabecera(f).then(function (tx) { bandas.push({ j: j, desc: tx.desc, conf: tx.conf, tag: '', dibujo: null }); });
+        return pr.then(function () { return paso(j + 1); });
+      };
+      paso(0).then(function () { if (vivo()) arma(bandas, 'ocr', nC ? Math.round(sumaC / nC) : 0); }).catch(function (e) {
+        if (!vivo()) return;
+        pintaLey(null, 'No pude leer el texto de la tabla (' + (e && e.message ? e.message : e) + ').\nSi tienes el cerebro configurado, prueba «Leer con el cerebro».');
+      });
+    }
+    /* 1) el texto del PDF, si la hoja lo trae (exacto y gratis) */
+    var rP = pdfLive[hoja];
+    if (rP && rP.doc) {
+      textoDePagina(rP, function (items) {
+        if (!vivo()) return;
+        var dentro = leyTextoPdfARect(items || [], ley.rect, state.bg, W, H);
+        var enTexto = dentro.filter(function (l) { return (l.x0 + l.x1) / 2 > colX; });
+        // con letras en curvas (ED-0.1) esto viene vacío o casi: entonces OCR
+        if (enTexto.length < 3) { porOcr(); return; }
+        var enBanda = function (l, f) { var cy = (l.y0 + l.y1) / 2; return cy >= f[0] && cy <= f[1]; };
+        var bandas = [];
+        var paso = function (j) {
+          if (j >= N || !vivo()) return Promise.resolve();
+          var f = t.filas[j], ls = dentro.filter(function (l) { return enBanda(l, f); });
+          if (!esSim[j]) { bandas.push({ j: j, desc: junta(ls), conf: 100, tag: '', dibujo: null }); return paso(j + 1); }
+          var der = ls.filter(function (l) { return (l.x0 + l.x1) / 2 > colX; }), izq = ls.filter(function (l) { return (l.x0 + l.x1) / 2 <= colX; });
+          var tagTxt = izq.map(function (l) { return l.t; }).join(' ').replace(/[^A-Za-z0-9\/\-.'" ]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 8);
+          return dibujoYTag(f, { texto: tagTxt, items: izq.map(function (l) { return { x0: l.x0, x1: l.x1 }; }) }).then(function (dt) {
+            bandas.push({ j: j, desc: junta(der), conf: 100, tag: dt.tag, dibujo: dt.dibujo });
+            return paso(j + 1);
+          });
+        };
+        paso(0).then(function () { arma(bandas, 'pdf', 100); });
+      });
+    } else porOcr();
+  }
+  /* Después de leer: a cada fila su RECETA propuesta (el punto completo), con
+     las que existen de verdad en el estimador. Sin sesión, sin recetas: se dice. */
+  /* Lo que la leyenda dice en inglés ↔ lo que la receta dice en castellano:
+     [qué busca en la leyenda, qué busca en la receta, peso, (no si la leyenda
+     dice esto)]. Peso 2 = el aparato (si no casa, no es esa receta); 1 = un
+     matiz (HG, TR, WP, USB…): la leyenda del ingeniero casi nunca lo dice y la
+     receta del proyecto sí, así que no pesa para quitar. */
+  var LEY_RECETA_SINON = [
+    [/QUAD|FOURPLEX|4-?PLEX/i, /QUAD|CU[AÁ]DRUPLE|4-?PLEX|DOBLE DUPLEX/i, 2],
+    [/GFCI|\bGFI\b|GROUND FAULT/i, /GFCI|\bGFI\b/i, 2],
+    [/DUPLEX|RECEPTACLE|\bRECEPT\b/i, /RECEPT[AÁ]CULO|RECEPTACLE|DUPLEX|TOMACORRIENTE|\bTOMA\b/i, 2],
+    [/\bDATA\b|TELE(PHONE|COM)|VOICE|CAT ?[56]|\bCOMM\b/i, /DATOS|\bDATA\b|\bVOZ\b|TELE|CAT ?[56]/i, 2],
+    [/CARD READER|ACCESS CONTROL|KEYPAD/i, /LECTOR|CARD READER|TARJETA|ACCESO/i, 2],
+    [/STROBE/i, /STROBE|ESTROBO/i, 2],
+    [/HORN|SPEAKER|CHIME/i, /HORN|BOCINA|SPEAKER|CORNETA|CHIME/i, 2],
+    [/SMOKE/i, /HUMO|SMOKE/i, 2],
+    [/HEAT DETECTOR/i, /CALOR|HEAT/i, 2],
+    [/PULL STATION/i, /PULL|ESTACI[OÓ]N MANUAL/i, 2],
+    [/DISCONNECT/i, /DISCONNECT|DESCONECT/i, 2],
+    [/JUNCTION BOX|J-?BOX/i, /JUNCTION|J-?BOX|CAJA DE PASO|CAJA DE EMPALME/i, 2],
+    [/DIMMER/i, /DIMMER|ATENUADOR/i, 2],
+    [/OCCUPANCY|VACANCY|SENSOR/i, /SENSOR|OCUPACI/i, 2],
+    [/\bEXIT\b/i, /\bEXIT\b|LETRERO|SE[NÑ]AL DE SALIDA/i, 2],
+    [/EMERGENCY|BATTERY/i, /EMERGENCIA|BATER/i, 2],
+    [/LIGHT(ING)? FIXTURE|LUMINAIRE|TROFFER|DOWNLIGHT|RECESSED|PENDANT|FIXTURE TYPE/i, /LUMINARIA|L[AÁ]MPARA|TROFFER|FIXTURE|DOWNLIGHT/i, 2],
+    [/TELEVISION|\bTV\b/i, /\bTV\b|TELEVIS/i, 2],
+    [/\bSWITCH\b|TOGGLE/i, /SWITCH|INTERRUPTOR|APAGADOR/i, 2, /DISCONNECT/i],
+    [/HOSPITAL/i, /HOSPITAL|\bHG\b/i, 1],
+    [/TAMPER|\bTR\b/i, /TAMPER|\bTR\b/i, 1],
+    [/WEATHERPROOF|\bWP\b/i, /WEATHERPROOF|\bWP\b|INTEMPERIE/i, 1],
+    [/\bUSB\b/i, /\bUSB\b/i, 1],
+    [/ISOLATED GROUND|\bIG\b/i, /ISOLATED|TIERRA AISLADA|\bIG\b/i, 1],
+    [/CEILING/i, /TECHO|CEILING/i, 1],
+    [/TWO GANG|2-?GANG/i, /2-?GANG|DOS GANG|\bDOBLE\b/i, 1]
+  ];
+  /* Cuánto casa una fila de la leyenda con una receta, 0..1. Lo que ES el
+     aparato va en la primera frase de la descripción; lo de después son los
+     matices («GFI - GND FAULT INTERRUPTER, WP - …» explica sufijos, no dice que
+     el duplex sea GFCI). Se propone si pasa de 0.45. */
+  function leyPuntReceta(desc, tag, receta) {
+    var d = String(desc || ''), r = String(receta || '');
+    var core = d.split(/\.\s|\.$/)[0]; if (core.length < 8) core = d;
+    var base = docPunt(d + ' ' + (tag || ''), r), quiere = 0, hay = 0, castigo = 0;
+    LEY_RECETA_SINON.forEach(function (sn) {
+      var enD = sn[0].test(core) && !(sn[3] && sn[3].test(core)), enR = sn[1].test(r), pe = sn[2] === 2 ? 2 : 0.5;
+      if (enD) { quiere += pe; if (enR) hay += pe; else castigo += sn[2] === 2 ? 0.5 : 0.1; }
+      else if (enR) castigo += sn[2] === 2 ? 1 : 0.3;
+    });
+    return Math.max(0, Math.min(1, (quiere ? 0.6 * (hay / quiere) : 0) + 0.4 * base - 0.25 * castigo));
+  }
+  function leyProponeRecetas() {
+    if (!ley || !ley.filas) return;
+    listaDe('recetas').then(function (recetas) {
+      if (!ley || !ley.filas) return;
+      ley.recetas = recetas;
+      ley.filas.forEach(function (f) {
+        if (!recetas.length) { f.recetas = []; f.receta = ''; return; }
+        var pun = recetas.map(function (r) { return { r: r, p: leyPuntReceta(f.desc, f.tag, r) }; }).sort(function (a, b) { return b.p - a.p; });
+        f.recetas = pun.slice(0, 4).filter(function (x) { return x.p > 0.15; }).map(function (x) { return { r: x.r, p: Math.round(x.p * 100) }; });
+        f.receta = (pun[0] && pun[0].p >= 0.45) ? pun[0].r : '';
+        f.recetaFull = !!(f.receta && /stub|vac[ií]o|empty/i.test(f.receta));
+      });
+      pintaLey();
     });
   }
   /* Lo que devuelve el worker → las filas de revisión. Cada fila trae su
      dibujito (recortado de la caja que dijo el modelo) y hasta 3 parejas. */
+  /* El nombre de la categoría: si la descripción es un párrafo, su primera
+     frase («20A, 125V, 3 WIRES GROUNDING TYPE DUPLEX RECEPTACLE», no lo de
+     GFI, WP, TR…). Se puede cambiar en la fila. */
+  function leyNombreCorto(desc) {
+    var d = String(desc || '').trim();
+    if (d.length <= 60) return d;
+    var f = d.split(/\.\s|\.$|;\s/)[0].trim();
+    return (f.length >= 8 && f.length < d.length) ? f.slice(0, 60) : d.slice(0, 60).trim();
+  }
   function leyendaRecibe(d) {
     if (!ley) return;
     if (!d || d.error) { pintaLey(null, (d && d.error) || 'El cerebro no contestó.' + (d && d.detalle ? '\n' + d.detalle : '')); return; }
@@ -10323,7 +10696,9 @@
         mont: String((s && s.montaje) || 'unknown'), nota: String((s && s.nota) || '').slice(0, 120),
         caja: s && s.caja, glifo: leyGlifo(s && s.caja, asig ? asig[i] : null),
         parejas: desc ? leyendaCasa(desc, s && s.tag, s && s.familia) : [],
-        nom: desc, fuera: !desc
+        nom: leyNombreCorto(desc), fuera: !desc,
+        // (17/09) la caja del dibujo EN EL PLANO: el molde para buscarlo después
+        moldeRect: (s && s.moldeRect && isFinite(s.moldeRect.x0)) ? s.moldeRect : null, moldeHoja: s && s.moldeHoja != null ? s.moldeHoja : null
       };
       // la pareja propuesta: la mejor si pasa el umbral; si no, sin pareja
       // preselecciona solo si pasa el umbral Y la descripción no es casi toda palabras que el item no tiene
@@ -10386,6 +10761,13 @@
       var a = rayasH[i], b = rayasH[i + 1];
       if (b - a >= 6) filas.push([a, b]);   // una raya doble no es una fila
     }
+    // la tabla cortada por abajo (el marco no llegó al borde): si debajo de la
+    // última raya queda por lo menos media fila, esa banda también es fila
+    if (filas.length >= 2) {
+      var alt = filas.map(function (f) { return f[1] - f[0]; }).sort(function (a, b) { return a - b; }), med = alt[Math.floor(alt.length / 2)];
+      var ult = rayasH[rayasH.length - 1];
+      if (H - 1 - ult >= med * 0.5) filas.push([ult, H - 1]);
+    }
     ley.tabla = { filas: filas, colX: colX, rayasH: rayasH.length };
     return ley.tabla;
   }
@@ -10406,6 +10788,17 @@
       var y0 = Math.round(f[0]) + my, h = Math.round(f[1]) - Math.round(f[0]) - 2 * my;
       var x0 = mx, w = xc - 2 * mx;
       if (h < 4 || w < 4) return;
+      // (17/09) si en esta banda NO está la raya vertical, es una cabecera que
+      // cruza toda la tabla (WIRING DEVICES, FIRE ALARM SYSTEM…): su letra sí
+      // llega a la columna del dibujo, pero no es un símbolo
+      if (t.colX) {
+        var dv; try { dv = ctx.getImageData(t.colX - 1, y0, 3, h).data; } catch (e) { dv = null; }
+        if (dv) {
+          var con = 0;
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < 3; xx++) { var q = (yy * 3 + xx) * 4; if ((dv[q] * 299 + dv[q + 1] * 587 + dv[q + 2] * 114) / 1000 < 150) { con++; break; } }
+          if (con / h < 0.5) return;
+        }
+      }
       var d; try { d = ctx.getImageData(x0, y0, w, h).data; } catch (e) { return; }
       var n = 0;
       for (var i = 0; i < d.length; i += 4) if ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < 150) n++;
@@ -10489,7 +10882,7 @@
     if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>'; enganchaLeyOtra(); return; }
     if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
     if (!ley || !ley.filas) {
-      c.innerHTML = '<div class="bMuted">Encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero y el cerebro te saca las categorías del Count ya nombradas.<br><br><b>Mejor una sección a la vez</b> (ELECTRICAL DEVICES, después FIRE ALARM…): con menos filas por imagen lee mejor y no se le corren los dibujitos. La hoja entera no: la letra sale ilegible.</div>';
+      c.innerHTML = '<div class="bMuted">Encierra con dos toques la <b>TABLA DE SÍMBOLOS</b> del ingeniero. La app la lee <b>sola, en tu aparato</b>: saca cada dibujo con su texto, le busca su fila del catálogo y su <b>receta</b> (el punto completo), y después puede <b>buscar cada símbolo en todas las hojas</b> y contarlos.<br><br>Encierra la tabla con su borde, no la hoja entera. Si las letras del PDF están en curvas, las lee con OCR (la primera vez carga 10 MB).</div>';
       return;
     }
     var vivas = ley.filas.filter(function (f) { return !f.fuera; });
@@ -10500,7 +10893,8 @@
       h += '<button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>';
       c.innerHTML = h; enganchaLeyOtra(); return;
     }
-    h += '<div class="muted small">El nombre se puede corregir. La pareja es lo que te propone la biblioteca, con su parecido: revísala. Sin pareja, la categoría nace con el texto del ingeniero y llega al estimador por alias cuando se le ponga.</div>';
+    h += '<div class="muted small">El nombre se puede corregir. La pareja es lo que te propone la biblioteca; la <b>receta</b> es el punto completo que irá al estimador (caja, anillo, tapa, conectores…). Verde = casa bien; rojo = míralo. Nada se crea sin que lo veas.</div>';
+    if (ley.local && ley.recetas && !ley.recetas.length) h += '<div class="muted small" style="color:#a33">Sin sesión del estimador no puedo proponer recetas: las categorías nacen sin punto completo (se les pone después en Count ▾).</div>';
     h += '<div class="lyLista" id="lyLista">';
     ley.filas.forEach(function (f) {
       h += '<div class="lyFila' + (f.fuera ? ' fuera' : '') + '" data-i="' + f.i + '">' +
@@ -10513,16 +10907,23 @@
         f.parejas.map(function (p) {
           return '<option value="' + esc(p.k) + '"' + (f.sel === p.k ? ' selected' : '') + '>' + Math.round(p.sc * 100) + '% · ' + esc(p.nom) + (p.it.item ? '' : ' (sin item)') + ' · ' + esc(p.set) + '</option>';
         }).join('') + '</select>' +
+        (f.recetas ? '<select class="lySel lyRec" data-i="' + f.i + '"' + (f.fuera ? ' disabled' : '') + '>' +
+          '<option value=""' + (f.receta ? '' : ' selected') + '>— sin receta: pieza suelta —</option>' +
+          f.recetas.map(function (r) { return '<option value="' + esc(r.r) + '"' + (f.receta === r.r ? ' selected' : '') + '>' + r.p + '% · ' + esc(r.r) + '</option>'; }).join('') + '</select>' : '') +
         '<div class="lyDet">' + esc(LEY_FAM_NOM[f.fam] || f.fam) + (f.tag ? ' · tag <b>' + esc(f.tag) + '</b>' : '') + (f.mont && f.mont !== 'unknown' ? ' · ' + esc(f.mont) : '') +
-        (f.ya ? ' · <b>ya en el proyecto</b>' : '') + (f.nota ? ' · ' + esc(f.nota) : '') + '</div>' +
+        (f.ya ? ' · <b>ya en el proyecto</b>' : '') + (f.nota ? ' · ' + esc(f.nota) : '') +
+        (f.receta ? ' · <span class="' + ((f.recetas || []).length && f.recetas[0].p >= 70 ? 'cdOk' : 'cdMal') + '">punto completo' + (f.recetaFull ? ' con su tubo' : '') + '</span>' : '') +
+        (f.moldeRect ? ' · <span class="muted">se puede buscar en el plano</span>' : '') + '</div>' +
         '</div></div>';
     });
     h += '</div>';
     if (ley.lineas.length) h += '<div class="muted small">Tipos de línea que trae la leyenda (no se cuentan; van por Rutas o por Homerun): ' + esc(ley.lineas.join(' · ')) + '</div>';
     if (ley.notas) h += '<div class="muted small">Notas del cerebro: ' + esc(ley.notas) + '</div>';
-    h += '<button id="leyCrear" style="width:100%;margin-top:6px"' + (vivas.length ? '' : ' disabled') + '>Crear ' + (vivas.length === 1 ? 'la categoría' : 'las ' + vivas.length + ' categorías') + '</button>';
+    var conMolde = vivas.filter(function (f) { return f.moldeRect; }).length;
+    h += '<button id="leyCrear" style="width:100%;margin-top:6px"' + (vivas.length ? '' : ' disabled') + '>Crear ' + (vivas.length === 1 ? 'la categoría' : 'las ' + vivas.length + ' categorías') + (conMolde ? ' y buscar los símbolos en el plano' : '') + '</button>';
     h += '<button id="leyOtra" style="width:100%;margin-top:4px">Encerrar otra tabla</button>';
-    h += '<div class="muted small" style="margin-top:6px">Esto pone los NOMBRES. Contar sigue siendo tuyo: Count a mano, o Buscar iguales con el dibujito de cada fila.</div>';
+    if (ley.local && cerebroCfg().url) h += '<button id="leyCerebro" style="width:100%;margin-top:4px" title="Que el cerebro lea la misma tabla (segunda opinión): tarda 30-60 s">Leer con el cerebro (segunda opinión)</button>';
+    h += '<div class="muted small" style="margin-top:6px">' + (conMolde ? 'Al crear, la app <b>busca cada dibujo en todas las hojas</b> y lo cuenta; las marcas quedan revisables y Ctrl+Z las quita todas.' : 'Esto pone los nombres. Contar: Count a mano, o Buscar iguales con el dibujito de cada fila.') + '</div>';
     c.innerHTML = h;
     var lista = $('#lyLista');
     if (lista) {
@@ -10530,10 +10931,12 @@
         var t = ev.target, i = +t.dataset.i, f = ley && ley.filas && ley.filas[i]; if (!f) return;
         if (t.classList.contains('lyOn')) { f.fuera = !t.checked; pintaLey(); return; }
         if (t.classList.contains('lyNom')) { f.nom = String(t.value || '').trim().slice(0, 60); return; }
+        if (t.classList.contains('lyRec')) { f.receta = t.value; f.recetaFull = !!(f.receta && /stub|vac[ií]o|empty/i.test(f.receta)); pintaLey(); return; }
         if (t.classList.contains('lySel')) { f.sel = t.value; return; }
       });
     }
     var bC = $('#leyCrear'); if (bC) bC.addEventListener('click', leyendaCrea);
+    var bB = $('#leyCerebro'); if (bB) bB.addEventListener('click', leyConCerebro);
     enganchaLeyOtra();
   }
   function enganchaLeyOtra() { var b = $('#leyOtra'); if (b) b.addEventListener('click', function () { if (ley && ley.cv) { ley.cv.width = 1; } ley = null; pintaLey(); setTool('leyenda'); }); }
@@ -10560,13 +10963,60 @@
       // para reconocerla en el plano y para Buscar iguales después
       if (f.glifo && f.glifo.length < 6000) c.glifo = f.glifo;
       if (f.tag) c.tag = f.tag;
+      // (17/09) el punto completo y el molde para buscarlo en el plano
+      if (f.receta) { c.receta = String(f.receta).slice(0, 80); if (f.recetaFull) c.recetaFull = true; }
+      if (f.moldeRect) { c.moldeRect = f.moldeRect; c.moldeHoja = f.moldeHoja == null ? state.curSheet : f.moldeHoja; }
       nuevas.push(c);
     });
     if (!nuevas.length) { popUndoVacio(); setHint('Esas categorías ya estaban en el proyecto'); return; }
     catActiva = nuevas[0].id;
+    var rectLey = ley && ley.rect, hojaLey = ley && ley.hoja != null ? ley.hoja : state.curSheet;
     cierraLey();
-    refresh(); refreshCounts();
-    setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : '') + ' — están en Count ▾ y en el panel Conteo. Ahora sí: a contar.');
+    refresh(); refreshCounts(); scheduleAutosave();
+    var conMolde = nuevas.filter(function (c) { return c.moldeRect; });
+    setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : '') + (conMolde.length ? ' — buscando los símbolos en el plano…' : ' — están en Count ▾ y en el panel Conteo.'));
+    if (conMolde.length) leyBarre(conMolde, rectLey, hojaLey);
+  }
+  /* ================= BUSCAR EN EL PLANO CADA SÍMBOLO DE LA LEYENDA =================
+     Por el MISMO camino del buscador visual (E3 v2, probado): el rectángulo
+     del dibujo en el plano → visualArranca (molde) → visualBarreTodo (todas
+     las hojas, a su escala) → metVisualAlConteo (las marcas en cada hoja). Una
+     categoría tras otra, sin colgar la página. Lo que cae DENTRO de la tabla
+     de la leyenda no se cuenta: es el dibujo de muestra, no una pieza. */
+  var leyBarriendo = false;
+  function leyBarre(cats, rectLey, hojaLey, cb) {
+    if (leyBarriendo) { setHint('Ya hay una búsqueda en marcha'); return; }
+    if (state.curSheet !== hojaLey) { setHint('Para buscar hay que estar en la hoja de la leyenda (la ' + (hojaLey + 1) + ')'); if (cb) cb(null); return; }
+    leyBarriendo = true;
+    var i = 0, resumen = [], t0 = Date.now();
+    pushUndo();
+    function dentroLey(h) { return rectLey && h.sheet === hojaLey && h.x >= rectLey.x0 && h.x <= rectLey.x1 && h.y >= rectLey.y0 && h.y <= rectLey.y1; }
+    function sig() {
+      if (i >= cats.length) {
+        leyBarriendo = false;
+        refresh(); refreshCounts(); scheduleAutosave();
+        var tot = resumen.reduce(function (a, r) { return a + r.n; }, 0);
+        uiAlert('✔ Búsqueda terminada en ' + Math.round((Date.now() - t0) / 1000) + ' s.\n\n' +
+          resumen.map(function (r) { return '• ' + r.nom + ': ' + (r.err ? '⚠ ' + r.err : r.n + ' en el plano' + (r.hojas > 1 ? ' (' + r.hojas + ' hojas)' : '')); }).join('\n') +
+          '\n\nTotal: ' + tot + ' marca(s). Revísalas: toca cada categoría en Materiales para verlas; la que sobre, bórrala. Ctrl+Z quita TODAS las de esta búsqueda.\n\nDespués: Materiales → Cuadre para compararlo con el schedule, y Estimador para mandarlo.');
+        if (cb) cb(resumen);
+        return;
+      }
+      var c = cats[i++];
+      setHint('Buscando «' + c.nom + '» en todas las hojas… (' + i + ' de ' + cats.length + ')');
+      visualArranca(c.moldeRect, function (res) {
+        if (!res || res.err) { resumen.push({ nom: c.nom, n: 0, err: res && res.err ? res.err.split('.')[0] : 'sin molde' }); setTimeout(sig, 0); return; }
+        visualBarreTodo(res, VISUAL_UMBRAL_DEF, null, function (hits) {
+          var buenos = hits.filter(function (h) { return !dentroLey(h); });
+          var hojas = {}; buenos.forEach(function (h) { hojas[h.sheet == null ? state.curSheet : h.sheet] = 1; });
+          visual = { ctx0: res, umbral: VISUAL_UMBRAL_DEF, hits: buenos, todo: true };
+          if (buenos.length) metVisualAlConteo(c.id, true); else visual = null;
+          resumen.push({ nom: c.nom, n: buenos.length, hojas: Object.keys(hojas).length });
+          setTimeout(sig, 0);
+        });
+      });
+    }
+    sig();
   }
   function enganchaLey() {
     var b = $('#leyBox'); if (!b) return;
@@ -10574,8 +11024,15 @@
     var bc = $('#leyCerrar'); if (bc) bc.addEventListener('click', cierraLey);
   }
   enganchaLey();
+  window.__ocrDbg = { lee: ocrLee, recorte: ocrRecorte, carga: ocrCarga };
   window.__leyendaDbg = {
     lee: function (rect) { leyendaFin([rect.x0, rect.y0], [rect.x1, rect.y1]); },
+    // (17/09) la lectura local y el barrido, para probarlos sin cerebro
+    local: function () { return ley ? { local: !!ley.local, filas: JSON.parse(JSON.stringify((ley.filas || []).map(function (f) { return { desc: f.desc, tag: f.tag, fam: f.fam, nota: f.nota, receta: f.receta, recetaFull: !!f.recetaFull, recetas: f.recetas, moldeRect: f.moldeRect, sel: f.sel, fuera: f.fuera, glifo: !!f.glifo }; }))), notas: ley.notas, tabla: ley.tabla ? { filas: ley.tabla.filas.length, colX: ley.tabla.colX } : null } : null; },
+    crea: leyendaCrea, barre: leyBarre, textoARect: leyTextoPdfARect, familia: leyFamiliaDe, limpia: leyLimpia, cerebro: leyConCerebro,
+    barriendo: function () { return leyBarriendo; },
+    bandas: function () { return ley ? ley.bandas || null : null; },
+    cv: function () { return ley ? ley.cv : null; },
     recibe: function (d) { if (!ley) ley = { cv: null, w: 1, h: 1, filas: null }; leyendaRecibe(d); },
     recorta: function (rect, cb) { recorteFondo(rect, cb); },
     casa: leyendaCasa,
@@ -15041,6 +15498,9 @@
       ['alias', 'set', 'item', 'unidad', 'codigo', 'receta'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
       if (o.receta && o.recetaFull) o.recetaFull = true; else delete o.recetaFull;
       var mn = parseInt(o.manual, 10); if (mn > 0) o.manual = mn; else delete o.manual;
+      // el molde para buscar el símbolo en el plano (17/09): cuatro números o nada
+      if (o.moldeRect && typeof o.moldeRect === 'object') { var mr = o.moldeRect, ok = ['x0', 'y0', 'x1', 'y1'].every(function (k) { return isFinite(N(mr[k], NaN)); }); if (ok) o.moldeRect = { x0: N(mr.x0, 0), y0: N(mr.y0, 0), x1: N(mr.x1, 0), y1: N(mr.y1, 0) }; else delete o.moldeRect; } else delete o.moldeRect;
+      if (o.moldeRect) { var mh = parseInt(o.moldeHoja, 10); if (mh >= 0) o.moldeHoja = mh; else delete o.moldeHoja; } else delete o.moldeHoja;
     });
     // el cuadre (17/09): paneles y categorías esperados con enteros ≥ 0, nada más
     if (state.project && state.project.cuadre && typeof state.project.cuadre === 'object') {

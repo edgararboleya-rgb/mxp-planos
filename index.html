@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <!-- CSP (auditoría seguridad 03/09): GitHub Pages no permite cabeceras; esta meta corta la exfiltración si algo llegara a ejecutar script. pdf.js necesita worker-src blob: e img-src data:/blob:. El cerebro debe vivir en *.workers.dev (o agregar aquí su dominio). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://*.workers.dev; media-src 'self' blob:; base-uri 'none'; object-src 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://*.workers.dev; media-src 'self' blob:; base-uri 'none'; object-src 'none'; form-action 'none'">
 <title>MXP Planos — Diseño Eléctrico y Arquitectónico</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231e2530'/%3E%3Ctext x='16' y='22' font-size='14' font-family='Arial' font-weight='bold' fill='%23f5b82e' text-anchor='middle'%3EMX%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">

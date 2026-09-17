@@ -1244,3 +1244,6 @@ td.pmAcc button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.
 #docCuerpo .cdTabla input[type=number] { width: 52px; }
 #docCuerpo .cdTabla input.dcR { font-size: 11px; padding: 2px 4px; }
 #docCuerpo button.dcS { padding: 0 4px; font-size: 10px; }
+
+/* LEYENDA LOCAL (17/09): la receta por fila */
+.lyRec { margin-top: 3px; }
