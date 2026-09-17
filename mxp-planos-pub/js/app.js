@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.C';
+  var APP_VERSION = 'v34.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -12665,14 +12665,17 @@
         var seq = parseInt(localStorage.getItem('mxp_est_seq_' + year) || '0', 10) + 1;
         var estId = 'EST-' + year + '-' + ('00' + seq).slice(-3);
         setHint('Creando el estimado borrador…');
-        sbFetch('/rest/v1/estimados', {
-          method: 'POST', prefer: 'return=representation',
-          body: [{
-            nombre: (state.project.name || 'Takeoff MXP Planos') + ' [' + estId + ']',
-            cliente: state.project.client || null,
-            direccion: state.project.address || null,
-            estado: 'borrador'
-          }]
+        // el cableado del trabajo: si el takeoff trae tubo (EMT, conduit, THHN) o
+        // recetas en EMT, el estimador no debe inventar conectores de cable NM a
+        // cada luminaria (Nicklaus 17/09: 278 conectores NM en un trabajo en tubo)
+        var enTubo = entries.some(function (e) { return /\bEMT\b|CONDUIT|THHN|\bIMC\b|\bGRS\b|\bPVC\b/i.test((e.receta || '') + ' ' + (e.name || '')); });
+        var cabecera = { nombre: (state.project.name || 'Takeoff MXP Planos') + ' [' + estId + ']', cliente: state.project.client || null, direccion: state.project.address || null, estado: 'borrador' };
+        if (enTubo) cabecera.cable = 'emt';
+        var creaEst = function (body) { return sbFetch('/rest/v1/estimados', { method: 'POST', prefer: 'return=representation', body: [body] }); };
+        creaEst(cabecera).then(null, function (err) {
+          // un estimador viejo sin ese valor de cable: se crea sin él y se sigue
+          if (cabecera.cable && /cable/i.test(err && err.message || '')) { delete cabecera.cable; return creaEst(cabecera); }
+          throw err;
         }).then(function (rows) {
           var est = rows && rows[0];
           if (!est) throw new Error('no se recibió el estimado creado');
