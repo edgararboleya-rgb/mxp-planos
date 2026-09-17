@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.B';
+  var APP_VERSION = 'v34.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -12545,6 +12545,26 @@
     });
     return out;
   }
+  /* LUMINARIAS QUE PONE OTRO (v34.C, 17/09). Edgar, con los STAK/SCR/LDN4 de
+     Nicklaus «SIN MAPEAR» delante: «la IA tiene que saber que nosotros no
+     ponemos las luces: por materiales sería solo hora… la de 2.000 lm y la de
+     5.000 es lo mismo en tiempo, donde cambia es en el precio de la luz, y
+     cuando tengamos la cuota la ponemos aparte». Una luminaria que no está en
+     el catálogo no es un error de alias: por su FORMA (2x2, 2x4, downlight,
+     exit) va a la receta de SOLO INSTALACIÓN (la mano, el whip, la caja, los
+     clips) y la luz en sí va aparte, en un renglón de cotización pendiente.
+     Devuelve el nombre de la receta, o '' si no parece una luminaria. PURA. */
+  function luzSoloInstalacion(nombre) {
+    var n = String(nombre || '').toUpperCase().replace(/\s+/g, ' ');
+    var pareceLuz = /LITHONIA|LUMINAIR|LUMINARIA|FIXTURE|TROFFER|RECESSED|DOWNLIGHT|\bSTAK\b|\bSCR\b|\bLDN|\bLED\b|\d\s*LM\b|LUMEN|\d\s*CRI\b|MVOLT|\bEXIT\b|\bLQM\b|EMERGENCY LIGHT|WALL ?PACK|STRIP|HIGH ?BAY|PENDANT|SCONCE/.test(n);
+    if (!pareceLuz) return '';
+    if (/\bEXIT\b|\bLQM\b|\bEXR\b/.test(n)) return 'EXIT SIGN — SOLO INSTALACIÓN';
+    if (/\bLDN\d|DOWNLIGHT|ROUND RECESSED|RECESSED CAN|\b[4-8]"\s*(ROUND|RECESSED|LED|DOWN)|WAFER|\bCAN\b/.test(n)) return 'DOWNLIGHT 4" — SOLO INSTALACIÓN';
+    if (/2\s*['’]?\s*X\s*2\b|\b22\b|SCR ?22|STAK\b.*\b2X2/.test(n)) return 'LUMINARIA 2X2 — SOLO INSTALACIÓN';
+    if (/2\s*['’]?\s*X\s*4\b|\b24\b(?![0-9V])|SCR ?24|1\s*X\s*4\b|\b14\b(?![0-9V])/.test(n)) return 'LUMINARIA 2X4 — SOLO INSTALACIÓN';
+    return '';
+  }
+  window.__luzDbg = luzSoloInstalacion;
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
     if (!SB || typeof fetch === 'undefined') { uiAlert('La conexión al estimador no está configurada.'); return; }
     var entries = null;
@@ -12582,7 +12602,7 @@
         }
         var catByNorm = {}; cat.forEach(function (c) { catByNorm[normTxt2(c.item)] = c; });
         var aliasByNorm = {}; alias.forEach(function (a) { aliasByNorm[normTxt2(a.alias)] = a; });
-        var mapped = {}, unmapped = [], recetas = {}, recSin = [];
+        var mapped = {}, unmapped = [], recetas = {}, recSin = [], luces = [];
         entries.forEach(function (e) {
           // PUNTO COMPLETO: no es un renglón del catálogo, es una receta × cantidad
           if (e.receta) {
@@ -12604,7 +12624,18 @@
           // por NOMBRE (sin alias): si se midió en pies y el catálogo vende por mil pies
           // (los THHN están en MLF), se divide por 1000 — 500 ft de 4/0 no son 500 MLF (15/09)
           if (!target) { target = catByNorm[n]; if (target) factor = factorUnidad(e.unit, target.unidad); }
-          if (!target) { unmapped.push(e.name + ' (' + e.qty + ' ' + e.unit + ')'); return; }
+          if (!target) {
+            // una luminaria que no está en el catálogo: la mano por su forma, la luz aparte (v34.C)
+            var luz = luzSoloInstalacion(e.name);
+            if (luz) {
+              var enLuz = ensByNorm2[normTxt2(luz)];
+              if (!enLuz) { recSin.push(luz + ' (' + e.qty + ' — para ' + e.name + '; corre docs/sql/e24)'); return; }
+              recetas[enLuz.id + '\u00011'] = (recetas[enLuz.id + '\u00011'] || 0) + e.qty;   // CON su whip: eso no se mide en el plano
+              luces.push({ name: e.name, qty: e.qty, receta: luz });
+              return;
+            }
+            unmapped.push(e.name + ' (' + e.qty + ' ' + e.unit + ')'); return;
+          }
           // el mismo item en dos partidas (jbox en rough y en feeders) son dos renglones
           var cod = esCodigo(e.codigo) ? e.codigo : CODIGO_DEFECTO;
           var k = target.item + '|' + cod;
@@ -12612,6 +12643,13 @@
           mapped[k].cantidad += e.qty * factor;
         });
         var items = Object.keys(mapped).sort().map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
+        if (luces.length) {
+          // la luz en sí, en $0 hasta que llegue la cuota: un renglón POR MODELO con su
+          // cantidad (cada modelo tiene su precio; la de 2.000 lm no vale lo que la de 5.000)
+          luces.forEach(function (l) {
+            items.push({ item: ('COTIZACIÓN PENDIENTE — ' + l.name.replace(/\s+/g, ' ').trim()).slice(0, 240), unidad: 'E', precio: 0, horas: 0, cantidad: l.qty, origen: 'cotizacion', codigo: '11-LIGHT', orden: items.length + 1 });
+          });
+        }
         var ensRows = Object.keys(recetas).map(function (kE) {
           var i = kE.lastIndexOf('\u0001'), id = kE.slice(0, i), full = kE.slice(i + 1) === '1';
           return { ensamble_id: isNaN(+id) ? id : +id, cantidad: recetas[kE], sin_lineales: !full };
@@ -12669,6 +12707,7 @@
             '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (sinColumnaLineal ? '\n\n⚠ El estimador aún no tiene la columna "sin_lineales" en estimado_ensambles: las recetas fueron CON su tubo y su cable, así que ese material está DOS VECES. SQL listo en docs/sql/e17-punto-completo.sql.' : '') +
+            (luces.length ? '\n\n💡 LUMINARIAS QUE PONE OTRO — fueron como SOLO INSTALACIÓN (la mano, el whip, la caja; la luz no):\n• ' + luces.map(function (l) { return l.name + ' ×' + l.qty + ' → ' + l.receta; }).join('\n• ') + '\nY la luz en sí, un renglón «COTIZACIÓN PENDIENTE — …» por modelo en $0: cuando llegue la cuota, pon ahí el precio de cada una.' : '') +
             (recSin.length ? '\n\n⚠ RECETAS QUE NO EXISTEN (no se enviaron):\n• ' + recSin.join('\n• ') : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
             '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
@@ -19629,7 +19668,53 @@
        este peso, por debajo del 84 % por defecto. Medido en la prueba. */
     return 0.65 * rec + 0.35 * pre;
   }
+  /* El molde girado 90° en sentido horario `n` veces. En el plano los
+     receptáculos y las salidas miran a la pared (0/90/180/270), y la leyenda
+     los dibuja en una sola postura: sin esto se escapaban los de tres paredes
+     de cada cuatro (17/09). */
+  function giraMolde(M, n) {
+    n = ((n % 4) + 4) % 4; if (!n) return M;
+    var tw = M.tw, th = M.th, tpl = M.tpl, tplG = M.tplG;
+    for (var v = 0; v < n; v++) {
+      var nw = th, nh = tw, t2 = new Uint8Array(nw * nh), g2 = new Uint8Array(nw * nh);
+      for (var y = 0; y < th; y++) for (var x = 0; x < tw; x++) {
+        var nx = nw - 1 - y, ny = x;   // (x, y) → (nw-1-y, x): giro horario
+        t2[ny * nw + nx] = tpl[y * tw + x]; g2[ny * nw + nx] = tplG[y * tw + x];
+      }
+      tpl = t2; tplG = g2; tw = nw; th = nh;
+    }
+    return { tpl: tpl, tplG: tplG, tw: tw, th: th, tint: M.tint };
+  }
+  function mismoMolde(A, B) {
+    if (A.tw !== B.tw || A.th !== B.th) return false;
+    for (var i = 0; i < A.tpl.length; i++) if (A.tpl[i] !== B.tpl[i]) return false;
+    return true;
+  }
+  /* El barrido completo: el molde en sus cuatro posturas (las que sean
+     distintas: un can es igual girado y se barre una vez), y un símbolo que
+     sale en dos posturas se cuenta una vez, con su mejor nota. */
   function visualBarre(ctx0, umbral, onPaso, cb, molde) {
+    var M0 = molde || ctx0, giros = [M0], n;
+    // (17/09) el giro queda APAGADO hasta medirlo sobre las hojas reales: en la prueba sintética metía un falso al 85 %
+    if (window.__visualConGiro) for (n = 1; n < 4; n++) { var G = giraMolde(M0, n); if (!giros.some(function (q) { return mismoMolde(q, G); })) giros.push(G); }
+    var todos = [], i = 0;
+    function sig() {
+      if (i >= giros.length) {
+        todos.sort(function (a, b) { return b.sc - a.sc; });
+        var buenos = [];
+        todos.forEach(function (h) {
+          var dm = Math.max(h.w, h.h) * 0.62;
+          for (var k = 0; k < buenos.length; k++) if (Math.abs(buenos[k].x - h.x) < dm && Math.abs(buenos[k].y - h.y) < dm) return;
+          buenos.push(h);
+        });
+        cb(buenos); return;
+      }
+      var M = giros[i++];
+      visualBarreUno(ctx0, umbral, function (pc) { if (onPaso) onPaso(((i - 1) + pc) / giros.length); }, function (hs) { hs.forEach(function (h) { h.giro = (i - 1) * 90; }); todos = todos.concat(hs); sig(); }, M);
+    }
+    sig();
+  }
+  function visualBarreUno(ctx0, umbral, onPaso, cb, molde) {
     var F = ctx0.F, M = molde || ctx0, tw = M.tw, th = M.th, tpl = M.tpl, tplG = M.tplG, tint = M.tint;
     var pasoG = Math.max(2, Math.min(6, Math.round(Math.min(tw, th) / 10)));
     var umbralG = Math.max(0.45, umbral - 0.18);
