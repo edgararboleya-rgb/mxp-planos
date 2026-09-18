@@ -1094,6 +1094,9 @@ svg.tool-cuenta { cursor: crosshair; }
 .cuTabla th { text-align: left; font-weight: 600; color: var(--mp-ink-2); border-bottom: 1px solid var(--mp-line); padding: 2px 4px; }
 .cuTabla td { padding: 2px 4px; border-bottom: 1px solid var(--mp-line); }
 .cuTabla td + td, .cuTabla th + th { text-align: right; font-variant-numeric: tabular-nums; }
+.cuTabla tr.cuTot td { border-top: 2px solid var(--mp-line); border-bottom: 0; }
+#cuentaCuerpo .cdOk { color: var(--mp-teal-text); font-weight: 600; }
+#cuentaCuerpo .cdMal { color: #a33; font-weight: 600; }
 body.touch #cuentaBox { right: 8px; top: 76px; width: min(380px, calc(100vw - 16px)); }
 body.touch #cuentaCab button { width: 34px; height: 34px; }
 

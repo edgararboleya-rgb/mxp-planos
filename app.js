@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.I';
+  var APP_VERSION = 'v34.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11107,6 +11107,11 @@
       return o;
     }).filter(function (o) { return o.nom; }).slice(0, 40);
   }
+  function cuentaNombresRepetidos() {
+    var v = {}, out = [];
+    catsCount().forEach(function (c) { var k = normTxt2(c.nom); if (!k) return; v[k] = (v[k] || 0) + 1; if (v[k] === 2) out.push(c.nom); });
+    return out;
+  }
   /* El rectángulo entero del plano de fondo (para «toda la hoja»). */
   function cuentaRectHoja() {
     var bg = state.bg; if (!bg || !bg.url) return null;
@@ -11238,15 +11243,15 @@
     function enMuestra(m) {
       return muestras.some(function (r) { var mx = (r.x1 - r.x0) * 0.2 + 2, my = (r.y1 - r.y0) * 0.2 + 2; return m.x >= r.x0 - mx && m.x <= r.x1 + mx && m.y >= r.y0 - my && m.y <= r.y1 + my; });
     }
-    var out = [], vistas = [], enLey = 0, dobles = 0, yaEstaban = 0;   // vistas: las que ya estaban, para que sus otras vistas del solape no se cuenten otra vez
+    var out = [], vistas = [], enLey = 0, dobles = 0, yaEstaban = 0, yaPorCat = {};   // vistas: las que ya estaban, para que sus otras vistas del solape no se cuenten otra vez
     marcas.slice().sort(function (a, b) { return b.conf - a.conf; }).forEach(function (m) {
       if (enMuestra(m)) { enLey++; return; }
       var mismaPieza = function (q) { return q.cat === m.cat && q.losa !== m.losa && Math.hypot(q.x - m.x, q.y - m.y) <= R; };
       if (out.some(mismaPieza) || vistas.some(mismaPieza)) { dobles++; return; }
-      if (state.counts.some(function (q) { return q.cat === m.cat && Math.hypot(q.x - m.x, q.y - m.y) <= R; })) { yaEstaban++; vistas.push(m); return; }
+      if (state.counts.some(function (q) { return q.cat === m.cat && Math.hypot(q.x - m.x, q.y - m.y) <= R; })) { yaEstaban++; yaPorCat[m.cat] = (yaPorCat[m.cat] || 0) + 1; vistas.push(m); return; }
       out.push(m);
     });
-    return { marcas: out, enLey: enLey, dobles: dobles, yaEstaban: yaEstaban };
+    return { marcas: out, enLey: enLey, dobles: dobles, yaEstaban: yaEstaban, yaPorCat: yaPorCat };
   }
   function cuentaTermina() {
     var C = cuenta; if (!C) return;
@@ -11267,7 +11272,8 @@
     C.nuevas = nuevas;
     var porCat = {}, hoja = conteoDeHoja();
     dep.marcas.forEach(function (m) { var e = porCat[m.cat] = porCat[m.cat] || { n: 0, dud: 0 }; e.n++; if (m.conf < CUENTA_DUDA) e.dud++; });
-    C.resumen = catsCount().map(function (c) { var e = porCat[c.id]; return { id: c.id, nom: c.nom, n: e ? e.n : 0, dud: e ? e.dud : 0, total: hoja[c.id] || 0 }; }).filter(function (r) { return r.n || r.total; })
+    // vio = lo que el cerebro contó de verdad (nuevas + las que ya estaban y volvió a ver): es contra lo que se mide
+    C.resumen = catsCount().map(function (c) { var e = porCat[c.id], ya = (dep.yaPorCat || {})[c.id] || 0; return { id: c.id, nom: c.nom, n: e ? e.n : 0, dud: e ? e.dud : 0, total: hoja[c.id] || 0, vio: (e ? e.n : 0) + ya }; }).filter(function (r) { return r.n || r.total; })
       .sort(function (a, b) { return b.n - a.n; });
     var dud = dep.marcas.filter(function (m) { return m.conf < CUENTA_DUDA; }).length;
     pintaCuenta();
@@ -11323,6 +11329,8 @@
       var nCats = catsCount().length, rH = cuentaRectHoja(), losasH = rH ? cuentaLosas(rH) : null, nL = losasH ? losasH.length : 0;
       h += '<div class="bMuted">El cerebro mira la hoja por <b>losas</b> y marca cada símbolo de tus <b>' + nCats + ' categoría' + (nCats === 1 ? '' : 's') + '</b>. Las marcas entran al Count; las <b>punteadas</b> son las dudosas: míralas primero.</div>';
       if (!nCats) h += '<div class="bMuted" style="color:#a33">Sin categorías no hay nombres que contar: <b>Count ▾ → Leer la leyenda</b>.</div>';
+      var rep = cuentaNombresRepetidos();
+      if (rep.length) h += '<div class="bMuted" style="color:#a33">⚠ Dos categorías con el <b>mismo nombre</b>: ' + rep.map(function (n) { return '«' + esc(n) + '»'; }).join(', ') + '. El cerebro copia nombres y no las distingue: todo lo que cuente cae en UNA. Renómbrale una antes (Count ▾ → Más… → Renombrar) y dile el tag que las diferencia.</div>';
       else if (nCats > 40) h += '<div class="muted small">Solo van las 40 primeras categorías (tope del cerebro).</div>';
       h += '<button id="cuTodo" style="width:100%;margin-top:6px"' + (nCats && nL ? '' : ' disabled') + '>Contar toda la hoja' + (nL ? ' <span class="muted">· ' + nL + ' losa' + (nL === 1 ? '' : 's') + ' · ≈ $' + (nL * 0.18).toFixed(2) + '</span>' : '') + '</button>';
       h += '<button id="cuZona" style="width:100%;margin-top:4px"' + (nCats ? '' : ' disabled') + '>Encerrar una zona <span class="muted">· dos toques, esquina y esquina</span></button>';
@@ -11343,9 +11351,22 @@
     var dudosas = C.nuevas ? state.counts.filter(function (q) { return C.nuevas.indexOf(q.id) >= 0 && q.ia != null && q.ia < CUENTA_DUDA; }) : [];
     h += '<div class="vN"><b>' + nN + '</b> marca(s) nuevas' + (dudosas.length ? ' · <b>' + dudosas.length + '</b> dudosa(s)' : '') + (C.cancel ? ' <span class="muted">· parado en la losa ' + C.hechas + ' de ' + C.losas.length + '</span>' : '') + '</div>';
     if (C.resumen && C.resumen.length) {
-      h += '<table class="cuTabla"><tr><th>Categoría</th><th>Nuevas</th><th>Dudosas</th><th>Hoja</th></tr>';
-      C.resumen.forEach(function (r) { h += '<tr><td>' + esc(r.nom) + '</td><td>' + r.n + '</td><td>' + (r.dud || '') + '</td><td>' + r.total + '</td></tr>'; });
+      /* MEDIR (18/09): «hasta que el nivel de error sea mínimo, un 1 o 2 %».
+         Al lado de lo que vio el cerebro va lo que Edgar contó a mano, y el
+         error sale solo. «Vio» son las marcas que el cerebro contó de verdad
+         (las nuevas y las que ya estaban y volvió a encontrar); «Hoja» es todo
+         lo que hay ahora en la hoja. Se mide contra «Vio». */
+      C.tu = C.tu || {};
+      h += '<table class="cuTabla" id="cuTabla"><tr><th>Categoría</th><th title="Marcas nuevas de esta pasada">Nuevas</th><th>Dudosas</th><th title="Lo que el cerebro contó: nuevas + las que ya estaban y volvió a ver">Vio</th><th title="Tu conteo a mano, para medir el error">Tú</th><th>Error</th></tr>';
+      C.resumen.forEach(function (r) {
+        var tu = C.tu[r.id];
+        h += '<tr data-id="' + esc(r.id) + '"><td>' + esc(r.nom) + '</td><td>' + r.n + '</td><td>' + (r.dud || '') + '</td><td>' + r.vio + '</td>' +
+          '<td><input type="number" class="cuTu" data-id="' + esc(r.id) + '" min="0" step="1" value="' + (tu != null ? esc(tu) : '') + '" style="width:3.6rem;font:inherit;padding:1px 4px;border:1px solid var(--mp-line);border-radius:6px;text-align:right"></td>' +
+          '<td class="cuErr">' + cuentaErrorTxt(r.vio, tu) + '</td></tr>';
+      });
+      h += '<tr class="cuTot"><td><b>Total</b></td><td>' + C.resumen.reduce(function (a, r) { return a + r.n; }, 0) + '</td><td></td><td id="cuVioTot">' + C.resumen.reduce(function (a, r) { return a + r.vio; }, 0) + '</td><td id="cuTuTot"></td><td id="cuErrTot"></td></tr>';
       h += '</table>';
+      h += '<div class="row"><button id="cuCopia" style="flex:1" title="Copia la tabla como texto para mandarla">Copiar la medición</button></div>';
     }
     var quitadas = [];
     if (dep.yaEstaban) quitadas.push(dep.yaEstaban + ' ya estaban contadas');
@@ -11370,8 +11391,61 @@
     h += '<div class="muted small" style="margin-top:4px">Ctrl+Z quita TODAS las de esta pasada. Lo que ya estaba contado no se duplicó.</div>';
     c.innerHTML = h; enganchaCuentaBotones();
   }
+  function cuentaErrorTxt(vio, tu) {
+    if (tu == null || tu === '' || !isFinite(+tu)) return '<span class="muted">—</span>';
+    var t = +tu, d = vio - t;
+    if (!t) return d ? '<span class="cdMal">+' + d + '</span>' : '<span class="cdOk">0</span>';
+    var pc = Math.round(Math.abs(d) / t * 1000) / 10;
+    return '<span class="' + (pc <= 2 ? 'cdOk' : 'cdMal') + '">' + (d > 0 ? '+' : '') + d + ' (' + pc + ' %)</span>';
+  }
+  function cuentaMedicionTotales() {
+    var C = cuenta; if (!C || !C.resumen) return;
+    var vio = 0, tu = 0, hay = false;
+    C.resumen.forEach(function (r) { var t = C.tu[r.id]; if (t != null && t !== '' && isFinite(+t)) { hay = true; vio += r.vio; tu += +t; } });
+    var eT = $('#cuTuTot'), eE = $('#cuErrTot');
+    if (eT) eT.textContent = hay ? tu : '';
+    if (eE) eE.innerHTML = hay ? cuentaErrorTxt(vio, tu) : '';
+  }
+  /* La medición como texto plano: para pegarla en el chat tal cual. */
+  function cuentaMedicionTexto() {
+    var C = cuenta; if (!C || !C.resumen) return '';
+    var sh = (state.sheets || [])[state.curSheet], hoja = sh && sh.no ? sh.no : ('hoja ' + (state.curSheet + 1));
+    var L = ['MEDICIÓN DEL CONTEO — ' + hoja + ' — ' + new Date().toISOString().slice(0, 10) + (C.modelo ? ' — ' + C.modelo : ''),
+             'categoría | cerebro vio | tú | diferencia | dudosas'];
+    var vio = 0, tu = 0, hay = false;
+    C.resumen.forEach(function (r) {
+      var t = C.tu[r.id], tt = (t != null && t !== '' && isFinite(+t)) ? +t : null;
+      if (tt != null) { hay = true; vio += r.vio; tu += tt; }
+      L.push(r.nom + ' | ' + r.vio + ' | ' + (tt != null ? tt : '?') + ' | ' + (tt != null ? ((r.vio - tt > 0 ? '+' : '') + (r.vio - tt)) : '?') + ' | ' + (r.dud || 0));
+    });
+    if (hay) { var d = vio - tu; L.push('TOTAL | ' + vio + ' | ' + tu + ' | ' + (d > 0 ? '+' : '') + d + (tu ? ' (' + (Math.round(Math.abs(d) / tu * 1000) / 10) + ' %)' : '') + ' | ' + C.resumen.reduce(function (a, r) { return a + (r.dud || 0); }, 0)); }
+    var dep = C.dep || {};
+    L.push('no puestas: ' + (dep.yaEstaban || 0) + ' ya estaban · ' + (dep.dobles || 0) + ' dobles del solape · ' + (dep.enLey || 0) + ' en la leyenda');
+    L.push('losas ' + C.losas.length + ' · ' + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in + '/' + C.uso.out + ' tokens ≈ $' + cuentaCosto(C.uso, C.modelo).toFixed(2));
+    if (C.dudas.length) L.push('el cerebro dice: ' + C.dudas.slice(0, 8).join(' · '));
+    return L.join('\n');
+  }
+  window.__cuentaMedicion = cuentaMedicionTexto;
   function enganchaCuentaBotones() {
     var b;
+    var tabla = $('#cuTabla');
+    if (tabla) {
+      tabla.addEventListener('input', function (ev) {
+        var t = ev.target; if (!t.classList || !t.classList.contains('cuTu') || !cuenta) return;
+        cuenta.tu = cuenta.tu || {}; cuenta.tu[t.dataset.id] = t.value;
+        var r = (cuenta.resumen || []).filter(function (x) { return x.id === t.dataset.id; })[0];
+        var celda = t.closest('tr') && t.closest('tr').querySelector('.cuErr');
+        if (r && celda) celda.innerHTML = cuentaErrorTxt(r.vio, t.value);
+        cuentaMedicionTotales();
+      });
+      cuentaMedicionTotales();
+    }
+    if ((b = $('#cuCopia'))) b.addEventListener('click', function () {
+      var txt = cuentaMedicionTexto();
+      var listo = function () { setHint('✔ Medición copiada: pégala en el chat'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(listo, function () { uiAlert(txt); });
+      else uiAlert(txt);
+    });
     if ((b = $('#cuTodo'))) b.addEventListener('click', function () { var r = cuentaRectHoja(); if (r) cuentaArranca(r); });
     if ((b = $('#cuZona'))) b.addEventListener('click', function () { setTool('cuenta'); setHint(HINTS.cuenta); });
     if ((b = $('#cuCancela'))) b.addEventListener('click', cuentaCancela);
