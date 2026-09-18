@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.D';
+  var APP_VERSION = 'v34.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -12587,7 +12587,7 @@
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
         sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad&order=orden'),
-        sbFetchTodo('/rest/v1/alias_takeoff?select=alias,item,factor&order=alias'),
+        sbFetchTodo('/rest/v1/alias_takeoff?select=*&order=alias'),
         // las recetas, para las categorías que son un PUNTO COMPLETO
         sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden').then(null, function () { return []; }),
         // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
@@ -12602,7 +12602,7 @@
         }
         var catByNorm = {}; cat.forEach(function (c) { catByNorm[normTxt2(c.item)] = c; });
         var aliasByNorm = {}; alias.forEach(function (a) { aliasByNorm[normTxt2(a.alias)] = a; });
-        var mapped = {}, unmapped = [], recetas = {}, recSin = [], luces = [];
+        var mapped = {}, unmapped = [], recetas = {}, recSin = [], luces = [], porAlias = [];
         entries.forEach(function (e) {
           // PUNTO COMPLETO: no es un renglón del catálogo, es una receta × cantidad
           if (e.receta) {
@@ -12616,6 +12616,22 @@
           }
           var n = normTxt2(e.name), target = null, factor = 1;
           var al = aliasByNorm[n];
+          /* (v34.E, 18/09) EL ALIAS PUEDE APUNTAR A UNA RECETA, no solo a un
+             ítem suelto. Es el arreglo de los $100.000 de Nicklaus: 95
+             receptáculos llegaron al estimador como UN ítem residencial pelado
+             —sin caja, sin anillo, sin placa, sin conectores, sin wirenuts—
+             porque el alias solo sabía apuntar a `catalogo_items`. Marcar cada
+             categoría a mano como «punto completo» no es práctico (Edgar:
+             «no lo veo práctico»), así que se dice UNA vez por herramienta de
+             Bluebeam, en la tabla de alias, y ya vale para todos los planos. */
+          if (al && al.receta) {
+            var enAl = ensByNorm2[normTxt2(al.receta)];
+            if (!enAl) { recSin.push(al.receta + ' (' + e.qty + ' — el alias «' + e.name + '» apunta ahí y esa receta no existe)'); return; }
+            var kAl = enAl.id + '\u0001' + (al.receta_full ? '1' : '0');
+            recetas[kAl] = (recetas[kAl] || 0) + e.qty;
+            porAlias.push({ name: e.name, qty: e.qty, receta: al.receta, full: !!al.receta_full });
+            return;
+          }
           // por ALIAS. La auditoría del catálogo (16/09) pilló que esta ruta no
           // dividía pies entre mil: 500 ft de 14/4 FPL medidos en el plano entraban
           // como 500 MLF ($92.000). Regla: si el alias trae su propio factor (≠ 1),
@@ -12654,6 +12670,13 @@
           var i = kE.lastIndexOf('\u0001'), id = kE.slice(0, i), full = kE.slice(i + 1) === '1';
           return { ensamble_id: isNaN(+id) ? id : +id, cantidad: recetas[kE], sin_lineales: !full };
         });
+        /* CAJAS DOS VECES (18/09). Si hay puntos completos —que ya traen su
+           caja, su anillo y su tapa— y ADEMÁS una categoría de cajas contada
+           aparte, esas cajas se pagan dos veces. En Nicklaus eran 162. No se
+           decide por Edgar: se le avisa con el número delante. */
+        var cajasSueltas = items.filter(function (i) { return /\bBOX\b|\bCAJA\b/i.test(i.item) && !/BLANK|COVER|HANGER|TAPA/i.test(i.item); });
+        var avisoCajas = (Object.keys(recetas).length && cajasSueltas.length)
+          ? cajasSueltas.map(function (i) { return i.item + ' ×' + Math.round(i.cantidad); }).join(', ') : '';
         var nPuntos = Object.keys(recetas).reduce(function (a, k) { return a + recetas[k]; }, 0);
         var nFull = ensRows.filter(function (r) { return !r.sin_lineales; }).reduce(function (a, r) { return a + r.cantidad; }, 0);
         if (!items.length && !ensRows.length) {
@@ -12710,6 +12733,8 @@
             '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (sinColumnaLineal ? '\n\n⚠ El estimador aún no tiene la columna "sin_lineales" en estimado_ensambles: las recetas fueron CON su tubo y su cable, así que ese material está DOS VECES. SQL listo en docs/sql/e17-punto-completo.sql.' : '') +
+            (porAlias.length ? '\n\n🔁 CATEGORÍAS QUE YA SABEN SU RECETA (por la tabla de alias — no hay que marcarlas una por una):\n• ' + porAlias.map(function (a) { return a.name + ' ×' + a.qty + ' → ' + a.receta + (a.full ? ' (con su tubo)' : ''); }).join('\n• ') : '') +
+            (avisoCajas ? '\n\n⚠ CAJAS QUE PUEDEN IR DOS VECES: mandaste puntos completos (cada uno trae su caja, su anillo y su tapa) y además estas cajas contadas aparte:\n• ' + avisoCajas + '\nSi esas cajas son las de los puntos, bórralas del estimado.' : '') +
             (luces.length ? '\n\n💡 LUMINARIAS QUE PONE OTRO — fueron como SOLO INSTALACIÓN (la mano, el whip, la caja; la luz no):\n• ' + luces.map(function (l) { return l.name + ' ×' + l.qty + ' → ' + l.receta; }).join('\n• ') + '\nY la luz en sí, un renglón «COTIZACIÓN PENDIENTE — …» por modelo en $0: cuando llegue la cuota, pon ahí el precio de cada una.' : '') +
             (recSin.length ? '\n\n⚠ RECETAS QUE NO EXISTEN (no se enviaron):\n• ' + recSin.join('\n• ') : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
