@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.G';
+  var APP_VERSION = 'v34.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5356,6 +5356,7 @@
     match: 'COPIAR FORMATO: toca la marca cuyo aspecto quieres copiar y después las que quieras dejar iguales · SHIFT+toque cambia el origen · Esc para salir',
     vsearch: 'BUSCAR IGUALES: encierra en un marco UN símbolo del plano del ingeniero (dos toques, esquina y esquina) y te busco todos los que se ven igual',
     leyenda: 'LEER LA LEYENDA: encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero (solo la tabla) y el cerebro te saca las categorías del Count ya nombradas',
+    cuenta: 'CUÉNTAME LOS DEVICES: encierra con dos toques la zona del plano (esquina y esquina) y el cerebro marca cada símbolo de tus categorías · Esc para salir',
     count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
@@ -5405,6 +5406,7 @@
     if (t !== 'vsearch' && visual) { var vb = $('#visualBox'); if (vb) vb.classList.add('oculto'); visual = null; var gv = document.getElementById('gVisual'); if (gv) gv.innerHTML = ''; }
     // la leyenda NO se cierra al cambiar de herramienta: la lista tarda 30-60 s en llegar y mientras se sigue trabajando
     if (t !== 'leyenda' && drawing && drawing.mode === 'leyenda') { drawing = null; G.prev.innerHTML = ''; }
+    if (t !== 'cuenta' && drawing && drawing.mode === 'cuenta') { drawing = null; G.prev.innerHTML = ''; }
     /* Lo pendiente del cofre solo vale para la herramienta que se encendió con
        él: si cambias de herramienta por otro camino, se olvida (si no, el
        siguiente texto saldría con el tamaño de la nota guardada). */
@@ -5667,6 +5669,10 @@
         if (drawing && drawing.mode === 'leyenda') { var aL = drawing.a; drawing = null; G.prev.innerHTML = ''; leyendaFin(aL, rawP); }
         else { drawing = { mode: 'leyenda', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente de la tabla'); }
         return;
+      case 'cuenta':
+        if (drawing && drawing.mode === 'cuenta') { var aC = drawing.a; drawing = null; G.prev.innerHTML = ''; cuentaFin(aC, rawP); }
+        else { drawing = { mode: 'cuenta', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente de la zona'); }
+        return;
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -5704,7 +5710,7 @@
         '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' + gp +
         '<text class="lbl" x="' + ((drawing.last[0] + b[0]) / 2 + 8) + '" y="' + ((drawing.last[1] + b[1]) / 2 - 8) + '" font-size="9" font-weight="bold">' + fmtFtIn(len) + '</text></g>';
       drawing.cursor = b;
-    } else if (drawing && (drawing.mode === 'vsearch' || drawing.mode === 'leyenda')) {
+    } else if (drawing && (drawing.mode === 'vsearch' || drawing.mode === 'leyenda' || drawing.mode === 'cuenta')) {
       var vx = Math.min(drawing.a[0], p[0]), vy = Math.min(drawing.a[1], p[1]);
       G.prev.innerHTML = '<g class="preview"><rect x="' + vx + '" y="' + vy + '" width="' + Math.abs(p[0] - drawing.a[0]) +
         '" height="' + Math.abs(p[1] - drawing.a[1]) + '" fill="rgba(11,132,255,.10)" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
@@ -9083,6 +9089,10 @@
       g += '<text x="' + c.x + '" y="' + (c.y + r * 0.38) + '" text-anchor="middle" font-size="' + (r * 1.15).toFixed(2) +
         '" font-weight="700" fill="#ffffff" style="paint-order:stroke" stroke="none">' + n + '</text>';
     }
+    // la puso el cerebro con poca confianza: anillo punteado, para mirarla primero
+    if (c.ia != null && c.ia < CUENTA_DUDA) {
+      g += '<circle class="duda" cx="' + c.x + '" cy="' + c.y + '" r="' + (r * 1.55).toFixed(2) + '" fill="none" stroke="' + col + '" stroke-width="' + (r * 0.2).toFixed(2) + '" stroke-dasharray="' + (r * 0.5).toFixed(2) + ' ' + (r * 0.38).toFixed(2) + '"/>';
+    }
     return g + '</g>';
   }
   function renderConteo() {
@@ -10089,18 +10099,36 @@
   function recorteFondo(r, cb) {
     var bg = state.bg;
     if (!bg || !bg.url) { cb(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
-    var x0 = Math.max(bg.x, Math.min(r.x0, r.x1)), y0 = Math.max(bg.y, Math.min(r.y0, r.y1));
-    var x1 = Math.min(bg.x + bg.w, Math.max(r.x0, r.x1)), y1 = Math.min(bg.y + bg.h, Math.max(r.y0, r.y1));
-    var W = x1 - x0, H = y1 - y0;
-    if (W < 2 || H < 2) { cb(null, 'El marco salió vacío o fuera del plano. Encierra la tabla de la leyenda.'); return; }
+    var q = rectEnFondo(r);
+    if (!q) { cb(null, 'El marco salió vacío o fuera del plano. Encierra la tabla de la leyenda.'); return; }
     // una hoja ARCH D entera son 36": a 1568 px la letra de la leyenda sale de
     // 5 px y no se lee. Se pide la TABLA, no la hoja.
-    var pulgPapel = bg.paperW && bg.w ? Math.max(W, H) * (bg.paperW / bg.w) : null;
+    var pulgPapel = bg.paperW && bg.w ? Math.max(q.W, q.H) * (bg.paperW / bg.w) : null;
     if (pulgPapel !== null && pulgPapel > 26) {
       cb(null, 'Ese marco abarca ' + Math.round(pulgPapel) + '" de papel: es la hoja casi entera y la letra saldría ilegible. Encierra SOLO la tabla de la leyenda (suele medir 6" a 12").');
       return;
     }
-    var MAX = 1568, k = MAX / Math.max(W, H);
+    fondoRecorte(r, 1568, cb);
+  }
+  /* r en mundo, recortado al plano de fondo; null si queda vacío. */
+  function rectEnFondo(r) {
+    var bg = state.bg; if (!bg || !r) return null;
+    var x0 = Math.max(bg.x, Math.min(r.x0, r.x1)), y0 = Math.max(bg.y, Math.min(r.y0, r.y1));
+    var x1 = Math.min(bg.x + bg.w, Math.max(r.x0, r.x1)), y1 = Math.min(bg.y + bg.h, Math.max(r.y0, r.y1));
+    var W = x1 - x0, H = y1 - y0;
+    if (!(W >= 2) || !(H >= 2)) return null;
+    return { x0: x0, y0: y0, x1: x1, y1: y1, W: W, H: H };
+  }
+  /* El recorte en sí, a maxPx de lado largo: del PDF vivo si lo hay (nítido),
+     del raster de fondo si no. Lo usan la leyenda (una tabla) y el conteo con
+     el cerebro (una losa tras otra). cb(rec) / cb(null, mensaje). */
+  function fondoRecorte(r, maxPx, cb) {
+    var bg = state.bg;
+    if (!bg || !bg.url) { cb(null, 'Esta hoja no tiene plano de fondo.'); return; }
+    var q = rectEnFondo(r);
+    if (!q) { cb(null, 'El marco quedó vacío o fuera del plano.'); return; }
+    var x0 = q.x0, y0 = q.y0, x1 = q.x1, y1 = q.y1, W = q.W, H = q.H;
+    var MAX = maxPx || 1568, k = MAX / Math.max(W, H);
     var cw = Math.max(1, Math.round(W * k)), ch = Math.max(1, Math.round(H * k));
     var rec = pdfLive[state.curSheet];
     function listo(cv) {
@@ -11026,6 +11054,363 @@
     var bc = $('#leyCerrar'); if (bc) bc.addEventListener('click', cierraLey);
   }
   enganchaLey();
+
+  /* ================= CUÉNTAME LOS DEVICES — el cerebro cuenta, Edgar revisa (E27, 18/09) =================
+     Edgar, desde el principio: «que yo seleccione el plano y te diga: cuéntame
+     los devices, y que tú me los cuentes y yo revise… hasta que el nivel de
+     error sea mínimo, un 1 o 2 %». Y el 17/09: «la IA se gasta donde hace falta
+     de verdad: contar los devices en el plano».
+
+     Cómo: la zona (o la hoja entera) se parte en LOSAS de ~9" de papel, cada
+     losa va al cerebro a 1568 px (170 px por pulgada: un receptáculo mide 25 px
+     y se distingue del quadruplex) junto con la lista de categorías del
+     proyecto —su nombre, su tag y su dibujito de la leyenda—, y vuelve una
+     marca por cada aparición con su confianza. Las marcas entran al Count de
+     verdad (un solo Ctrl+Z las quita todas); las de menos de 70 % salen con un
+     anillo punteado para mirarlas primero. Lo que ya estaba contado no se
+     duplica, y lo que cae en el solape de dos losas se funde.
+
+     Costo, medido en tokens por el propio worker: ≈ $0,15–0,20 por losa con
+     Fable; una ARCH D entera son 12 losas. El modelo lo elige el worker por
+     tarea (conteo → Fable). */
+  var cuenta = null;   // { rect, hoja, losas, hechas, corriendo, marcas, dudas, fallos, uso, modelo, t0, enVuelo, cancel, nuevas, resumen }
+  var CUENTA_LOSA_PULG = 9;    // pulgadas de papel por losa (lado largo)
+  var CUENTA_SOLAPE = 0.08;    // solape entre losas: lo del borde se ve entero en alguna
+  var CUENTA_PX = 1568;        // lado largo de la imagen que se manda (lo que la API acepta sin encoger)
+  var CUENTA_DUDA = 70;        // por debajo, la marca sale punteada
+  var CUENTA_PARALELO = 2;     // losas en vuelo a la vez
+  var CUENTA_PRECIO = { 'claude-fable-5-1': [10, 50], 'claude-opus-5': [5, 25], 'claude-sonnet-5': [2, 10], 'claude-haiku-4-5-20251001': [1, 5] };   // $ por millón, entrada/salida
+
+  function abreCuenta() { var b = $('#cuentaBox'); if (b) b.classList.remove('oculto'); }
+  function cierraCuenta() {
+    if (cuenta && cuenta.enVuelo) cuentaCancela();
+    var b = $('#cuentaBox'); if (b) b.classList.add('oculto');
+    cuenta = null;
+    if (tool === 'cuenta') setTool('select');
+  }
+  /* Las categorías del proyecto tal como se le dicen al cerebro: el nombre que
+     tiene que copiar letra por letra, el tag del ingeniero y el dibujito de la
+     leyenda (imagen de referencia). Máximo 40: es el tope del worker. */
+  function cuentaFamilia(c) {
+    var k = String(codigoDeCat(c) || '');
+    if (/^11/.test(k)) return 'luminaria / exit';
+    if (/^13/.test(k)) return 'baja tensión: data, fire alarm, CCTV';
+    if (/^05/.test(k)) return 'panel / equipo';
+    if (/^10/.test(k)) return 'dispositivo: receptáculo o switch';
+    if (/^08/.test(k)) return 'caja';
+    return '';
+  }
+  function cuentaSimbolos() {
+    return catsCount().map(function (c) {
+      var o = { nom: String(c.nom || '').trim().slice(0, 120), tag: String(c.tag || '').slice(0, 12), familia: cuentaFamilia(c) };
+      if (c.glifo && /^data:image\/(png|jpeg);base64,/.test(c.glifo) && c.glifo.length < 12000) o.glifo = c.glifo;
+      return o;
+    }).filter(function (o) { return o.nom; }).slice(0, 40);
+  }
+  /* El rectángulo entero del plano de fondo (para «toda la hoja»). */
+  function cuentaRectHoja() {
+    var bg = state.bg; if (!bg || !bg.url) return null;
+    return { x0: bg.x, y0: bg.y, x1: bg.x + bg.w, y1: bg.y + bg.h };
+  }
+  /* Partir la zona en losas. Cada eje se reparte en n tramos iguales de lado
+     `lado` que se solapan al menos CUENTA_SOLAPE. Sin papel conocido, la losa
+     es un cuarto del lado largo del plano. */
+  function cuentaLosas(r) {
+    var bg = state.bg; if (!bg || !bg.url) return null;
+    var q = rectEnFondo(r); if (!q) return null;
+    var ppu = bg.paperW && bg.w ? bg.paperW / bg.w : null;   // pulgadas de papel por unidad de mundo
+    var lado = ppu ? CUENTA_LOSA_PULG / ppu : Math.max(bg.w, bg.h) / 4;
+    lado = Math.max(40, Math.min(lado, Math.max(q.W, q.H)));
+    function ejes(a, L) {
+      if (L <= lado * 1.02) return [[a, a + L]];
+      var n = Math.ceil((L - lado) / (lado * (1 - CUENTA_SOLAPE))) + 1, paso = (L - lado) / (n - 1), out = [];
+      for (var i = 0; i < n; i++) out.push([a + i * paso, a + i * paso + lado]);
+      return out;
+    }
+    var xs = ejes(q.x0, q.W), ys = ejes(q.y0, q.H), out = [];
+    ys.forEach(function (y) { xs.forEach(function (x) { out.push({ x0: x[0], y0: y[0], x1: x[1], y1: y[1] }); }); });
+    return out;
+  }
+  /* Radio de «es la misma pieza»: 0,3" de papel (un receptáculo dibujado mide
+     ~0,2"). Sin papel, el 2 % de la losa. */
+  function cuentaRadio() {
+    var bg = state.bg, ppu = bg && bg.paperW && bg.w ? bg.paperW / bg.w : null;
+    if (ppu) return 0.3 / ppu;
+    var L = cuenta && cuenta.losas && cuenta.losas[0];
+    return L ? (L.x1 - L.x0) * 0.02 : 6;
+  }
+  function cuentaCosto(uso, modelo) {
+    var p = CUENTA_PRECIO[modelo] || CUENTA_PRECIO['claude-fable-5-1'];
+    return (uso.in / 1e6) * p[0] + (uso.out / 1e6) * p[1];
+  }
+
+  /* --- arrancar --- */
+  function cuentaArranca(r) {
+    if (cuenta && cuenta.enVuelo) { setHint('Ya hay un conteo en marcha — espera a que termine o cancélalo en el panel'); return; }
+    abreCuenta();
+    var c = cerebroCfg();
+    if (!c.url) { pintaCuenta(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!state.bg || !state.bg.url) { pintaCuenta(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
+    var simb = cuentaSimbolos();
+    if (!simb.length) { pintaCuenta(null, 'Primero los nombres: Count ▾ → Leer la leyenda (o crea las categorías). Sin categorías el cerebro no sabe qué contar.'); return; }
+    var losas = cuentaLosas(r);
+    if (!losas || !losas.length) { pintaCuenta(null, 'La zona quedó vacía o fuera del plano. Encierra una parte del plano de fondo.'); return; }
+    if (!layerVisible.count) setHint('⚠ La capa Count está apagada: enciéndela en Capas para ver lo que marque el cerebro');
+    var porNom = {};
+    catsCount().forEach(function (k) { porNom[normTxt2(k.nom)] = k.id; });
+    cuenta = { rect: rectEnFondo(r), hoja: state.curSheet, losas: losas, hechas: 0, corriendo: 0, sig: 0, marcas: [], dudas: [], fallos: [], uso: { in: 0, out: 0 },
+               modelo: '', t0: Date.now(), enVuelo: true, cancel: false, nuevas: null, resumen: null, simb: simb, porNom: porNom, nSimb: catsCount().length };
+    pintaCuenta();
+    cuentaLanza();
+  }
+  function cuentaLanza() {
+    if (!cuenta || cuenta.cancel) return;
+    while (cuenta.corriendo < CUENTA_PARALELO && cuenta.sig < cuenta.losas.length) {
+      cuentaLosa(cuenta.sig++);
+    }
+    if (!cuenta.corriendo && cuenta.hechas >= cuenta.losas.length) cuentaTermina();
+  }
+  function cuentaLosa(i, reintento) {
+    var C = cuenta, L = C.losas[i];
+    C.corriendo++;
+    if (!reintento) pintaCuenta();
+    function hecho() {
+      if (cuenta !== C || C.cancel) return;
+      C.corriendo--; C.hechas++;
+      setHint('Cerebro contando: losa ' + C.hechas + ' de ' + C.losas.length + ' · ' + C.marcas.length + ' marca(s) hasta ahora');
+      pintaCuenta(); cuentaLanza();
+    }
+    function falla(msg) {
+      if (cuenta !== C || C.cancel) return;
+      if (!reintento) { setTimeout(function () { if (cuenta === C && !C.cancel) { C.corriendo--; cuentaLosa(i, true); } }, 1500); return; }
+      C.fallos.push('losa ' + (i + 1) + ': ' + msg);
+      hecho();
+    }
+    fondoRecorte(L, CUENTA_PX, function (rec, err) {
+      if (cuenta !== C || C.cancel) return;
+      if (!rec) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': ' + err); pintaCuenta(); cuentaLanza(); return; }
+      var b64 = rec.b64; rec.cv.width = 1; rec.cv.height = 1;
+      pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, conteo: { simbolos: C.simb, losa: i + 1, de: C.losas.length } }).then(function (d) {
+        if (cuenta !== C || C.cancel) return;
+        if (!d || d.error || !d.conteo) { falla((d && d.error) ? String(d.error).slice(0, 120) : 'el cerebro no contestó en formato de conteo (¿worker viejo? git pull · wrangler deploy)'); return; }
+        cuentaRecibeLosa(d, rec.rect, i);
+        hecho();
+      }, function (e) { falla('sin respuesta (' + (e && e.message ? e.message : 'red') + ')'); });
+    });
+  }
+  /* Una losa contestada: sus marcas a coordenadas de mundo, cada una a su
+     categoría por el NOMBRE (exacto; si no, el único que lo contiene). Lo que
+     no casa va a dudas, no al conteo: un nombre inventado no crea nada. */
+  function cuentaCatDe(simbolo) {
+    var n = normTxt2(simbolo).replace(/[.:;,]+$/, '');
+    if (!n) return null;
+    if (cuenta.porNom[n]) return cuenta.porNom[n];
+    var hay = Object.keys(cuenta.porNom).filter(function (k) { return k.indexOf(n) >= 0 || n.indexOf(k) >= 0; });
+    return hay.length === 1 ? cuenta.porNom[hay[0]] : null;
+  }
+  function cuentaRecibeLosa(d, R, i) {
+    var C = cuenta, K = d.conteo;
+    if (d.modelo) C.modelo = String(d.modelo);
+    if (d.uso) { C.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); C.uso.out += +d.uso.output_tokens || 0; }
+    var W = R.x1 - R.x0, H = R.y1 - R.y0, sinNombre = {};
+    (Array.isArray(K.marcas) ? K.marcas : []).slice(0, 500).forEach(function (m) {
+      if (!m) return;
+      var id = cuentaCatDe(m.simbolo);
+      if (!id) { var s = String(m.simbolo || '?').slice(0, 60); sinNombre[s] = (sinNombre[s] || 0) + 1; return; }
+      var mx = +m.x, my = +m.y;
+      if (!isFinite(mx) || !isFinite(my)) return;
+      mx = Math.max(0, Math.min(100, mx)); my = Math.max(0, Math.min(100, my));
+      var conf = isFinite(+m.confianza) ? Math.round(Math.max(0, Math.min(100, +m.confianza))) : 100;
+      var q = { x: R.x0 + mx / 100 * W, y: R.y0 + my / 100 * H, cat: id, conf: conf, losa: i };
+      if (m.nota) q.nota = String(m.nota).slice(0, 120);
+      C.marcas.push(q);
+    });
+    Object.keys(sinNombre).forEach(function (s) { C.dudas.push('«' + s + '» no es ninguna categoría del proyecto (' + sinNombre[s] + ' en la losa ' + (i + 1) + ') — si es un símbolo real, créala y vuelve a contar esa zona'); });
+    (Array.isArray(K.dudas) ? K.dudas : []).slice(0, 20).forEach(function (t) { var s = String(t || '').trim().slice(0, 160); if (s) C.dudas.push(s + ' (losa ' + (i + 1) + ')'); });
+  }
+  /* Depurar: fuera lo que cae en el dibujo de muestra de la leyenda; una sola
+     por pieza cuando dos losas la vieron en el solape; y nada que ya estuviera
+     contado (a mano o en una pasada anterior) se pone dos veces. */
+  function cuentaDepura(marcas) {
+    var R = cuentaRadio(), hoja = state.curSheet;
+    var muestras = catsCount().filter(function (c) { return c.moldeRect && (c.moldeHoja == null || c.moldeHoja === hoja); }).map(function (c) { return c.moldeRect; });
+    if (ley && ley.rect && (ley.hoja == null || ley.hoja === hoja)) muestras.push(ley.rect);
+    function enMuestra(m) {
+      return muestras.some(function (r) { var mx = (r.x1 - r.x0) * 0.2 + 2, my = (r.y1 - r.y0) * 0.2 + 2; return m.x >= r.x0 - mx && m.x <= r.x1 + mx && m.y >= r.y0 - my && m.y <= r.y1 + my; });
+    }
+    var out = [], vistas = [], enLey = 0, dobles = 0, yaEstaban = 0;   // vistas: las que ya estaban, para que sus otras vistas del solape no se cuenten otra vez
+    marcas.slice().sort(function (a, b) { return b.conf - a.conf; }).forEach(function (m) {
+      if (enMuestra(m)) { enLey++; return; }
+      var mismaPieza = function (q) { return q.cat === m.cat && q.losa !== m.losa && Math.hypot(q.x - m.x, q.y - m.y) <= R; };
+      if (out.some(mismaPieza) || vistas.some(mismaPieza)) { dobles++; return; }
+      if (state.counts.some(function (q) { return q.cat === m.cat && Math.hypot(q.x - m.x, q.y - m.y) <= R; })) { yaEstaban++; vistas.push(m); return; }
+      out.push(m);
+    });
+    return { marcas: out, enLey: enLey, dobles: dobles, yaEstaban: yaEstaban };
+  }
+  function cuentaTermina() {
+    var C = cuenta; if (!C) return;
+    C.enVuelo = false;
+    if (state.curSheet !== C.hoja) { C.fallos.push('cambiaste de hoja mientras contaba: las marcas eran de la hoja ' + (C.hoja + 1) + ' y no se pusieron'); C.nuevas = []; C.resumen = []; pintaCuenta(); return; }
+    var dep = cuentaDepura(C.marcas);
+    C.dep = dep;
+    var nuevas = [];
+    if (dep.marcas.length) {
+      pushUndo();
+      dep.marcas.forEach(function (m) {
+        var cM = { id: uid(), x: Math.round(m.x), y: Math.round(m.y), cat: m.cat, ia: m.conf };
+        if (m.nota) cM.iaNota = m.nota;
+        state.counts.push(cM); nuevas.push(cM.id);
+      });
+      renderConteo(); refreshCounts(); scheduleAutosave();
+    }
+    C.nuevas = nuevas;
+    var porCat = {}, hoja = conteoDeHoja();
+    dep.marcas.forEach(function (m) { var e = porCat[m.cat] = porCat[m.cat] || { n: 0, dud: 0 }; e.n++; if (m.conf < CUENTA_DUDA) e.dud++; });
+    C.resumen = catsCount().map(function (c) { var e = porCat[c.id]; return { id: c.id, nom: c.nom, n: e ? e.n : 0, dud: e ? e.dud : 0, total: hoja[c.id] || 0 }; }).filter(function (r) { return r.n || r.total; })
+      .sort(function (a, b) { return b.n - a.n; });
+    var dud = dep.marcas.filter(function (m) { return m.conf < CUENTA_DUDA; }).length;
+    pintaCuenta();
+    setHint('✔ Cerebro: ' + nuevas.length + ' marca(s) nuevas en ' + Math.round((Date.now() - C.t0) / 1000) + ' s' + (dud ? ' · ' + dud + ' dudosa(s) punteadas: míralas primero' : '') + (C.cancel ? ' · cancelado en la losa ' + C.hechas + ' de ' + C.losas.length : '') + ' · Ctrl+Z las quita todas');
+  }
+  function cuentaCancela() {
+    var C = cuenta; if (!C || !C.enVuelo) return;
+    C.cancel = true;      // las losas que lleguen después se ignoran
+    cuentaTermina();      // lo que ya llegó se depura y entra igual
+  }
+  /* Las dudosas de ESTA hoja (de esta pasada o de otra): quitarlas o darlas por buenas. */
+  function cuentaDudosas() { return state.counts.filter(function (q) { return q.ia != null && q.ia < CUENTA_DUDA; }); }
+  function cuentaQuitaDudosas() {
+    var d = cuentaDudosas(); if (!d.length) return 0;
+    pushUndo();
+    var ids = {}; d.forEach(function (q) { ids[q.id] = 1; });
+    state.counts = state.counts.filter(function (q) { return !ids[q.id]; });
+    renderConteo(); refreshCounts(); scheduleAutosave(); pintaCuenta();
+    setHint('✔ ' + d.length + ' dudosa(s) quitadas · Ctrl+Z las devuelve');
+    return d.length;
+  }
+  function cuentaAceptaDudosas() {
+    var d = cuentaDudosas(); if (!d.length) return 0;
+    pushUndo();
+    d.forEach(function (q) { q.ia = 100; delete q.iaNota; });
+    renderConteo(); refreshCounts(); scheduleAutosave(); pintaCuenta();
+    setHint('✔ ' + d.length + ' dudosa(s) dadas por buenas');
+    return d.length;
+  }
+  function cuentaQuitaUna(id) {
+    var n = state.counts.length;
+    pushUndo();
+    state.counts = state.counts.filter(function (q) { return q.id !== id; });
+    if (state.counts.length === n) { popUndoVacio(); return; }
+    renderConteo(); refreshCounts(); scheduleAutosave(); pintaCuenta();
+  }
+  function centraEn(x, y) {
+    try {
+      var w = $('#canvasWrap').getBoundingClientRect();
+      view.tx = w.width / 2 - x * view.z;
+      view.ty = w.height / 2 - y * view.z;
+      applyView();
+    } catch (e) {}
+  }
+
+  /* --- lo que se ve --- */
+  function pintaCuenta(estado, err) {
+    var c = $('#cuentaCuerpo'); if (!c) return;
+    if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="cuOtra" style="width:100%;margin-top:8px">Volver</button>'; enganchaCuentaBotones(); return; }
+    if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
+    var h = '';
+    if (!cuenta) {
+      var nCats = catsCount().length, rH = cuentaRectHoja(), losasH = rH ? cuentaLosas(rH) : null, nL = losasH ? losasH.length : 0;
+      h += '<div class="bMuted">El cerebro mira la hoja por <b>losas</b> y marca cada símbolo de tus <b>' + nCats + ' categoría' + (nCats === 1 ? '' : 's') + '</b>. Las marcas entran al Count; las <b>punteadas</b> son las dudosas: míralas primero.</div>';
+      if (!nCats) h += '<div class="bMuted" style="color:#a33">Sin categorías no hay nombres que contar: <b>Count ▾ → Leer la leyenda</b>.</div>';
+      else if (nCats > 40) h += '<div class="muted small">Solo van las 40 primeras categorías (tope del cerebro).</div>';
+      h += '<button id="cuTodo" style="width:100%;margin-top:6px"' + (nCats && nL ? '' : ' disabled') + '>Contar toda la hoja' + (nL ? ' <span class="muted">· ' + nL + ' losa' + (nL === 1 ? '' : 's') + ' · ≈ $' + (nL * 0.18).toFixed(2) + '</span>' : '') + '</button>';
+      h += '<button id="cuZona" style="width:100%;margin-top:4px"' + (nCats ? '' : ' disabled') + '>Encerrar una zona <span class="muted">· dos toques, esquina y esquina</span></button>';
+      var dud0 = cuentaDudosas().length;
+      if (dud0) h += '<div class="muted small" style="margin-top:6px">Quedan <b>' + dud0 + '</b> dudosa(s) en esta hoja. <button id="cuQuita" class="small">Quitarlas</button> <button id="cuAcepta" class="small">Darlas por buenas</button></div>';
+      c.innerHTML = h; enganchaCuentaBotones(); return;
+    }
+    var C = cuenta;
+    if (C.enVuelo) {
+      var pc = Math.round(C.hechas / Math.max(1, C.losas.length) * 100);
+      h += '<div class="vN"><b>Losa ' + Math.min(C.losas.length, C.hechas + C.corriendo) + ' de ' + C.losas.length + '</b> · ' + C.marcas.length + ' marca(s) hasta ahora</div>';
+      h += '<div class="cuBarra"><div style="width:' + pc + '%"></div></div>';
+      h += '<div class="muted small">Cada losa tarda 20–60 s. Puedes seguir trabajando en esta hoja; no cambies de hoja hasta que termine.</div>';
+      h += '<button id="cuCancela" style="width:100%;margin-top:6px">Parar aquí y quedarme con lo que llegó</button>';
+      c.innerHTML = h; enganchaCuentaBotones(); return;
+    }
+    var nN = C.nuevas ? C.nuevas.length : 0, dep = C.dep || { enLey: 0, dobles: 0, yaEstaban: 0 };
+    var dudosas = C.nuevas ? state.counts.filter(function (q) { return C.nuevas.indexOf(q.id) >= 0 && q.ia != null && q.ia < CUENTA_DUDA; }) : [];
+    h += '<div class="vN"><b>' + nN + '</b> marca(s) nuevas' + (dudosas.length ? ' · <b>' + dudosas.length + '</b> dudosa(s)' : '') + (C.cancel ? ' <span class="muted">· parado en la losa ' + C.hechas + ' de ' + C.losas.length + '</span>' : '') + '</div>';
+    if (C.resumen && C.resumen.length) {
+      h += '<table class="cuTabla"><tr><th>Categoría</th><th>Nuevas</th><th>Dudosas</th><th>Hoja</th></tr>';
+      C.resumen.forEach(function (r) { h += '<tr><td>' + esc(r.nom) + '</td><td>' + r.n + '</td><td>' + (r.dud || '') + '</td><td>' + r.total + '</td></tr>'; });
+      h += '</table>';
+    }
+    var quitadas = [];
+    if (dep.yaEstaban) quitadas.push(dep.yaEstaban + ' ya estaban contadas');
+    if (dep.dobles) quitadas.push(dep.dobles + ' vistas dos veces en el solape');
+    if (dep.enLey) quitadas.push(dep.enLey + ' eran el dibujo de la leyenda');
+    if (quitadas.length) h += '<div class="muted small">No se pusieron: ' + quitadas.join(' · ') + '.</div>';
+    if (dudosas.length) {
+      h += '<div class="muted small" style="margin-top:4px">Las dudosas, de menos a más segura. Toca una y el plano va hasta ella; la ✗ la quita.</div>';
+      h += '<div class="vLista" id="cuLista">';
+      dudosas.slice().sort(function (a, b) { return a.ia - b.ia; }).slice(0, 80).forEach(function (q) {
+        var ct = catCount(q.cat);
+        h += '<div class="vFila" data-id="' + esc(q.id) + '"><span class="vPc">' + q.ia + '%</span><span class="vTxt">' + esc(ct ? ct.nom : '?') + (q.iaNota ? ' <span class="muted">· ' + esc(q.iaNota) + '</span>' : '') + '</span><button class="vX" data-x="' + esc(q.id) + '" title="No es: quítala">✗</button></div>';
+      });
+      h += '</div>';
+      h += '<div class="row"><button id="cuQuita" style="flex:1">Quitar las dudosas</button><button id="cuAcepta" style="flex:1">Darlas por buenas</button></div>';
+    }
+    if (C.dudas.length) h += '<div class="muted small" style="margin-top:4px"><b>El cerebro dice:</b><br>' + C.dudas.slice(0, 12).map(function (t) { return '• ' + esc(t); }).join('<br>') + (C.dudas.length > 12 ? '<br>… y ' + (C.dudas.length - 12) + ' más' : '') + '</div>';
+    if (C.fallos.length) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + C.fallos.slice(0, 6).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
+    var $c = cuentaCosto(C.uso, C.modelo);
+    h += '<div class="muted small" style="margin-top:6px">' + (C.modelo ? esc(C.modelo) + ' · ' : '') + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in.toLocaleString() + ' / ' + C.uso.out.toLocaleString() + ' tokens ≈ $' + $c.toFixed(2) + '</div>';
+    h += '<button id="cuOtra" style="width:100%;margin-top:6px">Contar otra zona</button>';
+    h += '<div class="muted small" style="margin-top:4px">Ctrl+Z quita TODAS las de esta pasada. Lo que ya estaba contado no se duplicó.</div>';
+    c.innerHTML = h; enganchaCuentaBotones();
+  }
+  function enganchaCuentaBotones() {
+    var b;
+    if ((b = $('#cuTodo'))) b.addEventListener('click', function () { var r = cuentaRectHoja(); if (r) cuentaArranca(r); });
+    if ((b = $('#cuZona'))) b.addEventListener('click', function () { setTool('cuenta'); setHint(HINTS.cuenta); });
+    if ((b = $('#cuCancela'))) b.addEventListener('click', cuentaCancela);
+    if ((b = $('#cuQuita'))) b.addEventListener('click', cuentaQuitaDudosas);
+    if ((b = $('#cuAcepta'))) b.addEventListener('click', cuentaAceptaDudosas);
+    if ((b = $('#cuOtra'))) b.addEventListener('click', function () { cuenta = null; pintaCuenta(); setTool('cuenta'); });
+    var lista = $('#cuLista');
+    if (lista) lista.addEventListener('click', function (ev) {
+      var bx = ev.target.closest && ev.target.closest('.vX');
+      if (bx) { cuentaQuitaUna(bx.dataset.x); return; }
+      var fila = ev.target.closest && ev.target.closest('.vFila'); if (!fila) return;
+      var q = null; state.counts.forEach(function (m) { if (m.id === fila.dataset.id) q = m; });
+      if (q) { centraEn(q.x, q.y); sel = { kind: 'count', id: q.id }; selGroup = null; renderSel(); }
+    });
+  }
+  function cuentaFin(a, b) {
+    var r = { x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) };
+    cuentaArranca(r);
+  }
+  (function () {
+    var b = $('#cuentaBox'); if (!b) return;
+    arrastraPanel($('#cuentaCab'), b);
+    var bc = $('#cuentaCerrar'); if (bc) bc.addEventListener('click', cierraCuenta);
+  })();
+  window.__cuentaDbg = {
+    arranca: function (rect) { cuentaArranca(rect); },
+    todo: function () { var r = cuentaRectHoja(); if (r) cuentaArranca(r); return r; },
+    losas: function (rect) { return cuentaLosas(rect || cuentaRectHoja()); },
+    simbolos: cuentaSimbolos,
+    radio: cuentaRadio,
+    estado: function () { return cuenta ? { enVuelo: cuenta.enVuelo, hechas: cuenta.hechas, losas: cuenta.losas.length, marcas: cuenta.marcas.length, nuevas: cuenta.nuevas ? cuenta.nuevas.length : null, dudas: cuenta.dudas.slice(), fallos: cuenta.fallos.slice(), dep: cuenta.dep || null, resumen: cuenta.resumen, uso: cuenta.uso, modelo: cuenta.modelo, cancel: cuenta.cancel } : null; },
+    cancela: cuentaCancela,
+    dudosas: function () { return cuentaDudosas().map(function (q) { return { id: q.id, ia: q.ia, cat: q.cat }; }); },
+    quitaDudosas: cuentaQuitaDudosas,
+    aceptaDudosas: cuentaAceptaDudosas,
+    cierra: cierraCuenta,
+    pinta: function () { abreCuenta(); pintaCuenta(); },
+    cfg: function (o) { if (o && o.paralelo) CUENTA_PARALELO = o.paralelo; if (o && o.px) CUENTA_PX = o.px; if (o && o.pulg) CUENTA_LOSA_PULG = o.pulg; return { paralelo: CUENTA_PARALELO, px: CUENTA_PX, pulg: CUENTA_LOSA_PULG, duda: CUENTA_DUDA }; }
+  };
   window.__ocrDbg = { lee: ocrLee, recorte: ocrRecorte, carga: ocrCarga };
   window.__leyendaDbg = {
     lee: function (rect) { leyendaFin([rect.x0, rect.y0], [rect.x1, rect.y1]); },
@@ -15628,7 +16013,7 @@
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
     state.counts = (state.counts || []).filter(function (o) { return o && typeof o === 'object'; });
-    state.counts.forEach(function (o) { nums(o, ['x', 'y']); if (o.cat != null) o.cat = String(o.cat).slice(0, 40); });
+    state.counts.forEach(function (o) { nums(o, ['x', 'y']); if (o.cat != null) o.cat = String(o.cat).slice(0, 40); if (o.ia != null) { o.ia = +o.ia; if (!(o.ia >= 0 && o.ia <= 100)) delete o.ia; } if (o.iaNota != null) { o.iaNota = String(o.iaNota).slice(0, 120); if (!o.iaNota) delete o.iaNota; } });
     state.countCats = (state.countCats || []).filter(function (o) { return o && typeof o === 'object' && o.id; });
     state.countCats.forEach(function (o) {
       o.id = String(o.id).slice(0, 40);
@@ -21821,6 +22206,7 @@
          quitó: se guardó. */
       html += '<div class="tmHead">Lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__leyenda"><span><b>Leer la leyenda</b> del plano… <span class="muted">· saca las categorías con su nombre</span></span></div>';
+      html += '<div class="tmItem" data-k="__cerebro"><span><b>Cuéntame los devices</b> con el cerebro… <span class="muted">· marca cada símbolo, tú revisas</span></span></div>';
       var cAl = catCount(catActiva) || catsM[0];
       if (catsM.length) {
         html += '<div class="tmHead">La categoría activa' + (cAl ? ' — ' + esc(cAl.nom) : '') + '</div>';
@@ -22067,6 +22453,7 @@
           if (k === '__mas') { countMas = !countMas; showToolMenu('count', anchor); return; }
           if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
           if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
+          if (k === '__cerebro') { tm.hidden = true; abreCuenta(); pintaCuenta(); setTool('cuenta'); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__doc') { tm.hidden = true; abreDoc(); return; }
@@ -22236,6 +22623,7 @@
 
   /* ---------------- inicio ---------------- */
   window.__mxpRefresh = refresh;
+  window.__toolMenuDbg = function (kind) { showToolMenu(kind, document.querySelector('.dock .grpBtn') || document.body); };
   window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
   window.__mxpAngle = refsAngle;
   window.__mxpRect = rectificarYcerrar;   // gancho de pruebas
