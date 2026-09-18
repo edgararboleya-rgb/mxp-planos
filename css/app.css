@@ -734,6 +734,19 @@ body.sumandoSel #btnSumar { background: rgba(140,240,106,.18); color: var(--mp-l
   .tbRow1 { gap: 5px; }
 }
 
+/* PANTALLA DE TABLETA (18/09). Con Count sacado a su propio grupo son SEIS
+   botones de grupo, y en el iPad (1024) la fila de barras se partía en dos:
+   la barra de herramientas pasaba de 133 a 206 px y el plano perdía 73 px de
+   alto. Aquí los botones de grupo se estrechan al mismo ancho que llevan en un
+   muelle vertical, el nombre se recorta con puntos suspensivos, y las seis
+   caben en una fila. */
+@media (max-width: 1180px) {
+  .dock.horiz .barra button.grpBtn { min-width: calc(52px * var(--tb)); padding: 3px 4px; }
+  .dock.horiz .barra button.grpBtn label {
+    max-width: calc(48px * var(--tb)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+}
+
 /* Mobile / tablet adjustments */
 @media (max-width: 900px) {
   #palette { width: 168px; }

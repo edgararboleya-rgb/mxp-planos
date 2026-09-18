@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.F';
+  var APP_VERSION = 'v34.G';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5387,6 +5387,8 @@
 
   function setTool(t) {
     if (typeof sumandoSel !== 'undefined' && sumandoSel && t !== 'select') ponSumando(false);
+    // por aquí pasan TODAS: barras, desplegables, atajos de teclado, Mi cofre
+    if (typeof marcaTocada === 'function') marcaTocada(t);
     tool = t;
     if (t !== 'place') placingKey = null;
     pendingAreaLabel = false;
@@ -9422,7 +9424,7 @@
       h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
         '<td><span class="cntChip" style="background:' + esc(c.color) + '"></span>' + esc(c.nom) +
         (c.item ? ' <span class="muted small" title="Item del catálogo del estimador">· catálogo</span>' : (c.alias ? ' <span class="muted small" title="Tool de Bluebeam sin item en el catálogo: al estimador llega por alias">· sin item</span>' : '')) +
-        ' <span class="cntCod' + (c.codigo ? '' : ' def') + '" title="' + (c.codigo ? 'Código de partida' : 'Sin código propio: sale como ' + CODIGO_DEFECTO + '. Cámbialo en Count ▾ → Código de partida') + '">' + esc(codigoDeCat(c)) + '</span>' +
+        ' <span class="cntCod' + (c.codigo ? '' : ' def') + '" title="' + (c.codigo ? 'Código de partida' : 'Sin código propio: sale como ' + CODIGO_DEFECTO + '. Cámbialo en Count ▾ → Más… → Código de partida') + '">' + esc(codigoDeCat(c)) + '</span>' +
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
         '<td class="n">' + nh + (c.manual > 0 ? ' <span class="muted small" title="Cantidad puesta a mano (Count ▾): se suma a las marcas y va al estimador">+ ' + c.manual + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     });
@@ -20906,7 +20908,7 @@
     { id: 'dim', grp: 'note', ico: 'dim', nom: 'Dim', key: 'C', tip: 'Cota / dimensión (C)' },
     { id: 'measure', grp: 'note', ico: 'measure', nom: 'Measure', key: 'M', tip: 'Medir (M)', menu: 'measure', menuTip: 'Tipo de medición: distancia, área o perímetro' },
     { id: 'match', grp: 'note', ico: 'pincel', nom: 'Match', key: 'F', tip: 'Match Properties / Copiar formato (F): coge el aspecto de una marca — color, grosor, tamaño, tipo — y pásaselo a las demás con un toque cada una. SHIFT+toque cambia el origen.', menu: 'match', menuTip: 'Qué formato está copiado, y coger otro origen' },
-    { id: 'count', grp: 'note', ico: 'count', nom: 'Count', key: 'O', tip: 'Count (O): cuenta lo que YA trae el plano del ingeniero — cada toque marca uno y el total va corriendo por hoja y por set', menu: 'count', menuTip: 'Elegir qué se está contando' },
+    { id: 'count', grp: 'count', ico: 'count', nom: 'Count', key: 'O', tip: 'Count (O): cuenta lo que YA trae el plano del ingeniero — cada toque marca uno y el total va corriendo por hoja y por set', menu: 'count', menuTip: 'Elegir qué se está contando' },
     { id: 'text', grp: 'note', ico: 'text', nom: 'Text', key: 'T', tip: 'Texto (T)' },
     { id: 'leader', grp: 'note', ico: 'callout', nom: 'Callout', key: 'L', tip: 'Nota con flecha (L)' },
     { id: 'calibrate', grp: 'note', ico: 'calibrate', nom: 'Calibrate', key: 'K', tip: 'Calibrar plano de fondo (K)', menuTip: 'Medir una distancia conocida o aplicar la escala escrita en el plano' },
@@ -20919,6 +20921,11 @@
     { id: 'build', nom: 'Construir', largo: 'Construir: paredes, puertas y ventanas' },
     { id: 'shape', nom: 'Formas', largo: 'Superficies y formas' },
     { id: 'elec', nom: 'Eléctrico', largo: 'Eléctrico: circuitos y cableado' },
+    // (v34.G, 18/09) Count con su propio botón y su propia ▾. Edgar: «que la
+    // parte de Count pueda estar independiente con su flechita y demás
+    // opciones, y no dentro de Medir». Es la herramienta con la que empieza
+    // un takeoff; estaba escondida entre las cotas y el texto.
+    { id: 'count', nom: 'Count', largo: 'Count: contar lo que trae el plano' },
     { id: 'note', nom: 'Medir y anotar', corto: 'Medir', largo: 'Medir y anotar' },
     { id: 'ink', nom: 'A mano', largo: 'A mano: lápiz, resaltador, borrador' }
   ];
@@ -20937,14 +20944,77 @@
     ultima: {},
     uso: {},
     tam: 'normales',    // chicas · normales · grandes (E7b)
-    panelW: null        // ancho del panel derecho en px (200-460); null = el de la hoja de estilos
+    panelW: null,       // ancho del panel derecho en px (200-460); null = el de la hoja de estilos
+    modo: 'simple',     // simple = solo lo de siempre · todo = todas las herramientas (v34.G)
+    tocadas: []         // las que se pueden esconder pero Edgar ya usó alguna vez
   };
+  /* LO DE SIEMPRE (v34.G, 18/09). Edgar: «hay muchas informaciones, muchas
+     opciones; centrarnos en las que más usamos y las otras ponerlas hidden y
+     sacarlas si hacen falta».
+     Estas son las que un takeoff comercial NO toca: dibujar la casa desde cero
+     y la geometría fina. NO desaparecen — se encienden en ⋮⋮ Barras →
+     «Mostrar todo», y además NUNCA se esconde una que Edgar haya usado (la app
+     ya lleva la cuenta en layout.uso) ni una que tenga en Mis herramientas.
+     Se esconde por DATO, no por opinión. */
+  var SIMPLE_FUERA = ['wall', 'door', 'window', 'area', 'ellipse', 'pline', 'trim', 'match'];
+  /* LA RED DE SEGURIDAD, DE VERDAD (revisión 18/09). La primera versión decía
+     «nunca se esconde una que hayas usado» y era MENTIRA: miraba layout.uso, y
+     uso solo se apunta al elegir la herramienta en una barra o en un
+     desplegable — NO con el atajo de teclado, NI desde Mi cofre, NI desde
+     Medir ▾ → Área. Quien dibuja paredes con la W habría abierto la app y no
+     habría encontrado la pared. Ahora se apunta en setTool, que es por donde
+     pasan TODAS: teclado, cofre, submenús y barras. `tocadas` va aparte de
+     `uso` a propósito: uso alimenta la sugerencia de Mis herramientas y no
+     debe inflarse con los cambios de herramienta que hace la app sola. */
+  function marcaTocada(id) {
+    if (!layout || !defDe(id)) return;
+    if (SIMPLE_FUERA.indexOf(id) < 0) return;        // solo importan las que se pueden esconder
+    if (!layout.tocadas) layout.tocadas = [];
+    if (layout.tocadas.indexOf(id) >= 0) return;
+    layout.tocadas.push(id); guardaLayoutLuego();
+  }
+  function toolVisible(id) {
+    if (!layout || layout.modo !== 'simple') return true;
+    if (SIMPLE_FUERA.indexOf(id) < 0) return true;
+    if (layout.uso && layout.uso[id] > 0) return true;                // la ha usado
+    if (layout.tocadas && layout.tocadas.indexOf(id) >= 0) return true;  // la ha tocado alguna vez
+    if (layout.favs && layout.favs.indexOf(id) >= 0) return true;     // está en Mis herramientas
+    // un grupo entero nunca se esconde: ver grupoIntocable
+    if (grupoIntocable(defDe(id) && defDe(id).grp)) return true;
+    return false;
+  }
+  /* UN GRUPO NUNCA SE QUEDA VACÍO (revisión 18/09). «Construir» tiene
+     exactamente pared, puerta y ventana, y las tres estaban en la lista de
+     esconder: el grupo entero desaparecía de la barra y no quedaba NINGÚN
+     camino de clic para dibujar una pared — en el iPad, sin teclado, se perdía
+     de verdad.
+     La decisión es POR GRUPO y FIJA, no según lo que se haya tocado: si un
+     grupo tiene TODAS sus herramientas en la lista, no se esconde ninguna.
+     Si dependiera del uso, al tocar Pared desaparecerían Puerta y Ventana a
+     media sesión — que es exactamente lo que hacía el primer intento. Con esto,
+     lo que se esconde de verdad es la geometría fina (superficie, elipse,
+     polilínea, recortar) y copiar formato, que conviven con hermanas visibles. */
+  var GRUPO_INTOCABLE = null;
+  function grupoIntocable(grp) {
+    if (!grp) return false;
+    if (!GRUPO_INTOCABLE) {
+      GRUPO_INTOCABLE = {};
+      GRUPOS.forEach(function (g) {
+        var hs = TOOL_DEFS.filter(function (x) { return x.grp === g.id; });
+        GRUPO_INTOCABLE[g.id] = hs.length > 0 && hs.every(function (x) { return SIMPLE_FUERA.indexOf(x.id) >= 0; });
+      });
+    }
+    return !!GRUPO_INTOCABLE[grp];
+  }
+  function nEscondidas() { return (layout && layout.modo) === 'simple' ? SIMPLE_FUERA.filter(function (id) { return !toolVisible(id); }).length : 0; }
+  function nomEscondidas() { return SIMPLE_FUERA.filter(function (id) { return !toolVisible(id); }).map(function (id) { return defDe(id).nom; }); }
   var TAM_BARRAS = ['chicas', 'normales', 'grandes'];
   var TAM_NOM = { chicas: 'Chicas', normales: 'Normales', grandes: 'Grandes' };
   var PANEL_W_MIN = 200, PANEL_W_MAX = 460;
   function defDe(id) { for (var i = 0; i < TOOL_DEFS.length; i++) if (TOOL_DEFS[i].id === id) return TOOL_DEFS[i]; return null; }
   function grpDe(id) { var d = defDe(id); return d ? d.grp : null; }
-  function toolsDe(grp) { return TOOL_DEFS.filter(function (d) { return d.grp === grp; }); }
+  var countMas = false;   // ¿está abierto el «Más…» del menú de Count? (v34.G)
+  function toolsDe(grp) { return TOOL_DEFS.filter(function (d) { return d.grp === grp && toolVisible(d.id); }); }
   function grupoDef(id) { for (var i = 0; i < GRUPOS.length; i++) if (GRUPOS[i].id === id) return GRUPOS[i]; return null; }
   function clonaLayoutDef() { return JSON.parse(JSON.stringify(LAYOUT_DEF)); }
   /* Lee la disposición guardada y la SANEA: una barra que falte vuelve a su
@@ -20973,6 +21043,8 @@
     if (g.ultima && typeof g.ultima === 'object') Object.keys(g.ultima).forEach(function (k) { if (grupoDef(k) && grpDe(g.ultima[k]) === k) L.ultima[k] = g.ultima[k]; });
     if (g.uso && typeof g.uso === 'object') Object.keys(g.uso).forEach(function (k) { var n = +g.uso[k]; if (defDe(k) && n > 0) L.uso[k] = Math.min(n, 99999); });
     if (TAM_BARRAS.indexOf(g.tam) >= 0) L.tam = g.tam;
+    if (g.modo === 'simple' || g.modo === 'todo') L.modo = g.modo;
+    L.tocadas = (Array.isArray(g.tocadas) ? g.tocadas : []).filter(function (id) { return !!defDe(id); });
     var pw = +g.panelW; L.panelW = (isFinite(pw) && pw >= PANEL_W_MIN && pw <= PANEL_W_MAX) ? Math.round(pw) : null;
     L.palOculta = !!g.palOculta; L.rpOculta = !!g.rpOculta;
     L.plegadas = Array.isArray(g.plegadas) ? g.plegadas.filter(function (x) { return typeof x === 'string'; }) : [];
@@ -21073,7 +21145,8 @@
      que Select y Pan nunca se pierdan. Si está visible, no se duplican. */
   /* Select, Pan y el zoom viven fijos en la barra de abajo (#navFijo), así que
      el grupo Navegar no hace falta en Grupos y nunca se puede perder Select. */
-  function gruposVisibles() { return GRUPOS.filter(function (g) { return g.id !== 'nav'; }); }
+  // un grupo que se queda sin herramientas visibles no pinta un botón vacío
+  function gruposVisibles() { return GRUPOS.filter(function (g) { return g.id !== 'nav' && toolsDe(g.id).length; }); }
 
   /* ---------- pintar ---------- */
   function btnTool(id) {
@@ -21083,7 +21156,10 @@
       (tieneDd ? '<span class="dd" data-menu="' + d.menu + '" title="' + esc(d.menuTip) + '">▾</span>' : '') + '</button>';
   }
   function btnGrupo(g, vert) {
-    var ult = defDe(layout.ultima[g.id]) || toolsDe(g.id)[0];
+    // (revisión 18/09) si la última que se usó está escondida, el botón enseñaba
+    // su icono y al abrirlo no estaba: se cae a la primera VISIBLE del grupo
+    var uid = layout.ultima[g.id];
+    var ult = (uid && toolVisible(uid) ? defDe(uid) : null) || toolsDe(g.id)[0];
     var abierto = false;
     try { abierto = !$('#toolMenu').hidden && $('#toolMenu').dataset.grp === g.id; } catch (e) {}
     return '<button class="grpBtn' + (grpDe(tool) === g.id ? ' active' : '') + (abierto ? ' abierto' : '') + '" data-grp="' + g.id + '" title="' + esc(g.largo) + ' — toca para ver todas sus herramientas">' +
@@ -21148,7 +21224,8 @@
     var g = grpDe(t);
     if (g && layout.ultima[g] !== t) { layout.ultima[g] = t; guardaLayoutLuego(); }
     $$('.dock .grpBtn').forEach(function (b) {
-      var d = defDe(layout.ultima[b.dataset.grp]) || toolsDe(b.dataset.grp)[0];
+      var uid2 = layout.ultima[b.dataset.grp];
+      var d = (uid2 && toolVisible(uid2) ? defDe(uid2) : null) || toolsDe(b.dataset.grp)[0];
       var ic = b.querySelector('.gIco'); if (ic && d) ic.innerHTML = ICO.svg(d.ico);
       b.classList.toggle('active', b.dataset.grp === g);
     });
@@ -21241,6 +21318,16 @@
   function toggleGrupo(b) {
     var tm = $('#toolMenu');
     if (!tm.hidden && tm.dataset.grp === b.dataset.grp) { cierraToolMenu(); return; }
+    /* (revisión 18/09) UN GRUPO DE UNA SOLA HERRAMIENTA abre directamente el
+       menú de ESA herramienta, no un desplegable de una fila. Si no, el ▾ del
+       botón Count —que es un grupo de uno— enseñaba «Count» y nada más, en vez
+       de las categorías y sus opciones, que es justo para lo que se sacó. */
+    var ts = toolsDe(b.dataset.grp);
+    if (ts.length === 1 && ts[0].menu) {
+      setTool(ts[0].id);
+      showToolMenu(ts[0].menu, b);
+      return;
+    }
     menuGrupo(b.dataset.grp, b);
   }
   function togglePin(id) {
@@ -21404,6 +21491,15 @@
   function pintaPanelBarras() {
     var p = $('#barrasPanel'), st = p.scrollTop;
     var html = '<h4>Organizar barras <button class="x" data-bp="cerrar" title="Cerrar">' + ICO.svg('close') + '</button></h4>';
+    html += '<div class="bpSec">Qué herramientas se ven</div>';
+    html += '<div class="bpRow bpTam">' +
+      '<button data-bp="modo" data-m="simple"' + ((layout.modo || 'simple') === 'simple' ? ' class="cur"' : '') + ' title="Solo las que usas en un takeoff: contar, medir, tubería, cableado, texto, calibrar. Lo de dibujar la casa desde cero se esconde.">Lo de siempre</button>' +
+      '<button data-bp="modo" data-m="todo"' + (layout.modo === 'todo' ? ' class="cur"' : '') + ' title="Todas las herramientas, como antes">Mostrar todo</button></div>';
+    var escN = nomEscondidas();
+    html += '<p class="bpNota">' + (layout.modo === 'todo'
+      ? 'Ahora mismo están TODAS a la vista. «Lo de siempre» escondería la geometría fina y copiar formato.'
+      : (escN.length ? 'Escondidas ahora: <b>' + escN.map(esc).join(', ') + '</b>.' : 'Ahora mismo no hay ninguna escondida: las has usado todas.')) +
+      ' <b>Nunca se esconde una que ya hayas usado</b> —ni con el teclado, ni desde Mi cofre—, ni una que tengas en Mis herramientas, y un grupo nunca se queda sin herramientas.</p>';
     html += '<div class="bpSec">Barras — cuáles ves y dónde van</div>';
     ordenBarras().forEach(function (o) {
       var arr = layout.docks[o.dock], i = arr.indexOf(o.id), vis = barraVisible(o.id);
@@ -21482,6 +21578,13 @@
       aplicaTamYPanel();
       guardaLayout(); pintaBarras(); pintaPanelBarras();
       setHint('Barras como de fábrica');
+      return;
+    }
+    if (bp === 'modo') {
+      layout.modo = t.dataset.m === 'todo' ? 'todo' : 'simple';
+      cierraToolMenu();   // un desplegable de grupo abierto se quedaba con la lista vieja
+      guardaLayout(); pintaBarras(); pintaPanelBarras();
+      setHint(layout.modo === 'simple' ? 'Lo de siempre — ' + nEscondidas() + ' herramienta(s) escondida(s); en ⋮⋮ Barras vuelven' : 'Todas las herramientas a la vista');
       return;
     }
     if (bp === 'tam') {
@@ -21709,29 +21812,43 @@
           '<span class="cntChip" style="background:' + esc(c.color) + '"></span><span>' + esc(c.nom) +
           ' <span class="muted">· ' + nH + ' en esta hoja</span></span></div>';
       });
-      html += '<div class="tmHead">Contar lo que ya trae el plano</div>';
-      html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
-      html += '<div class="tmItem" data-k="__leyenda"><span>Leer la leyenda del plano (categorías con nombre)…</span></div>';
-      html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
+      /* (v34.G, 18/09) DE DOCE COSAS A TRES. Edgar: «todas esas categorías de
+         leer un documento, renombrar la activa, color y forma, código de la
+         partida, a qué ítem del catálogo va… no sé si eso es funcional. Si no
+         es funcional, agruparlos en dos o tres nada más». Así que quedan tres
+         bloques —lo que trae el plano, la categoría activa, y ya— y todo lo
+         demás debajo de «Más…», que se abre solo si hace falta. Nada se
+         quitó: se guardó. */
+      html += '<div class="tmHead">Lo que ya trae el plano</div>';
+      html += '<div class="tmItem" data-k="__leyenda"><span><b>Leer la leyenda</b> del plano… <span class="muted">· saca las categorías con su nombre</span></span></div>';
+      var cAl = catCount(catActiva) || catsM[0];
       if (catsM.length) {
-        html += '<div class="tmHead">Categorías</div>';
-        html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
-        html += '<div class="tmItem" data-k="__doc"><span><b>Leer un conteo de un documento</b>… <span class="muted">· pega la tabla tal cual y la app propone las recetas</span></span></div>';
-        html += '<div class="tmItem" data-k="__lista"><span>Crear categorías desde una lista pegada… <span class="muted">· nombre | cantidad | receta | tubo</span></span></div>';
-        html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
-        html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
-        html += '<div class="tmItem" data-k="__codigo"><span>Código de partida de la activa… <span class="muted">· ' + esc(codigoDeCat(catCount(catActiva) || catsM[0])) + '</span></span></div>';
-        var cAl = catCount(catActiva) || catsM[0];
-        html += '<div class="tmItem" data-k="__alias"><span>A qué ítem del catálogo va…' +
-          (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
+        html += '<div class="tmHead">La categoría activa' + (cAl ? ' — ' + esc(cAl.nom) : '') + '</div>';
         html += '<div class="tmItem" data-k="__receta"><span>Que sea un <b>punto completo</b> (receta)…' +
           (cAl && cAl.receta ? ' <span class="muted">· ' + esc(cAl.receta) + '</span>' : ' <span class="muted">· hoy manda solo la pieza</span>') + '</span></div>';
         if (cAl && cAl.receta) html += '<div class="tmItem" data-k="__recetafull"><span>' + (cAl.recetaFull ? '☑' : '☐') +
           ' Que la receta venga <b>con su tubo y su cable</b> <span class="muted">· para stubs vacíos, donde el tubo ES el punto</span></span></div>';
         html += '<div class="tmItem" data-k="__manual"><span>Poner <b>cantidad a mano</b>…' +
           (cAl && cAl.manual > 0 ? ' <span class="muted">· ' + cAl.manual + ' a mano + las marcas</span>' : ' <span class="muted">· para un conteo que ya tienes hecho</span>') + '</span></div>';
-        html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
-        html += '<div class="tmItem" data-k="__borra"><span>Borrar la categoría activa…</span></div>';
+        html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
+        html += '<div class="tmItem" data-k="__borra"><span>Borrar la activa…</span></div>';
+      }
+      html += '<div class="tmItem tmMas" data-k="__mas"><span>' + (countMas ? '▾' : '▸') + ' Más…' + (countMas ? '' : ' <span class="muted">· renombrar, color, partida, ítem del catálogo, buscar iguales, listas</span>') + '</span></div>';
+      if (countMas) {
+        if (catsM.length) {
+          html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
+          html += '<div class="tmItem" data-k="__color"><span>Color y forma de la activa…</span></div>';
+          html += '<div class="tmItem" data-k="__codigo"><span>Código de partida… <span class="muted">· ' + esc(codigoDeCat(cAl)) + '</span></span></div>';
+          html += '<div class="tmItem" data-k="__alias"><span>A qué ítem del catálogo va…' +
+            (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
+          html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
+        }
+        html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
+        html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
+        if (catsM.length) {
+          html += '<div class="tmItem" data-k="__doc"><span>Leer un conteo de un documento… <span class="muted">· pega la tabla tal cual</span></span></div>';
+          html += '<div class="tmItem" data-k="__lista"><span>Crear categorías desde una lista pegada… <span class="muted">· nombre | cantidad | receta | tubo</span></span></div>';
+        }
       }
     } else if (kind === 'homerun') {
       /* Lo que pidió Edgar (15/09): elegir tubo, calibre y cuántos circuitos
@@ -21947,6 +22064,7 @@
           if (k === '__origen') { pincelCogeOrigen = true; setTool('match'); setHint('El próximo toque coge el formato de esa marca'); }
           else if (k === '__olvida') { formatoClip = null; pincelPuestos = 0; setTool('match'); setHint('Formato olvidado — toca la marca cuyo aspecto quieres copiar'); showProps(); }
         } else if (kind === 'count') {
+          if (k === '__mas') { countMas = !countMas; showToolMenu('count', anchor); return; }
           if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
           if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
