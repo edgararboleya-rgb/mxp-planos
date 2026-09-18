@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.E';
+  var APP_VERSION = 'v34.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -12565,6 +12565,53 @@
     return '';
   }
   window.__luzDbg = luzSoloInstalacion;
+  /* COMPARAR CON EL BORRADOR ANTERIOR (v34.F, 18/09). Entre lo que la app
+     mandó y el borrador a mano hubo ~$100.000 de diferencia y nadie lo vio
+     hasta el final. Esto mira qué llevaba el estimado anterior del MISMO
+     proyecto —puntos completos por receta y renglones sueltos— contra lo que
+     se va a mandar ahora, y dice si es MUY distinto: recetas que desaparecen,
+     renglones que se caen sin que suban los puntos, cantidades que cambian
+     más de un 25 %. No calcula dinero (eso es del estimador): compara
+     CONTEOS, que es donde se pierde el dinero. PURA. */
+  function diferenciasTakeoff(ant, ensRows, items, ensL) {
+    var nomEns = {}; (ensL || []).forEach(function (e) { nomEns[String(e.id)] = e.nombre; });
+    var num = function (v) { return Number(v) || 0; };
+    var suma = function (arr, k) { return (arr || []).reduce(function (a, r) { return a + num(r[k]); }, 0); };
+    var antEns = ant.ens || [], antItems = ant.items || [];
+    var pAnt = suma(antEns, 'cantidad'), pNue = suma(ensRows, 'cantidad');
+    var lineas = [], grave = false;
+    var porRec = {};
+    antEns.forEach(function (r) { var k = String(r.ensamble_id); porRec[k] = porRec[k] || { a: 0, n: 0 }; porRec[k].a += num(r.cantidad); });
+    (ensRows || []).forEach(function (r) { var k = String(r.ensamble_id); porRec[k] = porRec[k] || { a: 0, n: 0 }; porRec[k].n += num(r.cantidad); });
+    Object.keys(porRec).forEach(function (id) {
+      var q = porRec[id], nom = nomEns[id] || ('receta ' + id);
+      if (q.a && !q.n) { lineas.push('• ' + nom + ': antes ' + q.a + ' puntos, ahora NINGUNO'); grave = true; }
+      else if (!q.a && q.n) lineas.push('• ' + nom + ': nueva, ' + q.n + ' puntos');
+      else if (q.a && q.n && Math.abs(q.n - q.a) / q.a > 0.25) { lineas.push('• ' + nom + ': antes ' + q.a + ' puntos, ahora ' + q.n); grave = true; }
+    });
+    var norm = function (t) { return String(t || '').replace(/\s+/g, ' ').trim().toUpperCase(); };
+    var porItem = {};
+    var lindo = function (t) { return String(t || '').replace(/\s+/g, ' ').trim(); };   // el catálogo trae espacios de más
+    antItems.forEach(function (i) { var k = norm(i.item); porItem[k] = porItem[k] || { a: 0, n: 0, nom: lindo(i.item) }; porItem[k].a += num(i.cantidad); });
+    (items || []).forEach(function (i) { var k = norm(i.item); porItem[k] = porItem[k] || { a: 0, n: 0, nom: lindo(i.item) }; porItem[k].n += num(i.cantidad); });
+    var caidos = [], nuevos = [], cambiados = [];
+    Object.keys(porItem).forEach(function (k) {
+      var q = porItem[k];
+      if (q.a && !q.n) caidos.push(q.nom + ' ×' + Math.round(q.a));
+      else if (!q.a && q.n) nuevos.push(q.nom + ' ×' + Math.round(q.n));
+      else if (q.a && q.n && Math.abs(q.n - q.a) / q.a > 0.25) cambiados.push(q.nom + ': ' + Math.round(q.a) + ' → ' + Math.round(q.n));
+    });
+    // un renglón que se cae es grave salvo que ahora vaya DENTRO de una receta (los puntos subieron)
+    if (caidos.length && pNue <= pAnt) grave = true;
+    if (cambiados.length) grave = true;
+    var texto = 'Antes: ' + pAnt + ' puntos completos en ' + antEns.length + ' receta(s) y ' + antItems.length + ' renglón(es) suelto(s).\nAhora: ' + pNue + ' puntos en ' + (ensRows || []).length + ' receta(s) y ' + (items || []).length + ' renglón(es).';
+    if (lineas.length) texto += '\n\nPuntos completos:\n' + lineas.join('\n');
+    if (caidos.length) texto += '\n\nRenglones que YA NO van: ' + caidos.join(', ');
+    if (cambiados.length) texto += '\n\nCantidades que cambian más de un 25 %: ' + cambiados.join(' · ');
+    if (nuevos.length) texto += '\n\nRenglones nuevos: ' + nuevos.slice(0, 8).join(', ') + (nuevos.length > 8 ? ' … (' + nuevos.length + ')' : '');
+    return { grave: grave, texto: texto, pAnt: pAnt, pNue: pNue, caidos: caidos, nuevos: nuevos, cambiados: cambiados };
+  }
+  window.__takeoffCmp = diferenciasTakeoff;
   if ($('#btnEst')) $('#btnEst').addEventListener('click', function () {
     if (!SB || typeof fetch === 'undefined') { uiAlert('La conexión al estimador no está configurada.'); return; }
     var entries = null;
@@ -12683,6 +12730,29 @@
           uiAlert('Ninguna pieza del plano coincide todavía con el catálogo del estimador.\n\nSIN MAPEAR:\n• ' + unmapped.join('\n• ') + '\n\nAgrega esos nombres en la tabla de alias del estimador (alias_takeoff) y vuelve a intentar.');
           setHint(''); return;
         }
+        /* Si este proyecto YA mandó un estimado, se compara con aquel antes de
+           crear otro; si es muy distinto, se enseña la diferencia y se pregunta.
+           Sin anterior, o si no se puede leer, se manda directo. */
+        function comparaConAnterior(sigue) {
+          var prevId = state.project.estimateId;
+          if (!prevId) { sigue(); return; }
+          setHint('Comparando con el estimado anterior (' + prevId + ')…');
+          sbFetch('/rest/v1/estimados?select=id,nombre&nombre=like.' + encodeURIComponent('*[' + prevId + ']*') + '&limit=1').then(function (rows) {
+            var prev = rows && rows[0]; if (!prev) return null;
+            return Promise.all([
+              sbFetchTodo('/rest/v1/estimado_ensambles?select=ensamble_id,cantidad,sin_lineales&estimado_id=eq.' + prev.id).then(null, function () { return []; }),
+              sbFetchTodo('/rest/v1/estimado_items?select=item,cantidad,codigo&estimado_id=eq.' + prev.id).then(null, function () { return []; })
+            ]).then(function (r) { return { est: prev, ens: r[0] || [], items: r[1] || [] }; });
+          }).then(function (ant) {
+            if (!ant || (!ant.ens.length && !ant.items.length)) { sigue(); return; }
+            var d = diferenciasTakeoff(ant, ensRows, items, ensL);
+            if (!d.grave) { sigue(); return; }
+            uiConfirm('⚠ ESTE TAKEOFF ES MUY DISTINTO DEL ANTERIOR (' + prevId + ')\n\n' + d.texto +
+              '\n\nOK = mandarlo igual (se crea otro estimado).\nCancelar = volver a revisar antes de mandar.',
+              function (okk) { if (okk) sigue(); else setHint('Takeoff NO enviado: revisa y vuelve a mandar.'); });
+          }).catch(function () { sigue(); });
+        }
+        function manda() {
         // estimate_id EST-AAAA-NNN: lo emite esta app (contrato de datos §3)
         var year = new Date().getFullYear();
         var seq = parseInt(localStorage.getItem('mxp_est_seq_' + year) || '0', 10) + 1;
@@ -12741,6 +12811,8 @@
             '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
           setHint('✔ Estimado ' + estId + ' creado como borrador en el estimador');
         }).catch(handleErr);
+        }
+        comparaConAnterior(manda);
       }).catch(handleErr);
       function handleErr(e) {
         if (e && e.message === 'login') { askLogin(go); return; }
