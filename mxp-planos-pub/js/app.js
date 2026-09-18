@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.H';
+  var APP_VERSION = 'v34.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11192,7 +11192,7 @@
       var b64 = rec.b64; rec.cv.width = 1; rec.cv.height = 1;
       pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, conteo: { simbolos: C.simb, losa: i + 1, de: C.losas.length } }).then(function (d) {
         if (cuenta !== C || C.cancel) return;
-        if (!d || d.error || !d.conteo) { falla((d && d.error) ? String(d.error).slice(0, 120) : 'el cerebro no contestó en formato de conteo (¿worker viejo? git pull · wrangler deploy)'); return; }
+        if (!d || d.error || !d.conteo) { falla((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 220) : '') : 'el cerebro no contestó en formato de conteo (¿worker viejo? git pull · wrangler deploy)'); return; }
         cuentaRecibeLosa(d, rec.rect, i);
         hecho();
       }, function (e) { falla('sin respuesta (' + (e && e.message ? e.message : 'red') + ')'); });
