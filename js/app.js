@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.O';
+  var APP_VERSION = 'v34.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -325,6 +325,7 @@
     set: function () { return conteoDelProyecto(); },
     nueva: function (nom) { var c = nuevaCatCount(nom); catActiva = c.id; setTool('count'); refreshCounts(); return c.id; },
     activa: function (id) { catActiva = id; },
+    activaSegura: function () { return catActivaSegura().id; },
     cats: function () { return catsCount().slice(); }
   };
   window.__hojaDbg = { nueva: function (no) { addSheet(no); }, cambia: function (i) { switchSheet(i); } };
@@ -2324,7 +2325,7 @@
   function breakersDeCircuitos(areas) {
     var porCkt = {}, out = {};
     (areas || []).forEach(function (ar) {
-      if (!ar || !ar.open || !ar.circ) return;
+      if (!ar || !ar.open || !ar.circ || ar.propuesta) return;   // (E30) las rutas propuestas no se cotizan
       var c = ar.circ, pan = String(c.panel || '').trim().toUpperCase();
       var mult = Math.max(1, (+c.mult) || 1);
       var lista = numsCirc(c).filter(function (n) { return n > 0; });
@@ -2362,7 +2363,7 @@
   function circuitosPorPanel(areas) {
     var por = {};
     (areas || []).forEach(function (ar) {
-      if (!ar || !ar.open || !ar.circ) return;
+      if (!ar || !ar.open || !ar.circ || ar.propuesta) return;   // (E30) las rutas propuestas no se cotizan
       var pan = String(ar.circ.panel || '').trim().toUpperCase() || '(sin panel)';
       por[pan] = por[pan] || {};
       var m = Math.max(1, (+ar.circ.mult) || 1);
@@ -2405,7 +2406,7 @@
   function cuentaCircuitos(areas) {
     var v = {}, n = 0;
     (areas || []).forEach(function (ar) {
-      if (!ar || !ar.open || !ar.circ) return;
+      if (!ar || !ar.open || !ar.circ || ar.propuesta) return;   // (E30) las rutas propuestas no se cotizan
       var pan = String(ar.circ.panel || '').trim().toUpperCase();
       numsCirc(ar.circ).forEach(function (q) { if (q > 0 && !v[pan + '#' + q]) { v[pan + '#' + q] = 1; n++; } });
     });
@@ -3997,7 +3998,7 @@
       var d = a.lineStyle === 'cloud' ? cloudPath(a.pts, !a.open, cloudR(a)) : areaPath(plineRecortada(a));
       // el preset trae su tipo de linea; si el usuario eligio otra, manda la suya
       var est = LINE_STYLES[a.lineStyle] || (pdef && pdef.dash && !a.open ? LINE_STYLES[pdef.dash] : null) || LINE_STYLES.solid;
-      var dEst = dashDe(a, est);
+      var dEst = a.propuesta ? '6 4' : dashDe(a, est);
       var dash = dEst ? ' stroke-dasharray="' + dEst + '"' : '';
       var col = colorSeguro(a.color), lw = numSeguro(a.lw, 0) || est.lw || 0.9;
       /* RELLENO DE COLOR (Edgar, 03/09: "que un cuadradito o rectángulo o la
@@ -5139,6 +5140,7 @@
     if (typeof pintaVisual === 'function') pintaVisual();
     refreshCounts(); showProps();
     if (typeof renderMarcas === 'function') renderMarcas();   // la Lista de marcas, si está abierta
+    if (typeof pintaRutasSiAbierto === 'function') pintaRutasSiAbierto();   // el panel Rutas, si está abierto
   }
 
   /* ---------------- hit testing ---------------- */
@@ -9089,7 +9091,8 @@
      cuando quiera desde el ▾ o desde Propiedades. */
   function catActivaSegura() {
     var c = catActiva ? catCount(catActiva) : null;
-    if (!c) c = catsCount()[0] || nuevaCatCount('');
+    // (E30) si hay que elegir una por defecto, nunca un «⚡ PANEL»: eso no es una pieza que se cuenta
+    if (!c) c = catsCount().filter(function (k) { return !k.tablero; })[0] || nuevaCatCount('');
     catActiva = c.id;
     return c;
   }
@@ -9278,6 +9281,8 @@
       if (v == null) return;
       pushUndo();
       c.nom = String(v).trim().slice(0, 60) || c.nom;
+      // (E30) un panel renombrado sigue siendo un panel: su clave cambia con él y conserva el prefijo
+      if (c.tablero) { c.panel = nombreTablero(c.nom) || c.panel; if (!RE_TABLERO_PREFIJO.test(c.nom)) c.nom = (TABLERO_PREFIJOS[c.tipo] || TABLERO_PREFIJO) + c.panel; }
       refresh(); refreshCounts();
     });
   }
@@ -9442,7 +9447,8 @@
       return m;
     });
     var rows = [['Categoría', 'Alias (estimador)', 'Item catálogo', 'Tool set', 'Código de partida'].concat(hojas.map(function (sh, i) { return sh.no || ('Hoja ' + (i + 1)); })).concat(['A mano', 'Total'])];
-    cats.forEach(function (c) {
+    // (E30) los paneles localizados no son piezas: no van al CSV que se manda al estimado
+    cats.filter(function (c) { return !c.tablero; }).forEach(function (c) {
       var tot = 0;
       var fila = [c.nom, c.alias || c.nom, c.item || '', c.set || '', codigoDeCat(c)].concat(porHoja.map(function (m) { var n = m[c.id] || 0; tot += n; return n; }));
       var mano = c.manual > 0 ? c.manual : 0; tot += mano;
@@ -9462,8 +9468,9 @@
       h += '<tr><td colspan="2" class="muted small">Sin categorías todavía — coge Count en la barra y toca el plano</td></tr>';
       return h;
     }
-    var totH = 0, totS = 0;
-    cats.forEach(function (c) {
+    var totH = 0, totS = 0, tableros = cats.filter(function (c) { return c.tablero; });
+    if (tableros.length) h += '<tr><td colspan="2" class="muted small">⚡ ' + tableros.length + ' panel(es) localizado(s): ' + esc(tableros.map(function (c) { return c.panel || c.nom; }).join(', ')) + ' — no se cotizan, son la referencia de las rutas</td></tr>';
+    cats.filter(function (c) { return !c.tablero; }).forEach(function (c) {
       var nh = hoja[c.id] || 0, ns = set[c.id] || 0;
       totH += nh; totS += ns;
       h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
@@ -9473,7 +9480,7 @@
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
         '<td class="n">' + nh + (c.manual > 0 ? ' <span class="muted small" title="Cantidad puesta a mano (Count ▾): se suma a las marcas y va al estimador">+ ' + c.manual + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     });
-    var totMano = cats.reduce(function (a, c) { return a + (c.manual > 0 ? c.manual : 0); }, 0);
+    var totMano = cats.reduce(function (a, c) { return a + (c.manual > 0 && !c.tablero ? c.manual : 0); }, 0);
     h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (totMano ? ' <span class="muted small">+ ' + totMano + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
     if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
     h += '<tr><td colspan="2" style="padding-top:6px">' +
@@ -11163,7 +11170,7 @@
     return '';
   }
   function cuentaSimbolos() {
-    return catsCount().map(function (c) {
+    return catsCount().filter(function (c) { return !c.tablero; }).map(function (c) {
       var o = { nom: String(c.nom || '').trim().slice(0, 120), tag: String(c.tag || '').slice(0, 12), familia: cuentaFamilia(c) };
       if (c.glifo && /^data:image\/(png|jpeg);base64,/.test(c.glifo) && c.glifo.length < 12000) o.glifo = c.glifo;
       return o;
@@ -11171,7 +11178,7 @@
   }
   function cuentaNombresRepetidos() {
     var v = {}, out = [];
-    catsCount().forEach(function (c) { var k = normTxt2(c.nom); if (!k) return; v[k] = (v[k] || 0) + 1; if (v[k] === 2) out.push(c.nom); });
+    catsCount().forEach(function (c) { if (c.tablero) return; var k = normTxt2(c.nom); if (!k) return; v[k] = (v[k] || 0) + 1; if (v[k] === 2) out.push(c.nom); });
     return out;
   }
   /* El rectángulo entero del plano de fondo (para «toda la hoja»). */
@@ -11190,7 +11197,8 @@
     var lado = ppu ? pulg / ppu : Math.max(bg.w, bg.h) / (pulgOpc ? 4.5 : 4);
     lado = Math.max(40, Math.min(lado, Math.max(q.W, q.H)));
     function ejes(a, L) {
-      if (L <= lado * 1.02) return [[a, a + L]];
+      // hasta un 10 % más larga que la losa sigue siendo UNA losa (un 2 % partía en dos casi iguales: la misma imagen dos veces)
+      if (L <= lado * 1.1) return [[a, a + L]];
       var n = Math.ceil((L - lado) / (lado * (1 - CUENTA_SOLAPE))) + 1, paso = (L - lado) / (n - 1), out = [];
       for (var i = 0; i < n; i++) out.push([a + i * paso, a + i * paso + lado]);
       return out;
@@ -11254,6 +11262,8 @@
       C.fallos.push('losa ' + (i + 1) + ': ' + msg);
       hecho();
     }
+    // la losa se recorta del fondo de la hoja que esté delante: si Edgar cambió de hoja, esa losa no vale
+    if (state.curSheet !== C.hoja) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': cambiaste de hoja, no se leyó'); C.hojaRota = true; pintaCuenta(); cuentaLanza(); return; }
     fondoRecorte(L, CUENTA_PX, function (rec, err) {
       if (cuenta !== C || C.cancel) return;
       if (!rec) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': ' + err); pintaCuenta(); cuentaLanza(); return; }
@@ -11263,6 +11273,7 @@
         if (cuenta !== C || C.cancel) return;
         if (!d || d.error || !d.conteo) { falla((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 220) : '') : 'el cerebro no contestó en formato de conteo (¿worker viejo? git pull · wrangler deploy)'); return; }
         cuentaRecibeLosa(d, rec.rect, i);
+        if (d.incompleto) C.dudas.push('la respuesta del cerebro se cortó por larga en la losa ' + (i + 1) + ': puede faltar piezas ahí — vuelve a contar esa zona en un marco más chico');
         hecho();
       }, function (e) { falla('sin respuesta (' + (e && e.message ? e.message : 'red') + ')'); });
     });
@@ -11292,6 +11303,8 @@
       var conf = isFinite(+m.confianza) ? Math.round(Math.max(0, Math.min(100, +m.confianza))) : 100;
       var q = { x: R.x0 + mx / 100 * W, y: R.y0 + my / 100 * H, cat: id, conf: conf, losa: i };
       if (m.nota) q.nota = String(m.nota).slice(0, 120);
+      // (E30) el rótulo de circuito junto a la pieza: es lo que después permite proponer la ruta
+      if (m.ckt) { var ck = String(m.ckt).toUpperCase().replace(/\s+/g, '').slice(0, 16); if (ck) q.ckt = ck; }
       C.marcas.push(q);
     });
     Object.keys(sinNombre).forEach(function (s) { C.dudas.push('«' + s + '» no es ninguna categoría del proyecto (' + sinNombre[s] + ' en la losa ' + (i + 1) + ') — si es un símbolo real, créala y vuelve a contar esa zona'); });
@@ -11329,6 +11342,7 @@
       dep.marcas.forEach(function (m) {
         var cM = { id: uid(), x: Math.round(m.x), y: Math.round(m.y), cat: m.cat, ia: m.conf };
         if (m.nota) cM.iaNota = m.nota;
+        if (m.ckt) cM.ckt = m.ckt;
         state.counts.push(cM); nuevas.push(cM.id);
       });
       renderConteo(); refreshCounts(); scheduleAutosave();
@@ -11634,6 +11648,7 @@
       if (!reintento) { setTimeout(function () { if (notas === N && !N.cancel) { N.corriendo--; notasLosa(i, true); } }, 1500); return; }
       N.fallos.push('losa ' + (i + 1) + ': ' + msg); hecho();
     }
+    if (state.curSheet !== N.hoja) { N.corriendo--; N.hechas++; N.fallos.push('losa ' + (i + 1) + ': cambiaste de hoja, no se leyó'); pintaNotas(); notasLanza(); return; }
     fondoRecorte(L, CUENTA_PX, function (rec, err) {
       if (notas !== N || N.cancel) return;
       if (!rec) { N.corriendo--; N.hechas++; N.fallos.push('losa ' + (i + 1) + ': ' + err); pintaNotas(); notasLanza(); return; }
@@ -11649,6 +11664,7 @@
           N.leidas.push({ id: String((n && n.id) || '').slice(0, 12), tema: String((n && n.tema) || 'otro').slice(0, 24), texto: t, hoja: hoja, losa: i + 1 });
         });
         var sl = String((d.notas && d.notas.sin_leer) || '').trim(); if (sl) N.sinLeer.push(sl.slice(0, 200) + ' (losa ' + (i + 1) + ')');
+        if (d.incompleto) N.sinLeer.push('la respuesta se cortó por larga: puede faltar el final de la losa ' + (i + 1) + ' — léela otra vez en un marco más chico');
         hecho();
       }, function (e) { falla('sin respuesta (' + (e && e.message ? e.message : 'red') + ')'); });
     });
@@ -11657,7 +11673,8 @@
   function notasDepura(lista) {
     var out = [], vistas = {};
     lista.forEach(function (n) {
-      var k = normTxt2(n.texto).replace(/[^a-z0-9áéíóúñ ]+/g, '').slice(0, 90);
+      // la nota ENTERA (dos notas que empiezan igual son dos notas: revisión 20/09)
+      var k = normTxt2(n.texto).replace(/[^a-z0-9áéíóúñ ]+/g, '');
       if (!k || vistas[k]) return;
       vistas[k] = 1; out.push(n);
     });
@@ -11667,15 +11684,20 @@
      lectura y las que el proyecto ya tenía). Se puede volver a llamar sola —
      «volver a pensar»— cuando cambian las categorías. */
   function notasCuidados() {
+    if (!notas) {
+      // «volver a pensar»: una pasada con su estado, como las demás — se puede parar, y una respuesta tardía no pisa nada
+      notas = { hoja: state.curSheet, losas: [], hechas: 0, corriendo: 0, sig: 0, leidas: [], sinLeer: [], fallos: [], uso: { in: 0, out: 0 },
+                modelo: '', t0: Date.now(), enVuelo: true, cancel: false, fase: 'pensar', repensar: true };
+    }
     var N = notas, P = proyNotas() || {};
-    var nuevas = N ? N.leidas : [];
+    var nuevas = N.leidas;
     var todas = notasDepura((P.leidas || []).concat(nuevas));
     if (!todas.length) {
-      if (N) { N.enVuelo = false; N.fase = 'fin'; }
-      pintaNotas(null, 'No se leyó ninguna nota en esa zona.' + (N && N.sinLeer.length ? ' El cerebro dice: ' + N.sinLeer.join(' · ') : ' Encierra el bloque de texto de las notas, no el dibujo.'));
+      N.enVuelo = false; N.fase = 'fin';
+      pintaNotas(null, 'No se leyó ninguna nota en esa zona.' + (N.sinLeer.length ? ' El cerebro dice: ' + N.sinLeer.join(' · ') : ' Encierra el bloque de texto de las notas, no el dibujo.'));
       return;
     }
-    if (N) { N.fase = 'pensar'; pintaNotas(); } else { abreNotas(); pintaNotas('Volviendo a pensar los cuidados con las categorías de ahora…'); }
+    N.fase = 'pensar'; N.nTodas = todas.length; abreNotas(); pintaNotas();
     var cats = catsCount().map(function (c) { return { nom: c.nom, tag: c.tag || '' }; });
     listaDe('recetas').then(function (recetas) {
       return pideCerebro({ cuidados: { notas: todas, categorias: cats, recetas: recetas || [], scope: (state.project && state.project.scope) || '',
@@ -11690,6 +11712,9 @@
         pintaNotas(); return;
       }
       if (d.uso && N) { N.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); N.uso.out += +d.uso.output_tokens || 0; }
+      // lo que el worker no pudo mirar entero, se dice (revisión 20/09: cortaba en silencio)
+      if (Array.isArray(d.recortes)) d.recortes.forEach(function (t) { N.fallos.push('cuidados: ' + String(t).slice(0, 160)); });
+      if (d.incompleto) N.fallos.push('cuidados: la respuesta se cortó por larga; puede faltar alguno');
       var K = d.cuidados, viejos = P.cuidados || [];
       var cu = (Array.isArray(K.cuidados) ? K.cuidados : []).slice(0, 20).map(function (x) {
         var o = { titulo: String((x && x.titulo) || '').slice(0, 140), por_que: String((x && x.por_que) || '').slice(0, 400), accion: String((x && x.accion) || '').slice(0, 300),
@@ -11718,7 +11743,7 @@
   function notasGuarda(leidas, cuidados, quienPone, resumen, N) {
     if (!state.project) state.project = {};
     var P = proyNotas() || {};
-    var hojas = (P.hojas || []).slice(); if (N) { var hn = notasHojaNom(N.hoja); if (hojas.indexOf(hn) < 0) hojas.push(hn); }
+    var hojas = (P.hojas || []).slice(); if (N && !N.repensar) { var hn = notasHojaNom(N.hoja); if (hojas.indexOf(hn) < 0) hojas.push(hn); }
     state.project.notas = { leidas: leidas, cuidados: cuidados, quien_pone: quienPone, resumen: resumen, hojas: hojas,
                             fecha: new Date().toISOString().slice(0, 10), modelo: N ? N.modelo : (P.modelo || '') };
     scheduleAutosave();
@@ -11770,7 +11795,7 @@
       if (N.fase === 'leer') {
         h += '<div class="vN"><b>Losa ' + Math.min(N.losas.length, N.hechas + N.corriendo) + ' de ' + N.losas.length + '</b> · ' + N.leidas.length + ' nota(s) leídas</div>';
         h += '<div class="cuBarra"><div style="width:' + Math.round(N.hechas / Math.max(1, N.losas.length) * 100) + '%"></div></div>';
-      } else h += '<div class="vN"><b>Pensando los cuidados</b> con ' + N.leidas.length + ' nota(s), tus categorías y tus recetas…</div>';
+      } else h += '<div class="vN"><b>Pensando los cuidados</b> con ' + (N.nTodas || N.leidas.length) + ' nota(s), tus categorías y tus recetas…</div>';
       h += ayudaHtml('notas2', 'Cada losa tarda 20–60 s. Después, una sola llamada más junta todas las notas con la leyenda y las recetas.');
       h += '<button id="ntCancela" style="width:100%;margin-top:6px">Parar aquí y quedarme con lo leído</button>';
       c.innerHTML = h; enganchaNotasBotones(); return;
@@ -11817,7 +11842,7 @@
     if ((b = $('#ntZona'))) b.addEventListener('click', function () { setTool('notas'); setHint(HINTS.notas); });
     if ((b = $('#ntCancela'))) b.addEventListener('click', notasCancela);
     if ((b = $('#ntOtra'))) b.addEventListener('click', function () { notas = null; pintaNotas(); });
-    if ((b = $('#ntRepiensa'))) b.addEventListener('click', function () { notas = null; notasCuidados(); });
+    if ((b = $('#ntRepiensa'))) b.addEventListener('click', function () { if (notas && notas.enVuelo) { setHint('Ya hay una lectura de notas en marcha'); return; } notas = null; notasCuidados(); });
     if ((b = $('#ntOlvida'))) b.addEventListener('click', function () { uiConfirm('¿Olvidar las notas y los cuidados de este proyecto?', function (ok) { if (ok) notasOlvida(); }); });
     var lista = $('#ntLista');
     if (lista) lista.addEventListener('click', function (ev) {
@@ -11844,12 +11869,455 @@
     proyecto: function () { return proyNotas() ? JSON.parse(JSON.stringify(proyNotas())) : null; },
     contexto: notasContexto,
     crea: notasCreaCategoria,
-    repiensa: function () { notas = null; notasCuidados(); },
+    repiensa: function () { if (notas && notas.enVuelo) return false; notas = null; notasCuidados(); return true; },
     olvida: notasOlvida,
     cierra: cierraNotas,
     pinta: function () { abreNotas(); pintaNotas(); },
     losas: function (r) { return cuentaLosas(r, NOTAS_LOSA_PULG); }
   };
+  /* ================= PASO 8 — «PROPÓN LA RUTA» (E30, 20/09) =================
+     Edgar, viendo el anuncio de Drawer AI: «no es que hagas el routing
+     automático; es que me muestres cuál es el mejor camino… que propongas la
+     ruta de la tubería a través de lo que leas y entiendas en el plano, que
+     ubiques los cuartos eléctricos por si yo estoy equivocado, y los
+     circuitos. Integrarlo de verdad, con IA, como los conteos».
+
+     El patrón de siempre: el cerebro PROPONE, Edgar CORRIGE, la app MIDE.
+       1. Localizar los paneles: el cerebro mira la hoja entera y dice dónde
+          está cada panel y cuarto eléctrico. Cada uno nace como una CATEGORÍA
+          DE CONTEO marcada `tablero` («⚡ PANEL NHI») con una marca en la hoja:
+          se mueve con la mano como cualquier marca, se guarda con la hoja, y
+          NO va al estimador ni al conteo de piezas.
+       2. Los circuitos: el conteo ya devuelve el rótulo de circuito que hay
+          junto a cada dispositivo (`ckt`: NHI-2, 2P5-69). Se agrupan por panel
+          y por circuito sin pedir nada más.
+       3. La ruta: por cada panel, el cerebro recibe la hoja entera, la
+          posición del panel y los dispositivos de cada circuito (que ya
+          tenemos: no los vuelve a mirar), y devuelve una polilínea por
+          circuito —o por tubo que comparten hasta 3— del panel al dispositivo
+          más lejano, por los pasillos. Cada una nace como un HOMERUN de
+          verdad («propuesta», punteado en fucsia) con su panel y sus números:
+          Edgar lo acepta, lo arrastra o lo quita, y desde ahí es una corrida
+          normal → pies de tubo y cable por circuito, panel y hoja, con el NEC.
+     Las propuestas NO entran al takeoff hasta que se aceptan. */
+  var rutasProp = null;   // la pasada en marcha
+  var RUTAS_MAX_TUBO = 3;
+  var RUTAS_MAX_CKTS = 40;   // circuitos por llamada: más, y el worker recortaba en silencio (revisión 20/09)
+  var TABLERO_PREFIJO = '⚡ PANEL ';
+  var TABLERO_PREFIJOS = { panel: '⚡ PANEL ', switchboard: '⚡ PANEL ', transformador: '⚡ XFMR ', cuarto_electrico: '⚡ CUARTO ', otro: '⚡ CUARTO ' };
+  var RE_TABLERO_PREFIJO = /^⚡ (PANEL|XFMR|CUARTO) /;
+  function esTablero(c) { return !!(c && c.tablero); }
+  /* Solo los paneles (y switchboards) reciben rutas: un cuarto eléctrico o un
+     transformador se localizan y se ven, y nada más (revisión 20/09: antes
+     todo nacía como «⚡ PANEL»). */
+  function esPanelDeRutas(c) { return esTablero(c) && (!c.tipo || c.tipo === 'panel' || c.tipo === 'switchboard'); }
+  function nombreTablero(nom) { return String(nom || '').replace(RE_TABLERO_PREFIJO, '').replace(/[«»"'`]/g, '').replace(/^\s*(PANEL|PANELBOARD|PNL|TABLERO)\s+(?=\S)/i, '').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 24); }
+  /* La CLAVE con que casan el tablero y el rótulo del circuito: «PANEL NHI»,
+     «'NHI'», «LP 1», «LP-1» y «LP1» son el mismo panel. (Revisión 20/09: se
+     casaban por igualdad de cadenas con dos normalizaciones distintas.) */
+  function clavePanel(s) { return nombreTablero(s).replace(/[\s\-_.]+/g, ''); }
+  function catTablero(nombre, crea, tipo) {
+    var n = nombreTablero(nombre); if (!n) return null;
+    var k = clavePanel(n), hay = null;
+    catsCount().forEach(function (c) { if (esTablero(c) && clavePanel(c.panel || c.nom) === k) hay = c; });
+    if (hay || !crea) return hay;
+    var tp = TABLERO_PREFIJOS[tipo] ? tipo : 'panel';
+    var c = nuevaCatCount(TABLERO_PREFIJOS[tp] + n, {});
+    c.tablero = true; c.panel = n; c.color = '#14161a'; c.forma = 'cuad'; c.num = false;
+    if (tp !== 'panel') c.tipo = tp;
+    return c;
+  }
+  /* Los paneles con su marca en ESTA hoja (una marca por panel; si hay varias, la primera). */
+  function tablerosDeHoja() {
+    var out = [];
+    catsCount().forEach(function (c) {
+      if (!esTablero(c)) return;
+      var m = null; state.counts.forEach(function (q) { if (q.cat === c.id && !m) m = q; });
+      var pn = c.panel || nombreTablero(c.nom);
+      out.push({ cat: c, panel: pn, clave: clavePanel(pn), tipo: c.tipo || 'panel', rutas: esPanelDeRutas(c), marca: m });
+    });
+    return out;
+  }
+  /* Los nombres de panel que el proyecto ya conoce: los schedules (Panel Sch.),
+     los homeruns trazados y los rótulos que el conteo leyó. Van al cerebro
+     para que los busque primero — pero no los pone si no los ve. */
+  function panelesConocidos() {
+    var v = {};
+    (state.sheets || []).forEach(function (sh, i) {
+      var o = null;
+      if (i === state.curSheet) o = { panels: state.panels, areas: state.areas, counts: state.counts };
+      else { try { o = JSON.parse(sh.data || '{}'); } catch (e) { o = null; } }
+      if (!o) return;
+      (o.panels || []).forEach(function (p) { var n = nombreTablero(p && p.name); if (n) v[n] = 1; });
+      (o.areas || []).forEach(function (a) { if (a && a.circ && a.circ.panel) { var n = nombreTablero(a.circ.panel); if (n) v[n] = 1; } });
+      (o.counts || []).forEach(function (q) { var pc = parseCkt(q && q.ckt); if (pc) v[pc.panel] = 1; });
+    });
+    return Object.keys(v);
+  }
+  /* «NHI-2» → {panel:'NHI', num:2} · «2P5-69» → {panel:'2P5', num:69} · «A14» → {panel:'A', num:14}
+     · «LP-1A-3» → {panel:'LP-1A', num:3} · «H1-2,4» → dos circuitos del H1 (el tubo compartido).
+     Lo que no tenga esa forma no se adivina: se enseña como ilegible. */
+  function normCktTxt(s) { return String(s || '').toUpperCase().replace(/[–—]/g, '-').replace(/[«»"'`]/g, '').replace(/\s+/g, '').replace(/^(PANEL|PNL|CKT|CIRCUIT|CCT)[:#-]?/, ''); }
+  function parseCkts(s) {
+    var t = normCktTxt(s); if (!t) return [];
+    var partes = t.split(/[,\/&+]/).filter(Boolean), out = [], panel = null;
+    partes.forEach(function (p, i) {
+      var m = p.match(/^([A-Z0-9][A-Z0-9-]*?)-?(\d{1,3})([A-Z])?$/);
+      if (m && /[A-Z]/.test(m[1]) && !/-$/.test(m[1]) && +m[2] > 0) { panel = m[1]; out.push({ panel: panel, num: +m[2], ckt: panel + '-' + m[2] + (m[3] || '') }); return; }
+      var n = p.match(/^(\d{1,3})([A-Z])?$/);
+      if (n && panel && i > 0 && +n[1] > 0) out.push({ panel: panel, num: +n[1], ckt: panel + '-' + n[1] + (n[2] || '') });
+    });
+    return out;
+  }
+  function parseCkt(s) { var a = parseCkts(s); return a.length ? a[0] : null; }
+  /* Los dispositivos de esta hoja agrupados por panel y circuito. */
+  function circuitosDeHoja() {
+    var porPanel = {}, sinCkt = 0, ilegibles = {}, conCkt = 0;
+    state.counts.forEach(function (q) {
+      var c = catCount(q.cat); if (!c || esTablero(c)) return;
+      if (!q.ckt) { sinCkt++; return; }
+      // un rótulo de varios circuitos (H1-2,4) es el tubo compartido: la pieza va al primero
+      var pc = parseCkt(q.ckt); if (!pc) { ilegibles[q.ckt] = (ilegibles[q.ckt] || 0) + 1; return; }
+      conCkt++;
+      var kp = clavePanel(pc.panel);
+      var P = porPanel[kp] = porPanel[kp] || { panel: pc.panel, clave: kp, ckts: {}, n: 0 };
+      var K = P.ckts[pc.ckt] = P.ckts[pc.ckt] || { ckt: pc.ckt, num: pc.num, devs: [] };
+      K.devs.push({ id: q.id, x: q.x, y: q.y }); P.n++;
+    });
+    return { porPanel: porPanel, sinCkt: sinCkt, conCkt: conCkt, ilegibles: ilegibles };
+  }
+  function propuestasDeHoja() { return (state.areas || []).filter(function (a) { return a && a.propuesta && a.circ; }); }
+  function abreRutas() { var b = $('#rutasBox'); if (b) b.classList.remove('oculto'); }
+  function cierraRutas() {
+    var R = rutasProp;
+    if (R && R.enVuelo) rutasPara(R);
+    var b = $('#rutasBox'); if (b) b.classList.add('oculto');
+    rutasProp = null;
+  }
+  /* Parar una pasada a medias: lo que ya llegó se dibuja y se guarda
+     (revisión 20/09: antes «Parar aquí» no guardaba y la ✕ ni dibujaba). */
+  function rutasPara(R) {
+    if (!R) return;
+    R.cancel = true; R.enVuelo = false;
+    refresh(); if (R.puestos) scheduleAutosave();
+  }
+  function rutasUso(R, d) { if (d && d.uso && R) { R.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); R.uso.out += +d.uso.output_tokens || 0; if (d.modelo) R.modelo = String(d.modelo); } }
+  /* Si Edgar cambió de hoja mientras el cerebro pensaba, lo que llegue no es
+     de esta hoja: no se pone nada (igual que hace el conteo). */
+  function rutasHojaCambio(R, que) {
+    if (state.curSheet === R.hoja) return false;
+    R.fallos.push('cambiaste de hoja mientras ' + que + ': era de la hoja ' + notasHojaNom(R.hoja) + ' y no se puso nada');
+    R.cancel = true; R.enVuelo = false; pintaRutas();
+    return true;
+  }
+  function rutasSinRespuesta(R, e) { return 'sin respuesta (' + (e && e.message ? e.message : 'red') + ')'; }
+
+  /* --- 1 · localizar los paneles --- */
+  function rutasLocaliza() {
+    if (rutasProp && rutasProp.enVuelo) { setHint('Ya hay una pasada en marcha'); return; }
+    abreRutas();
+    if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    var r = cuentaRectHoja();
+    if (!r) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
+    var R = rutasProp = { fase: 'paneles', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], paneles: null, resultados: [], puestos: 0 };
+    pintaRutas();
+    fondoRecorte(r, CUENTA_PX, function (rec, err) {
+      if (rutasProp !== R || R.cancel) return;
+      if (!rec) { R.enVuelo = false; R.fallos.push(err); pintaRutas(); return; }
+      var b64 = rec.b64, RR = rec.rect; rec.cv.width = 1; rec.cv.height = 1;
+      pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, paneles: { conocidos: panelesConocidos() } }).then(function (d) {
+        if (rutasProp !== R || R.cancel) return;
+        R.enVuelo = false;
+        if (!d || d.error || !d.paneles) { R.fallos.push((d && d.error) ? String(d.error) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 200) : '') : 'el cerebro no contestó en formato de paneles (¿worker viejo? git pull · wrangler deploy)'); pintaRutas(); return; }
+        rutasUso(R, d);
+        if (d.incompleto) R.fallos.push('la respuesta del cerebro se cortó por larga: puede faltar algún panel');
+        if (rutasHojaCambio(R, 'buscaba los paneles')) return;
+        var lista = Array.isArray(d.paneles.paneles) ? d.paneles.paneles.slice(0, 30) : [];
+        var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0, nuevos = [], yaEstaban = [], otros = [], undoHecho = false;
+        lista.forEach(function (p) {
+          var n = nombreTablero(p && p.nombre); if (!n) return;
+          var px = +p.x, py = +p.y; if (!isFinite(px) || !isFinite(py)) return;
+          px = Math.max(0, Math.min(100, px)); py = Math.max(0, Math.min(100, py));
+          var tipo = (p && TABLERO_PREFIJOS[p.tipo]) ? String(p.tipo) : 'panel';
+          var cat = catTablero(n, true, tipo);
+          // si Edgar ya lo colocó (o lo mudó), lo suyo manda: no se toca
+          if (state.counts.some(function (q) { return q.cat === cat.id; })) { yaEstaban.push(cat.panel); return; }
+          // la instantánea del undo, justo antes de la primera marca (y solo si hay alguna)
+          if (!undoHecho) { pushUndo(); undoHecho = true; }
+          var m = { id: uid(), x: Math.round(RR.x0 + px / 100 * W), y: Math.round(RR.y0 + py / 100 * H), cat: cat.id };
+          var det = [tipo !== 'panel' ? tipo.replace('_', ' ') : '', p.cuarto ? String(p.cuarto) : '', p.existente ? 'existente' : '', isFinite(+p.confianza) ? Math.round(+p.confianza) + ' %' : ''].filter(Boolean).join(' · ');
+          if (det) m.iaNota = det.slice(0, 120);
+          state.counts.push(m); R.puestos++;
+          if (esPanelDeRutas(cat)) nuevos.push(cat.panel); else otros.push(cat.panel + ' (' + tipo.replace('_', ' ') + ')');
+        });
+        R.paneles = { nuevos: nuevos, yaEstaban: yaEstaban, otros: otros, notas: String(d.paneles.notas || '').slice(0, 300), vistos: lista.length };
+        renderConteo(); refreshCounts(); if (R.puestos) scheduleAutosave(); pintaRutas();
+        setHint('✔ Paneles: ' + nuevos.length + ' localizado(s)' + (otros.length ? ' · ' + otros.length + ' cuarto(s)/equipo(s)' : '') + (yaEstaban.length ? ' · ' + yaEstaban.length + ' ya estaban (lo tuyo manda)' : '') + ' — muévelos si el cerebro se equivocó');
+      }, function (e) { if (rutasProp !== R || R.cancel) return; R.enVuelo = false; R.fallos.push(rutasSinRespuesta(R, e)); pintaRutas(); });
+    });
+  }
+  /* Colocar un panel a mano: la categoría nace y Count queda listo para el toque. */
+  function rutasColocaPanel(nombre) {
+    var cat = catTablero(nombre, true); if (!cat) return;
+    catActiva = cat.id; refreshCounts(); setTool('count');
+    setHint('Toca en el plano dónde está el panel «' + cat.panel + '» · Esc para salir');
+  }
+  /* Cuántos circuitos por tubo se le piden al cerebro: compartir tubo solo
+     tiene sentido EN TUBO. Con romex o MC (el defecto del ▾), cada circuito
+     es su propio cable: una ruta por circuito (revisión 20/09: un «tubo» de
+     3 circuitos en romex cotizaba UN cable). */
+  function rutasMaxTubo() { return esTuboCirc(circDefaults()) ? RUTAS_MAX_TUBO : 1; }
+  /* Los circuitos de un panel que YA tienen su corrida trazada en esta hoja
+     (propuesta o de la mano), por su rótulo y por su número — solo los de ESE
+     panel (revisión 20/09: una propuesta NHI-2 hacía saltar el CHI-2). */
+  function rutasYaTrazados(clave) {
+    var ya = {};
+    (state.areas || []).forEach(function (a) {
+      if (!a || !a.circ || clavePanel(a.circ.panel) !== clave) return;
+      numsCirc(a.circ).forEach(function (n) { if (n) ya['#' + n] = 1; });
+      if (a.rutaProp && Array.isArray(a.rutaProp.ckts)) a.rutaProp.ckts.forEach(function (k) { ya[k] = 1; });
+    });
+    return ya;
+  }
+
+  /* --- 3 · proponer las rutas --- */
+  function rutasPropon(soloPanel) {
+    if (rutasProp && rutasProp.enVuelo) { setHint('Ya hay una pasada en marcha'); return; }
+    abreRutas();
+    if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    var r = cuentaRectHoja();
+    if (!r) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
+    var C = circuitosDeHoja(), T = tablerosDeHoja(), tareas = [], soloK = soloPanel ? clavePanel(soloPanel) : null;
+    Object.keys(C.porPanel).forEach(function (pn) {
+      if (soloK && pn !== soloK) return;
+      var t = T.filter(function (x) { return x.clave === pn && x.rutas && x.marca; })[0]; if (!t) return;
+      var ya = rutasYaTrazados(pn);
+      // los circuitos que ya tienen su corrida trazada (propuesta o de la mano) no se vuelven a pedir
+      var ckts = Object.keys(C.porPanel[pn].ckts).map(function (k) { return C.porPanel[pn].ckts[k]; }).filter(function (k) { return !ya[k.ckt] && !ya['#' + k.num]; });
+      // por partes si son muchos: el worker no recorta nada y cada llamada cabe
+      for (var i = 0; i < ckts.length; i += RUTAS_MAX_CKTS) tareas.push({ panel: t.panel, clave: pn, marca: t.marca, ckts: ckts.slice(i, i + RUTAS_MAX_CKTS), parte: ckts.length > RUTAS_MAX_CKTS ? (Math.floor(i / RUTAS_MAX_CKTS) + 1) : 0 });
+    });
+    if (!tareas.length) {
+      pintaRutas(null, Object.keys(C.porPanel).length ? 'Ningún panel con circuitos pendientes está localizado en esta hoja (o ya tienen su ruta). Localiza los paneles primero, o colócalos tú.' : 'Ningún dispositivo de esta hoja lleva circuito. Cuenta con el cerebro (v34.P o más): el conteo lee el rótulo de circuito junto a cada pieza.');
+      return;
+    }
+    var R = rutasProp = { fase: 'rutas', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], tareas: tareas, hechas: 0, resultados: [], paneles: null, puestos: 0, undoHecho: false, maxTubo: rutasMaxTubo() };
+    pintaRutas();
+    fondoRecorte(r, CUENTA_PX, function (rec, err) {
+      if (rutasProp !== R || R.cancel) return;
+      if (!rec) { R.enVuelo = false; R.fallos.push(err); pintaRutas(); return; }
+      var b64 = rec.b64, RR = rec.rect; rec.cv.width = 1; rec.cv.height = 1;
+      var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0;
+      var pct = function (x, y) { return { x: Math.round((x - RR.x0) / W * 1000) / 10, y: Math.round((y - RR.y0) / H * 1000) / 10 }; };
+      var i = 0;
+      function sig() {
+        if (rutasProp !== R || R.cancel) return;
+        if (i >= tareas.length) {
+          R.enVuelo = false;
+          refresh(); pintaRutas();
+          var ft = propuestasDeHoja().reduce(function (a, q) { return a + largoHomerun(q) / 12; }, 0);
+          setHint('✔ Rutas propuestas: ' + propuestasDeHoja().length + ' tubo(s), ≈ ' + Math.round(ft).toLocaleString() + ' ft · acéptalas, arrástralas o quítalas' + (R.puestos ? ' · Ctrl+Z quita las de esta pasada' : ''));
+          return;
+        }
+        var t = tareas[i++], pp = pct(t.marca.x, t.marca.y);
+        pintaRutas();
+        pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, rutas: { panel: { nombre: t.panel, x: pp.x, y: pp.y },
+          circuitos: t.ckts.map(function (k) { return { ckt: k.ckt, dispositivos: k.devs.map(function (d) { return pct(d.x, d.y); }) }; }),
+          max_por_tubo: R.maxTubo, hoja: notasHojaNom(R.hoja) } }).then(function (d) {
+          if (rutasProp !== R || R.cancel) return;
+          var rot = t.panel + (t.parte ? ' (parte ' + t.parte + ')' : '');
+          if (!d || d.error || !d.rutas) R.fallos.push(rot + ': ' + ((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 160) : '') : 'el cerebro no contestó en formato de rutas (¿worker viejo?)'));
+          else {
+            rutasUso(R, d);
+            if (d.incompleto) R.fallos.push(rot + ': la respuesta se cortó por larga; puede faltar alguna ruta');
+            if (Array.isArray(d.omitidos) && d.omitidos.length) R.fallos.push(rot + ': el worker no miró ' + d.omitidos.length + ' circuito(s): ' + d.omitidos.slice(0, 6).join(', '));
+            if (rutasHojaCambio(R, 'proponía las rutas del ' + t.panel)) return;
+            rutasRecibe(d, t, RR, R);
+          }
+          R.hechas++; sig();
+        }, function (e) { if (rutasProp !== R || R.cancel) return; R.fallos.push(t.panel + ': ' + rutasSinRespuesta(R, e)); R.hechas++; sig(); });
+      }
+      sig();
+    });
+  }
+  /* Las rutas de un panel, a homeruns «propuesta». Devuelve cuántas puso. */
+  function rutasRecibe(d, t, RR, R) {
+    R = R || rutasProp;
+    var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0, validos = {}, puestos = 0;
+    t.ckts.forEach(function (k) { validos[k.ckt] = k; });
+    var cubiertos = {}, maxTubo = (R && R.maxTubo) || RUTAS_MAX_TUBO;
+    var mx = Math.round(t.marca.x), my = Math.round(t.marca.y), lejos = Math.hypot(W, H) * 0.06;
+    var dPanel = function (p) { return Math.hypot(p[0] - mx, p[1] - my); };
+    (Array.isArray(d.rutas.rutas) ? d.rutas.rutas : []).slice(0, 80).forEach(function (r) {
+      var ckts = (Array.isArray(r.ckts) ? r.ckts : []).map(function (s) { var pc = parseCkt(s); return (pc && validos[pc.ckt] && !cubiertos[pc.ckt]) ? pc : null; }).filter(Boolean).slice(0, maxTubo);
+      if (!ckts.length) return;
+      var pts = (Array.isArray(r.puntos) ? r.puntos : []).slice(0, 40).map(function (p) {
+        var x = +p.x, y = +p.y; if (!isFinite(x) || !isFinite(y)) return null;
+        x = Math.max(0, Math.min(100, x)); y = Math.max(0, Math.min(100, y));
+        return [Math.round(RR.x0 + x / 100 * W), Math.round(RR.y0 + y / 100 * H)];
+      }).filter(Boolean);
+      if (pts.length < 2) return;
+      /* La flecha apunta al panel: el extremo que esté más cerca de SU marca
+         es el arranque (si el cerebro la devolvió al revés, se da la vuelta) y
+         se clava en la marca. Si ni ese extremo está cerca, la marca se
+         antepone para no perder el dispositivo (revisión 20/09). */
+      if (dPanel(pts[pts.length - 1]) < dPanel(pts[0])) pts.reverse();
+      if (dPanel(pts[0]) > lejos) pts.unshift([mx, my]); else pts[0] = [mx, my];
+      // la instantánea del undo, justo antes de la primera ruta de TODA la pasada (y solo si hay alguna)
+      if (R && !R.undoHecho) { pushUndo(); R.undoHecho = true; }
+      var e = { id: uid(), pts: pts, pattern: 'none', rot: 0, open: true, lineStyle: 'homerun', capS: 'arrow', lw: 1.1, color: '#c2255c', propuesta: true };
+      e.circ = nuevoCirc();
+      e.circ.panel = t.panel; e.circ.num = ckts[0].num; e.circ.nums = ckts.map(function (k) { return k.num; }); e.circ.ckts = ckts.length;
+      try { normalizaCirc(e.circ); } catch (err) {}
+      e.rutaProp = { ckts: ckts.map(function (k) { return k.ckt; }), conf: isFinite(+r.confianza) ? Math.round(+r.confianza) : null, nota: String(r.nota || '').slice(0, 160), panel: t.panel, devs: ckts.reduce(function (a, k) { return a + validos[k.ckt].devs.length; }, 0) };
+      ckts.forEach(function (k) { cubiertos[k.ckt] = 1; });
+      state.areas.push(e); puestos++;
+    });
+    var sinRuta = t.ckts.filter(function (k) { return !cubiertos[k.ckt]; }).map(function (k) { return k.ckt; });
+    if (R) {
+      R.puestos += puestos;
+      R.resultados.push({ panel: t.panel + (t.parte ? ' (parte ' + t.parte + ')' : ''), puestos: puestos, circuitos: t.ckts.length, sinRuta: sinRuta, notas: String(d.rutas.notas || '').slice(0, 200) });
+    }
+    // lo que llegó se ve y se guarda ya: si Edgar para o cierra a medias, no se pierde
+    if (puestos) { refresh(); scheduleAutosave(); }
+    return puestos;
+  }
+  function rutaAcepta(id) {
+    var a = (state.areas || []).filter(function (q) { return q.id === id; })[0]; if (!a || !a.propuesta) return;
+    pushUndo(); delete a.propuesta; delete a.color; a.aceptada = true;
+    refresh(); scheduleAutosave(); pintaRutas();
+  }
+  function rutaQuita(id) {
+    var n = state.areas.length; pushUndo();
+    state.areas = state.areas.filter(function (q) { return q.id !== id; });
+    if (state.areas.length === n) { popUndoVacio(); return; }
+    refresh(); scheduleAutosave(); pintaRutas();
+  }
+  function rutasAceptaTodas() {
+    var ps = propuestasDeHoja(); if (!ps.length) return 0;
+    pushUndo(); ps.forEach(function (a) { delete a.propuesta; delete a.color; a.aceptada = true; });
+    refresh(); scheduleAutosave(); pintaRutas();
+    setHint('✔ ' + ps.length + ' ruta(s) aceptadas: ya son corridas normales y van al takeoff · Ctrl+Z lo deshace');
+    return ps.length;
+  }
+  function rutasQuitaTodas() {
+    var ps = propuestasDeHoja(); if (!ps.length) return 0;
+    pushUndo(); var ids = {}; ps.forEach(function (a) { ids[a.id] = 1; });
+    state.areas = state.areas.filter(function (a) { return !ids[a.id]; });
+    refresh(); scheduleAutosave(); pintaRutas();
+    setHint('✔ ' + ps.length + ' propuesta(s) quitadas · Ctrl+Z las devuelve');
+    return ps.length;
+  }
+
+  /* --- lo que se ve --- */
+  function pintaRutas(estado, err) {
+    var c = $('#rutasCuerpo'); if (!c) return;
+    if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="rtVolver" style="width:100%;margin-top:8px">Volver</button>'; enganchaRutasBotones(); return; }
+    if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
+    var R = rutasProp, h = '';
+    if (R && R.enVuelo) {
+      h += R.fase === 'paneles' ? '<div class="vN"><b>Buscando los paneles</b> en la hoja entera…</div>'
+        : '<div class="vN"><b>Proponiendo rutas</b> · panel ' + Math.min(R.tareas.length, R.hechas + 1) + ' de ' + R.tareas.length + '</div><div class="cuBarra"><div style="width:' + Math.round(R.hechas / Math.max(1, R.tareas.length) * 100) + '%"></div></div>';
+      h += ayudaHtml('rutas2', 'Una llamada por panel con la hoja entera delante: 30–90 s cada una. Los dispositivos no se vuelven a mirar, van como datos.');
+      h += '<button id="rtCancela" style="width:100%;margin-top:6px">Parar aquí</button>';
+      c.innerHTML = h; enganchaRutasBotones(); return;
+    }
+    var C = circuitosDeHoja(), T = tablerosDeHoja(), P = propuestasDeHoja(), aceptadas = (state.areas || []).filter(function (a) { return a && a.aceptada && a.circ; });
+    var paneles = {}, otros = [];
+    T.forEach(function (t) { if (t.rutas) paneles[t.clave] = { panel: t.panel, clave: t.clave, marca: t.marca, ckts: 0, devs: 0 }; else otros.push(t.panel + ' (' + t.tipo.replace('_', ' ') + ')'); });
+    Object.keys(C.porPanel).forEach(function (pn) { var p = paneles[pn] = paneles[pn] || { panel: C.porPanel[pn].panel, clave: pn, marca: null, ckts: 0, devs: 0 }; p.ckts = Object.keys(C.porPanel[pn].ckts).length; p.devs = C.porPanel[pn].n; });
+    var ftDe = function (arr) { return Math.round(arr.reduce(function (a, q) { return a + largoHomerun(q) / 12; }, 0)); };
+    var lista = Object.keys(paneles).map(function (k) { return paneles[k]; }).sort(function (a, b) { return b.devs - a.devs; });
+    h += '<div class="vN"><b>' + lista.filter(function (p) { return p.marca; }).length + '</b> panel(es) localizados · <b>' + C.conCkt + '</b> dispositivos con circuito' + (C.sinCkt ? ' · <span class="muted">' + C.sinCkt + ' sin circuito</span>' : '') + '</div>';
+    h += ayudaHtml('rutas1', 'Tres pasos. <b>1</b> El cerebro localiza los paneles en la hoja entera: nacen como marcas «⚡ PANEL» que puedes <b>mover</b> si se equivocó (o colocar tú). <b>2</b> Los circuitos salen del conteo: el cerebro lee el rótulo junto a cada pieza (NHI-2). <b>3</b> Por cada panel propone la ruta del tubo de cada circuito, del panel al dispositivo más lejano, por los pasillos; hasta ' + RUTAS_MAX_TUBO + ' circuitos por tubo si comparten pasillo. Salen <b>punteadas en fucsia</b>: acéptalas, arrastra sus vértices o quítalas. Solo las aceptadas van al takeoff.', !T.length);
+    h += '<div class="row"><button id="rtLocaliza" style="flex:1"' + (state.bg && state.bg.url ? '' : ' disabled') + '>1 · Localizar los paneles</button>' +
+         '<button id="rtPropon" style="flex:1"' + (lista.some(function (p) { return p.marca && p.ckts; }) ? '' : ' disabled') + '>3 · Proponer las rutas</button></div>';
+    if (R && R.paneles) {
+      h += '<div class="muted small">Paneles: ' + (R.paneles.nuevos.length ? '<b>' + R.paneles.nuevos.map(esc).join(', ') + '</b> localizados' : 'ninguno nuevo') + (R.paneles.yaEstaban.length ? ' · ' + R.paneles.yaEstaban.map(esc).join(', ') + ' ya estaban (lo tuyo manda)' : '') + (R.paneles.otros && R.paneles.otros.length ? ' · también: ' + R.paneles.otros.map(esc).join(', ') : '') + (R.paneles.notas ? '<br>El cerebro dice: ' + esc(R.paneles.notas) : '') + '</div>';
+    }
+    if (lista.length) {
+      h += '<table class="cuTabla"><tr><th>Panel</th><th>Ckts</th><th>Disp.</th><th>Rutas</th><th>ft</th><th></th></tr>';
+      lista.forEach(function (p) {
+        var props = P.filter(function (a) { return clavePanel(a.circ.panel) === p.clave; }), acc = aceptadas.filter(function (a) { return clavePanel(a.circ.panel) === p.clave; });
+        h += '<tr><td>' + (p.marca ? '⚡ ' : '<span class="cdMal">?</span> ') + esc(p.panel) + '</td><td>' + (p.ckts || '') + '</td><td>' + (p.devs || '') + '</td>' +
+          '<td>' + (props.length ? '<span class="cdMal">' + props.length + '</span>' : '') + (acc.length ? (props.length ? ' + ' : '') + '<span class="cdOk">' + acc.length + ' ✓</span>' : '') + '</td>' +
+          '<td>' + (props.length || acc.length ? ftDe(props.concat(acc)).toLocaleString() : '') + '</td>' +
+          '<td style="text-align:right">' + (p.marca ? (p.ckts ? '<button class="small" data-propon="' + esc(p.panel) + '" title="Proponer solo las rutas de este panel">rutas</button>' : '') : '<button class="small" data-coloca="' + esc(p.panel) + '" title="El cerebro no lo encontró: tócalo tú en el plano">colocar</button>') + '</td></tr>';
+      });
+      h += '</table>';
+      if (otros.length) h += '<div class="muted small">También en la hoja (sin rutas): ' + otros.map(esc).join(' · ') + '</div>';
+    } else if (state.bg && state.bg.url) h += '<div class="bMuted">Todavía no hay paneles ni dispositivos con circuito en esta hoja. Empieza por <b>1 · Localizar los paneles</b>; y cuenta las piezas con el cerebro para que lea sus circuitos.</div>';
+    var ileg = Object.keys(C.ilegibles);
+    if (ileg.length) h += '<div class="muted small">Rótulos que no entiendo como circuito (panel-número): ' + ileg.slice(0, 8).map(function (k) { return '«' + esc(k) + '» ×' + C.ilegibles[k]; }).join(' · ') + '</div>';
+    if (R && R.resultados.length) {
+      R.resultados.forEach(function (x) {
+        if (x.sinRuta.length || x.notas) h += '<div class="muted small">' + esc(x.panel) + ': ' + x.puestos + ' ruta(s) para ' + x.circuitos + ' circuito(s)' + (x.sinRuta.length ? ' · sin ruta: ' + x.sinRuta.map(esc).join(', ') : '') + (x.notas ? ' · ' + esc(x.notas) : '') + '</div>';
+      });
+    }
+    if (P.length) {
+      h += '<div class="vN" style="margin-top:6px"><b>' + P.length + '</b> ruta(s) propuestas · ≈ <b>' + ftDe(P).toLocaleString() + ' ft</b> <span class="muted">· toca una y el plano va hasta ella · no se cotizan hasta aceptarlas' + (state.bg && state.bg.paperW ? '' : ' · ⚠ el plano no está calibrado: los pies son orientativos') + '</span></div>';
+      h += '<div class="vLista" id="rtLista">';
+      P.forEach(function (a) {
+        var rp = a.rutaProp || {}, ft = Math.round(largoHomerun(a) / 12);
+        h += '<div class="vFila" data-id="' + esc(a.id) + '"><span class="vPc">' + (rp.conf != null ? rp.conf + '%' : '—') + '</span>' +
+          '<span class="vTxt"><b>' + esc((rp.ckts || numsCirc(a.circ).map(function (n) { return a.circ.panel + '-' + n; })).join(' + ')) + '</b> · ' + ft + ' ft' + (rp.devs ? ' · ' + rp.devs + ' disp.' : '') + (rp.nota ? ' <span class="muted">· ' + esc(rp.nota) + '</span>' : '') + '</span>' +
+          '<button class="vX" data-ok="' + esc(a.id) + '" title="Aceptar: pasa a ser una corrida normal">✓</button><button class="vX" data-x="' + esc(a.id) + '" title="Quitar esta propuesta">✗</button></div>';
+      });
+      h += '</div>';
+      h += '<div class="row"><button id="rtAceptaTodas" style="flex:1">✓ Aceptar todas</button><button id="rtQuitaTodas" style="flex:1">✗ Quitar todas</button></div>';
+    }
+    if (aceptadas.length) h += '<div class="muted small" style="margin-top:4px">' + aceptadas.length + ' ruta(s) aceptadas en esta hoja · ' + ftDe(aceptadas).toLocaleString() + ' ft — ya son corridas normales: se editan y cuentan como las demás.</div>';
+    if (R && R.fallos.length) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + R.fallos.slice(0, 6).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
+    if (R && (R.uso.in || R.uso.out)) h += '<div class="muted small" style="margin-top:4px">' + (R.modelo ? esc(R.modelo) + ' · ' : '') + Math.round((Date.now() - R.t0) / 1000) + ' s · ' + R.uso.in.toLocaleString() + ' / ' + R.uso.out.toLocaleString() + ' tokens ≈ $' + cuentaCosto(R.uso, R.modelo).toFixed(2) + '</div>';
+    h += ayudaHtml('rutas3', 'Las rutas propuestas heredan lo que tengas puesto en el ▾ de la corrida (tubo, calibre, neutro): cámbialo antes de proponer si el trabajo va en otro tubo. Solo EN TUBO se agrupan hasta ' + RUTAS_MAX_TUBO + ' circuitos por ruta; con romex o MC cada circuito es su propio cable y sale una ruta por circuito. El pie de cada ruta sale con el drop del ▾. Lo que el cerebro NO puede saber —si un tramo va por el piso o sobre el techo, si hay un chase— lo corriges arrastrando el vértice.');
+    c.innerHTML = h; enganchaRutasBotones();
+  }
+  function enganchaRutasBotones() {
+    var b;
+    if ((b = $('#rtLocaliza'))) b.addEventListener('click', function () { rutasLocaliza(); });
+    if ((b = $('#rtPropon'))) b.addEventListener('click', function () { rutasPropon(null); });
+    if ((b = $('#rtCancela'))) b.addEventListener('click', function () { rutasPara(rutasProp); pintaRutas(); });
+    if ((b = $('#rtVolver'))) b.addEventListener('click', function () { rutasProp = null; pintaRutas(); });
+    if ((b = $('#rtAceptaTodas'))) b.addEventListener('click', rutasAceptaTodas);
+    if ((b = $('#rtQuitaTodas'))) b.addEventListener('click', function () { uiConfirm('¿Quitar las ' + propuestasDeHoja().length + ' rutas propuestas de esta hoja?', function (ok) { if (ok) rutasQuitaTodas(); }); });
+    var c = $('#rutasCuerpo');
+    // el cuerpo es el mismo elemento en cada repintado: el listener se pone UNA vez (revisión 20/09: se apilaban)
+    if (c && !c.__rutasClick) c.__rutasClick = true, c.addEventListener('click', function (ev) {
+      var t = ev.target.closest && ev.target.closest('button');
+      if (t && t.dataset.propon != null) { rutasPropon(t.dataset.propon); return; }
+      if (t && t.dataset.coloca != null) { rutasColocaPanel(t.dataset.coloca); return; }
+      if (t && t.dataset.ok != null) { rutaAcepta(t.dataset.ok); return; }
+      if (t && t.dataset.x != null) { rutaQuita(t.dataset.x); return; }
+      var fila = ev.target.closest && ev.target.closest('.vFila'); if (!fila) return;
+      var a = (state.areas || []).filter(function (q) { return q.id === fila.dataset.id; })[0];
+      if (a && a.pts && a.pts.length) { var m = a.pts[Math.floor(a.pts.length / 2)]; centraEn(m[0], m[1]); sel = { kind: 'area', id: a.id }; selGroup = null; renderSel(); showProps(); }
+    });
+  }
+  /* El panel Rutas se repinta con el plano cuando está abierto y no hay pasada
+     en vuelo: colocar un panel a mano, mover o borrar marcas ⚡, contar con ckt
+     — todo se refleja (revisión 20/09: se quedaba con la vista vieja). */
+  function pintaRutasSiAbierto() {
+    var b = $('#rutasBox'); if (!b || b.classList.contains('oculto')) return;
+    if (rutasProp && rutasProp.enVuelo) return;
+    pintaRutas();
+  }
+  (function () {
+    var b = $('#rutasBox'); if (!b) return;
+    arrastraPanel($('#rutasCab'), b);
+    var bc = $('#rutasCerrar'); if (bc) bc.addEventListener('click', cierraRutas);
+  })();
+  // (el __rutasDbg de las rutas de conduit —E5— sigue siendo suyo: este es el de las propuestas)
+  window.__rutasPropDbg = {
+    localiza: rutasLocaliza, propon: rutasPropon, para: function () { rutasPara(rutasProp); pintaRutas(); },
+    parse: parseCkt, parseTodos: parseCkts, clave: clavePanel, nombre: nombreTablero, maxTubo: rutasMaxTubo,
+    circuitos: circuitosDeHoja, tableros: function () { return tablerosDeHoja().map(function (t) { return { panel: t.panel, clave: t.clave, tipo: t.tipo, rutas: t.rutas, marca: t.marca ? { x: t.marca.x, y: t.marca.y } : null }; }); },
+    conocidos: panelesConocidos,
+    propuestas: function () { return propuestasDeHoja().map(function (a) { return { id: a.id, panel: a.circ.panel, nums: numsCirc(a.circ), ckts: a.circ.ckts, pts: a.pts, ft: Math.round(largoHomerun(a) / 12), conf: a.rutaProp && a.rutaProp.conf }; }); },
+    acepta: rutaAcepta, quita: rutaQuita, aceptaTodas: rutasAceptaTodas, quitaTodas: rutasQuitaTodas,
+    estado: function () { return rutasProp ? { fase: rutasProp.fase, hoja: rutasProp.hoja, enVuelo: rutasProp.enVuelo, cancel: rutasProp.cancel, hechas: rutasProp.hechas, puestos: rutasProp.puestos, fallos: rutasProp.fallos.slice(), paneles: rutasProp.paneles, resultados: rutasProp.resultados } : null; },
+    pinta: function () { abreRutas(); pintaRutas(); }, cierra: cierraRutas
+  };
+
 
   window.__ocrDbg = { lee: ocrLee, recorte: ocrRecorte, carga: ocrCarga };
   window.__leyendaDbg = {
@@ -12549,7 +13017,7 @@
     // del 2P/3P y el panel crece si hace falta.
     var n = 0, avisos = [];
     state.areas.forEach(function (ar) {
-      if (!ar.open || !ar.circ || !ar.circ.num) return;
+      if (!ar.open || !ar.circ || !ar.circ.num || ar.propuesta) return;   // (E30) una propuesta no va al Panel Schedule
       var nom = (ar.circ.panel || '').trim(), p = null;   // (el tramo derivado comparte panel y número con su homerun)
       if (nom) p = state.panels.filter(function (q) { return (q.name || '').trim().toUpperCase() === nom.toUpperCase(); })[0];
       if (!p) {
@@ -12628,12 +13096,14 @@
       });
     }
     // CIRCUITOS / HOMERUNS: cable por tipo (trazo + drop) y breakers
-    var cabPorTipo = {}, nTramos = 0;
+    var cabPorTipo = {}, nTramos = 0, nProp = 0;
     state.areas.forEach(function (ar) {
       if (!ar.open || !ar.circ) return;
+      if (ar.propuesta) { nProp++; return; }   // (E30) una ruta propuesta no se cotiza hasta aceptarla
       nTramos++;
       partidasHomerun(ar).forEach(function (q) { cabPorTipo[q.item] = (cabPorTipo[q.item] || 0) + q.ft; });
     });
+    if (nProp) rows += '<tr><td colspan="2" class="muted small">⚡ ' + nProp + ' ruta(s) propuestas por el cerebro sin aceptar: no se cotizan (acéptalas en Rutas)</td></tr>';
     // el breaker es del CIRCUITO, no del tramo: se cuenta una vez por número
     var brk = breakersDeCircuitos(state.areas), nCirc = cuentaCircuitos(state.areas);
     if (nTramos) {
@@ -13025,7 +13495,7 @@
     });
     // circuitos: una fila por tramo (con su drop sumado) y los breakers por circuito
     state.areas.forEach(function (ar) {
-      if (!ar.open || !ar.circ) return;
+      if (!ar.open || !ar.circ || ar.propuesta) return;   // (E30) las propuestas no se cotizan
       var etq = (ar.circ.panel || '') + ' #' + rotuloNums(ar.circ) + ' ' + (TIPO_CORRIDA_NOM[tipoCorrida(ar.circ)] || '') + (ar.circ.desc ? ' ' + ar.circ.desc : '') + ' (' + (ar.circ.amps || '') + 'A/' + (ar.circ.poles || 1) + 'P, drop ' + (ar.circ.drop || 0) + ' ft' + ((ar.circ.mult || 1) > 1 ? ', ×' + ar.circ.mult : '') + ')';
       partidasHomerun(ar).forEach(function (q) {
         rows.push(['Circuits', q.item, etq, 1, (q.ft / 12).toFixed(2), fmtFtIn(q.ft), '']);
@@ -13275,11 +13745,13 @@
     var nom = function (i) { var sh = (state.sheets || [])[i]; return (sh && sh.no) ? sh.no : ('hoja ' + (i + 1)); };
     var tT = 0, tC = 0;
     ls.forEach(function (q) { tT += q.tubo; tC += q.cable; });
+    // el mundo va en pulgadas (largoRuta/12 es lo que va al takeoff): aquí igual
+    var ft = function (v) { return Math.round(v / 12).toLocaleString(); };
     return 'PIES POR HOJA (tubo / cable):\n' + ls.map(function (q) {
-      return '• ' + nom(q.i) + ' — ' + Math.round(q.tubo).toLocaleString() + ' ft de tubo · ' + Math.round(q.cable).toLocaleString() + ' ft de cable';
-    }).join('\n') + '\n• TOTAL — ' + Math.round(tT).toLocaleString() + ' ft de tubo · ' + Math.round(tC).toLocaleString() + ' ft de cable';
+      return '• ' + nom(q.i) + ' — ' + ft(q.tubo) + ' ft de tubo · ' + ft(q.cable) + ' ft de cable';
+    }).join('\n') + '\n• TOTAL — ' + ft(tT) + ' ft de tubo · ' + ft(tC) + ' ft de cable';
   }
-  window.__takeoffHojas = function () { return (takeoffPorHoja || []).map(function (q) { return { i: q.i, tubo: Math.round(q.tubo), cable: Math.round(q.cable) }; }); };
+  window.__takeoffHojas = function () { return (takeoffPorHoja || []).map(function (q) { return { i: q.i, tubo: Math.round(q.tubo / 12), cable: Math.round(q.cable / 12) }; }); };
   window.__takeoffHojasTxt = textoLinealesPorHoja;
   function resumenPorPartida(entries) {
     var m = {};
@@ -13337,14 +13809,14 @@
         ph.tubo += Lr;
       });
       (d.areas || []).forEach(function (ar) {
-        if (!ar.open || !ar.circ) return;
+        if (!ar.open || !ar.circ || ar.propuesta) return;   // una ruta PROPUESTA no se cotiza hasta que se acepta
         partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; suma(q.item, q.ft); });
         circAreas.push(ar);   // los breakers se cuentan al final, por circuito y no por tramo
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
       // el Count: cada marca suma 1 a su categoría; al estimador va con el
       // alias (el Subject de Bluebeam que ya entiende) o con el nombre
-      (d.counts || []).forEach(function (q) { if (q && q.cat) cnt[q.cat] = (cnt[q.cat] || 0) + 1; });
+      (d.counts || []).forEach(function (q) { if (q && q.cat) { var cq = catCount(q.cat); if (cq && cq.tablero) return; cnt[q.cat] = (cnt[q.cat] || 0) + 1; } });
       (d.areas || []).forEach(function (a) {
         var estA = LINE_STYLES[a.lineStyle];
         if (estA && estA.ft && Array.isArray(a.pts) && a.pts.length >= 2) {
@@ -13360,7 +13832,7 @@
        en dos tramos (A→B y B→C) pide UN breaker, y un tubo con 2 circuitos
        pide DOS. Antes salía uno por tramo y uno por tubo. */
     // lo puesto a mano en cada categoría entra una vez, sea la hoja o el set
-    catsCount().forEach(function (c) { if (c.manual > 0) cnt[c.id] = (cnt[c.id] || 0) + c.manual; });
+    catsCount().forEach(function (c) { if (c.manual > 0 && !c.tablero) cnt[c.id] = (cnt[c.id] || 0) + c.manual; });
     var brkT = breakersDeCircuitos(circAreas);
     Object.keys(brkT).forEach(function (kb) { byKey['__brk__' + kb] = (byKey['__brk__' + kb] || 0) + brkT[kb]; });
     // cada renglón sale con su código de partida (contrato §4): breakers y
@@ -16487,7 +16959,7 @@
     (state.leaders || []).forEach(function (o) { nums(o, ['x', 'y', 'tx', 'ty', 'size', 'op', 'bold', 'italic']); col(o); if (o.text != null) o.text = String(o.text); if (o.font != null && !TEXT_FONTS[o.font]) delete o.font; if (o.align != null && !TEXT_ANCHOR[o.align]) delete o.align; });
     (state.inks || []).forEach(function (o) { if (o.pts) o.pts = pts(o.pts); nums(o, ['lw', 'op', 'k']); col(o); });
     state.counts = (state.counts || []).filter(function (o) { return o && typeof o === 'object'; });
-    state.counts.forEach(function (o) { nums(o, ['x', 'y']); if (o.cat != null) o.cat = String(o.cat).slice(0, 40); if (o.ia != null) { o.ia = +o.ia; if (!(o.ia >= 0 && o.ia <= 100)) delete o.ia; } if (o.iaNota != null) { o.iaNota = String(o.iaNota).slice(0, 120); if (!o.iaNota) delete o.iaNota; } });
+    state.counts.forEach(function (o) { nums(o, ['x', 'y']); if (o.cat != null) o.cat = String(o.cat).slice(0, 40); if (o.ia != null) { o.ia = +o.ia; if (!(o.ia >= 0 && o.ia <= 100)) delete o.ia; } if (o.iaNota != null) { o.iaNota = String(o.iaNota).slice(0, 120); if (!o.iaNota) delete o.iaNota; } if (o.ckt != null) { o.ckt = String(o.ckt).toUpperCase().replace(/\s+/g, '').slice(0, 16); if (!o.ckt) delete o.ckt; } });
     state.countCats = (state.countCats || []).filter(function (o) { return o && typeof o === 'object' && o.id; });
     state.countCats.forEach(function (o) {
       o.id = String(o.id).slice(0, 40);
@@ -16497,6 +16969,8 @@
       o.num = o.num === false ? false : true;
       ['alias', 'set', 'item', 'unidad', 'codigo', 'receta'].forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; else o[k] = String(o[k]).slice(0, 80); });
       if (o.receta && o.recetaFull) o.recetaFull = true; else delete o.recetaFull;
+      // (E30) un panel localizado es una categoría de conteo, pero no una pieza: no va al estimador
+      if (o.tablero) { o.tablero = true; o.panel = String(o.panel || o.nom).replace(/^⚡ (PANEL|XFMR|CUARTO) /, '').slice(0, 24); if (o.tipo && /^(switchboard|transformador|cuarto_electrico|otro)$/.test(String(o.tipo))) o.tipo = String(o.tipo); else delete o.tipo; } else { delete o.tablero; delete o.panel; delete o.tipo; }
       var mn = parseInt(o.manual, 10); if (mn > 0) o.manual = mn; else delete o.manual;
       // el molde para buscar el símbolo en el plano (17/09): cuatro números o nada
       if (o.moldeRect && typeof o.moldeRect === 'object') { var mr = o.moldeRect, ok = ['x0', 'y0', 'x1', 'y1'].every(function (k) { return isFinite(N(mr[k], NaN)); }); if (ok) o.moldeRect = { x0: N(mr.x0, 0), y0: N(mr.y0, 0), x1: N(mr.x1, 0), y1: N(mr.y1, 0) }; else delete o.moldeRect; } else delete o.moldeRect;
@@ -22716,6 +23190,7 @@
       html += '<div class="tmHead">Lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__leyenda"><span><b>Leer la leyenda</b> del plano… <span class="muted">· saca las categorías con su nombre</span></span></div>';
       html += '<div class="tmItem" data-k="__cerebro"><span><b>Cuéntame los devices</b> con el cerebro… <span class="muted">· marca cada símbolo, tú revisas</span></span></div>';
+      html += '<div class="tmItem" data-k="__rutas"><span><b>Propón la ruta</b> del tubo… <span class="muted">· paneles, circuitos y el camino, tú corriges</span></span></div>';
       html += '<div class="tmItem" data-k="__notas"><span><b>Lee las notas</b> del ingeniero… <span class="muted">· ' + (proyNotas() ? (proyNotas().cuidados || []).filter(function (x) { return !x.fuera; }).length + ' cuidado(s) guardados' : 'saca los «cuidado con esto»') + '</span></span></div>';
       var cAl = catCount(catActiva) || catsM[0];
       if (catsM.length) {
@@ -22965,6 +23440,7 @@
           if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
           if (k === '__cerebro') { tm.hidden = true; abreCuenta(); pintaCuenta(); setTool('cuenta'); return; }
           if (k === '__notas') { tm.hidden = true; abreNotas(); pintaNotas(); if (!proyNotas()) setTool('notas'); return; }
+          if (k === '__rutas') { tm.hidden = true; abreRutas(); pintaRutas(); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__doc') { tm.hidden = true; abreDoc(); return; }

@@ -1109,6 +1109,27 @@ body.touch .ayudaQ { width: 26px; height: 26px; min-width: 26px; font-size: 13px
 #cuentaCuerpo .cdMal { color: #a33; font-weight: 600; }
 body.touch #cuentaBox { right: 8px; top: 76px; width: min(380px, calc(100vw - 16px)); }
 svg.tool-notas { cursor: crosshair; }
+/* Propón la ruta (E30): mismo panel */
+#rutasBox {
+  position: fixed; right: 276px; top: 78px; z-index: 61; width: 400px; max-width: calc(100vw - 16px);
+  background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 14px;
+  box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 20px 44px -14px rgba(7,26,46,.35); overflow: hidden;
+}
+#rutasBox.oculto { display: none; }
+#rutasCab { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line); cursor: move; touch-action: none; user-select: none; }
+#rutasTit { font-weight: 600; font-size: 12px; flex: 1; letter-spacing: .1em; color: var(--mp-ink); }
+#rutasCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+#rutasCuerpo { padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-height: calc(100vh - 120px); overflow: auto; }
+#rutasCuerpo .bMuted { color: var(--mp-ink-2); line-height: 1.5; }
+#rutasCuerpo .vN { font-size: 13px; }
+#rutasCuerpo button { padding: 6px 9px; border: 1px solid rgba(27,60,140,.18); border-radius: 9px; background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); color: var(--mp-navy); font-size: 12px; font-weight: 600; cursor: pointer; }
+#rutasCuerpo button[disabled] { opacity: .45; cursor: default; }
+#rutasCuerpo button.small { padding: 2px 7px; font-size: 11px; }
+#rutasCuerpo .row { display: flex; gap: 6px; }
+#rutasCuerpo .cdOk { color: var(--mp-teal-text); font-weight: 600; }
+#rutasCuerpo .cdMal { color: #c2255c; font-weight: 600; }
+body.touch #rutasBox { right: 8px; top: 76px; width: min(420px, calc(100vw - 16px)); }
+body.touch #rutasCab button { width: 34px; height: 34px; }
 /* Lee las notas → cuidado con esto (E29): mismo panel que el conteo */
 #notasBox {
   position: fixed; right: 276px; top: 78px; z-index: 61; width: 380px; max-width: calc(100vw - 16px);
