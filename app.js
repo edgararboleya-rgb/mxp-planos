@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.M';
+  var APP_VERSION = 'v34.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -142,6 +142,35 @@
     });
   }
   function uiConfirm(title, cb) { uiDialog(title, {}, cb); }
+
+  /* ================= MENOS TEXTO EN PANTALLA (E28, 19/09) =================
+     Edgar: «menos texto en pantalla: los avisos largos a un "?" al lado; las
+     pantallas de resultado dicen el número y ya».
+     No se borra ni una palabra —la primera vez hacen falta— pero se pliegan
+     detrás de un «?». Cada una recuerda si la dejó abierta, así que quien
+     quiere leerlas las tiene y quien ya sabe no las ve nunca más.
+     Sigue en el DOM aunque esté plegada: lo que se esconde es a la vista, no
+     al buscador del navegador ni a un lector de pantalla. */
+  function ayudaAbierta(id) { try { return localStorage.getItem('mxp_ayuda_' + id) === '1'; } catch (e) { return false; } }
+  function ayudaHtml(id, txt, abrePorDefecto) {
+    var ab;
+    try { var v = localStorage.getItem('mxp_ayuda_' + id); ab = v === null ? !!abrePorDefecto : v === '1'; }
+    catch (e) { ab = !!abrePorDefecto; }
+    return '<div class="ayudaCaja"><button type="button" class="ayudaQ' + (ab ? ' abierta' : '') + '" data-ayuda="' + esc(id) + '" title="' + (ab ? 'Esconder la explicación' : 'Qué es esto') + '">?</button>' +
+      '<div class="ayudaTxt' + (ab ? '' : ' plegada') + '" data-ayudatxt="' + esc(id) + '">' + txt + '</div></div>';
+  }
+  document.addEventListener('click', function (ev) {
+    var b = ev.target && ev.target.closest && ev.target.closest('.ayudaQ');
+    if (!b) return;
+    var id = b.dataset.ayuda, caja = b.parentNode.querySelector('.ayudaTxt[data-ayudatxt="' + id + '"]');
+    if (!caja) return;
+    var abre = caja.classList.contains('plegada');
+    caja.classList.toggle('plegada', !abre);
+    b.classList.toggle('abierta', abre);
+    b.title = abre ? 'Esconder la explicación' : 'Qué es esto';
+    try { localStorage.setItem('mxp_ayuda_' + id, abre ? '1' : '0'); } catch (e) {}
+  });
+  window.__ayudaDbg = { abierta: ayudaAbierta, html: ayudaHtml };
   function uiAlert(title) { uiDialog(title, { alert: true }, null); }
   document.getElementById('askOk').addEventListener('click', function () { askClose(true); });
   (function () { var b3 = document.getElementById('askTercero'); if (b3) b3.addEventListener('click', function () { askClose('tercero'); }); })();
@@ -10915,7 +10944,8 @@
     if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>'; enganchaLeyOtra(); return; }
     if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
     if (!ley || !ley.filas) {
-      c.innerHTML = '<div class="bMuted">Encierra con dos toques la <b>TABLA DE SÍMBOLOS</b> del ingeniero. La app la lee <b>sola, en tu aparato</b>: saca cada dibujo con su texto, le busca su fila del catálogo y su <b>receta</b> (el punto completo), y después puede <b>buscar cada símbolo en todas las hojas</b> y contarlos.<br><br>Encierra la tabla con su borde, no la hoja entera. Si las letras del PDF están en curvas, las lee con OCR (la primera vez carga 10 MB).</div>';
+      c.innerHTML = '<div class="bMuted">Encierra con dos toques la <b>TABLA DE SÍMBOLOS</b> del ingeniero.</div>' +
+        ayudaHtml('ley1', 'La app la lee <b>sola, en tu aparato</b>: saca cada dibujo con su texto, le busca su fila del catálogo y su <b>receta</b> (el punto completo). Encierra la tabla con su borde, no la hoja entera. Si las letras del PDF están en curvas, las lee con OCR (la primera vez carga 10 MB).', true);
       return;
     }
     var vivas = ley.filas.filter(function (f) { return !f.fuera; });
@@ -10926,7 +10956,7 @@
       h += '<button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>';
       c.innerHTML = h; enganchaLeyOtra(); return;
     }
-    h += '<div class="muted small">El nombre se puede corregir. La pareja es lo que te propone la biblioteca; la <b>receta</b> es el punto completo que irá al estimador (caja, anillo, tapa, conectores…). Verde = casa bien; rojo = míralo. Nada se crea sin que lo veas.</div>';
+    h += ayudaHtml('ley2', 'El nombre se puede corregir. La pareja es lo que te propone la biblioteca; la <b>receta</b> es el punto completo que irá al estimador (caja, anillo, tapa, conectores…). Verde = casa bien; rojo = míralo. Nada se crea sin que lo veas.');
     if (ley.local && ley.recetas && !ley.recetas.length) h += '<div class="muted small" style="color:#a33">Sin sesión del estimador no puedo proponer recetas: las categorías nacen sin punto completo (se les pone después en Count ▾).</div>';
     h += '<div class="lyLista" id="lyLista">';
     ley.filas.forEach(function (f) {
@@ -11367,7 +11397,8 @@
     var h = '';
     if (!cuenta) {
       var nCats = catsCount().length, rH = cuentaRectHoja(), losasH = rH ? cuentaLosas(rH) : null, nL = losasH ? losasH.length : 0;
-      h += '<div class="bMuted">El cerebro mira la hoja por <b>losas</b> y marca cada símbolo de tus <b>' + nCats + ' categoría' + (nCats === 1 ? '' : 's') + '</b>. Las marcas entran al Count; las <b>punteadas</b> son las dudosas: míralas primero.</div>';
+      h += '<div class="bMuted">Marca cada símbolo de tus <b>' + nCats + ' categoría' + (nCats === 1 ? '' : 's') + '</b>.</div>' +
+        ayudaHtml('cuenta1', 'El cerebro mira la hoja por <b>losas</b> (trozos), porque un receptáculo en una hoja entera son 12 píxeles y no se distingue de un quadruplex. Las marcas entran al Count como cualquier otra; las <b>punteadas</b> son las que él mismo da por dudosas: míralas primero.', true);
       if (!nCats) h += '<div class="bMuted" style="color:#a33">Sin categorías no hay nombres que contar: <b>Count ▾ → Leer la leyenda</b>.</div>';
       var rep = cuentaNombresRepetidos();
       if (rep.length) h += '<div class="bMuted" style="color:#a33">⚠ Dos categorías con el <b>mismo nombre</b>: ' + rep.map(function (n) { return '«' + esc(n) + '»'; }).join(', ') + '. El cerebro copia nombres y no las distingue: todo lo que cuente cae en UNA. Renómbrale una antes (Count ▾ → Más… → Renombrar) y dile el tag que las diferencia.</div>';
@@ -11384,7 +11415,7 @@
       var pc = Math.round(C.hechas / Math.max(1, C.losas.length) * 100);
       h += '<div class="vN"><b>Losa ' + Math.min(C.losas.length, C.hechas + C.corriendo) + ' de ' + C.losas.length + '</b> · ' + C.marcas.length + ' marca(s) hasta ahora</div>';
       h += '<div class="cuBarra"><div style="width:' + pc + '%"></div></div>';
-      h += '<div class="muted small">Cada losa tarda 20–60 s. Puedes seguir trabajando en esta hoja; no cambies de hoja hasta que termine.</div>';
+      h += ayudaHtml('cuenta2', 'Cada losa tarda 20–60 s. Puedes seguir trabajando en esta hoja; no cambies de hoja hasta que termine.');
       h += '<button id="cuCancela" style="width:100%;margin-top:6px">Parar aquí y quedarme con lo que llegó</button>';
       c.innerHTML = h; enganchaCuentaBotones(); return;
     }
@@ -11429,12 +11460,12 @@
     var $c = cuentaCosto(C.uso, C.modelo);
     h += '<div class="muted small" style="margin-top:6px">' + (C.modelo ? esc(C.modelo) + ' · ' : '') + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in.toLocaleString() + ' / ' + C.uso.out.toLocaleString() + ' tokens ≈ $' + $c.toFixed(2) + '</div>';
     h += '<button id="cuOtra" style="width:100%;margin-top:6px">Contar otra zona</button>';
-    h += '<div class="muted small" style="margin-top:4px">Ctrl+Z quita TODAS las de esta pasada. Lo que ya estaba contado no se duplicó.</div>';
+    h += ayudaHtml('cuenta3', 'Ctrl+Z quita TODAS las de esta pasada. Lo que ya estaba contado no se duplicó.');
     /* (19/09) El cerebro mira DIBUJOS. Lo que decide el precio de verdad en un
        hospital —hospital grade, rama crítica, quién pone la luz— no está en el
        dibujo: está en la leyenda, en las notas y en la receta. Decirlo aquí,
        donde se revisa, y no darlo por sabido. */
-    h += '<div class="muted small" style="margin-top:6px;border-top:1px solid var(--mp-line);padding-top:6px">El cerebro cuenta <b>dibujos</b>. No sabe si ese receptáculo es <b>hospital grade</b>, si va en <b>rama crítica</b>, si lleva tubo rojo o si la luminaria la pone otro: eso lo dicen la leyenda, las notas del ingeniero y la receta de cada categoría. Cuenta bien lo que hay; <b>qué es cada cosa lo decides tú</b>.</div>';
+    h += ayudaHtml('cuenta4', 'El cerebro cuenta <b>dibujos</b>. No sabe si ese receptáculo es <b>hospital grade</b>, si va en <b>rama crítica</b>, si lleva tubo rojo o si la luminaria la pone otro: eso lo dicen la leyenda, las notas del ingeniero y la receta de cada categoría. Cuenta bien lo que hay; <b>qué es cada cosa lo decides tú</b>.', true);
     c.innerHTML = h; enganchaCuentaBotones();
   }
   function cuentaErrorTxt(vio, tu) {
@@ -13337,11 +13368,15 @@
           state.project.estimateId = estId;
           scheduleAutosave();
           var porCod = resumenPorPartida(items.map(function (it) { return { codigo: it.codigo, qty: it.cantidad }; }));
-          uiAlert('✔ Takeoff enviado al estimador de Max Power.\n\nEstimado: "' + est.nombre + '" — BORRADOR\nRenglones enviados: ' + items.length +
-            (ensRows.length ? '\nPuntos completos (recetas): ' + nPuntos + ' en ' + ensRows.length + ' receta(s) — de cada punto salen su caja, anillo, tapa, conectores, wirenuts y pigtail'
-              + (nFull ? ', y ' + nFull + ' de ellos CON su tubo y su cable (los marcaste como stub)' : '')
-              + (nPuntos - nFull ? '. Los otros ' + (nPuntos - nFull) + ' van SIN tubo ni cable: esos los mediste tú sobre el plano' : '') : '') +
-            '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
+          /* MENOS TEXTO (19/09). Edgar: «las pantallas de resultado dicen el
+             número y ya». Antes esto abría con cuatro líneas de explicación de
+             lo que es un punto completo —que él sabe de sobra— y el desglose
+             por partida ocupaba diez renglones antes de los avisos. Ahora:
+             el NÚMERO primero, lo que hay que MIRAR después, y el detalle al
+             final, en una línea. No se quitó ningún aviso. */
+          uiAlert('✔ Takeoff enviado — ' + items.length + ' renglón(es)' +
+            (ensRows.length ? ' · ' + nPuntos + ' punto(s) completo(s) en ' + ensRows.length + ' receta(s)' + (nFull ? ' (' + nFull + ' con su tubo)' : '') : '') +
+            '\n' + est.nombre + ' — BORRADOR' +
             (textoLinealesPorHoja() ? '\n\n' + textoLinealesPorHoja() : '') +
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (sinColumnaLineal ? '\n\n⚠ El estimador aún no tiene la columna "sin_lineales" en estimado_ensambles: las recetas fueron CON su tubo y su cable, así que ese material está DOS VECES. SQL listo en docs/sql/e17-punto-completo.sql.' : '') +
@@ -13350,6 +13385,7 @@
             (luces.length ? '\n\n💡 LUMINARIAS QUE PONE OTRO — fueron como SOLO INSTALACIÓN (la mano, el whip, la caja; la luz no):\n• ' + luces.map(function (l) { return l.name + ' ×' + l.qty + ' → ' + l.receta; }).join('\n• ') + '\nY la luz en sí, un renglón «COTIZACIÓN PENDIENTE — …» por modelo en $0: cuando llegue la cuota, pon ahí el precio de cada una.' : '') +
             (recSin.length ? '\n\n⚠ RECETAS QUE NO EXISTEN (no se enviaron):\n• ' + recSin.join('\n• ') : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
+            '\n\nPor partida: ' + porCod.map(function (r) { return r.codigo + ' ×' + r.renglones; }).join(' · ') +
             '\n\nÁbrelo en tu panel de Max Power → Estimador para elegir escenario y sacar el BID.');
           setHint('✔ Estimado ' + estId + ' creado como borrador en el estimador');
         }).catch(handleErr);
@@ -20486,7 +20522,7 @@
       h += '<div class="row"><label style="flex:1">Buscar en todas las hojas (' + state.sheets.length + ')</label><input id="vTodo" type="checkbox"' + (visual.todo ? ' checked' : '') + ' title="El mismo símbolo en todas las hojas del set que tengan plano de fondo. Cada resultado dice en qué hoja está y al tocarlo salta allí."></div>';
     }
     h += '<div class="row"><label>Se parecen</label><input id="vUmbral" type="range" min="55" max="97" step="1" value="' + Math.round(visual.umbral * 100) + '" style="flex:1"><span id="vUmbralN" class="muted small" style="width:34px;text-align:right">' + Math.round(visual.umbral * 100) + '%</span></div>';
-    h += '<div class="muted small">Bájalo si faltan; súbelo si está cogiendo cosas que no son. Sobra mejor que falte: lo que sobra lo ves y lo quitas de la lista, lo que falta no lo sabes nunca.</div>';
+    h += ayudaHtml('vis1', 'Bájalo si faltan; súbelo si está cogiendo cosas que no son. Sobra mejor que falte: lo que sobra lo ves y lo quitas de la lista, lo que falta no lo sabes nunca.');
     /* La lista de revisión: uno por fila, del que más se parece al que menos.
        Tocar la fila lleva el plano hasta él; la ✗ lo saca de la cuenta. Los
        de abajo son casi siempre los falsos, así que se repasa de abajo arriba. */
@@ -20506,7 +20542,7 @@
       cats.map(function (q) { return '<option value="' + esc(q.id) + '"' + (catActiva === q.id ? ' selected' : '') + '>' + esc(q.nom) + '</option>'; }).join('') +
       '<option value="__nueva">＋ Categoría nueva…</option></select></div>';
     h += '<button id="vAdd" style="width:100%;margin-top:6px"' + (vivos.length ? '' : ' disabled') + '>Añadir ' + (vivos.length === 1 ? 'el que queda' : 'los ' + vivos.length) + ' al conteo</button>';
-    h += '<div class="muted small" style="margin-top:6px">Esto compara dibujos, no lee el plano: si hay dos símbolos casi iguales los va a confundir. Por eso los ves antes de contarlos.</div>';
+    h += ayudaHtml('vis2', 'Esto compara dibujos, no lee el plano: si hay dos símbolos casi iguales los va a confundir. Por eso los ves antes de contarlos.');
     c.innerHTML = h;
     var u = $('#vUmbral'), un = $('#vUmbralN');
     if (u) {
