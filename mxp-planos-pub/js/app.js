@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.K';
+  var APP_VERSION = 'v34.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11080,6 +11080,12 @@
   var CUENTA_DUDA = 70;        // por debajo, la marca sale punteada
   var CUENTA_PARALELO = 2;     // losas en vuelo a la vez
   var CUENTA_PRECIO = { 'claude-fable-5-1': [10, 50], 'claude-opus-5': [5, 25], 'claude-sonnet-5': [2, 10], 'claude-haiku-4-5-20251001': [1, 5] };   // $ por millón, entrada/salida
+  /* Lo que cuesta UNA losa de verdad. Medido el 19/09 sobre la E-2.2 de
+     Nicklaus con Fable: 6 losas, 64.590 de entrada y 54.138 de salida, $3,35
+     — o sea $0,56 la losa. El $0,18 que enseñaba antes era una estimación mía
+     y se quedaba en la tercera parte: decidir si gastar con un número que no
+     es no ayuda a nadie. */
+  var CUENTA_COSTO_LOSA = 0.56;
 
   function abreCuenta() { var b = $('#cuentaBox'); if (b) b.classList.remove('oculto'); }
   function cierraCuenta() {
@@ -11346,7 +11352,7 @@
       var rep = cuentaNombresRepetidos();
       if (rep.length) h += '<div class="bMuted" style="color:#a33">⚠ Dos categorías con el <b>mismo nombre</b>: ' + rep.map(function (n) { return '«' + esc(n) + '»'; }).join(', ') + '. El cerebro copia nombres y no las distingue: todo lo que cuente cae en UNA. Renómbrale una antes (Count ▾ → Más… → Renombrar) y dile el tag que las diferencia.</div>';
       else if (nCats > 40) h += '<div class="muted small">Solo van las 40 primeras categorías (tope del cerebro).</div>';
-      h += '<button id="cuTodo" style="width:100%;margin-top:6px"' + (nCats && nL ? '' : ' disabled') + '>Contar toda la hoja' + (nL ? ' <span class="muted">· ' + nL + ' losa' + (nL === 1 ? '' : 's') + ' · ≈ $' + (nL * 0.18).toFixed(2) + '</span>' : '') + '</button>';
+      h += '<button id="cuTodo" style="width:100%;margin-top:6px"' + (nCats && nL ? '' : ' disabled') + '>Contar toda la hoja' + (nL ? ' <span class="muted">· ' + nL + ' losa' + (nL === 1 ? '' : 's') + ' · ≈ $' + (nL * CUENTA_COSTO_LOSA).toFixed(2) + ' y ' + Math.ceil(nL * 70 / 60) + ' min</span>' : '') + '</button>';
       h += '<button id="cuZona" style="width:100%;margin-top:4px"' + (nCats ? '' : ' disabled') + '>Encerrar una zona <span class="muted">· dos toques, esquina y esquina</span></button>';
       var dud0 = cuentaDudosas().length, ia0 = cuentaMarcasIA().length;
       if (dud0) h += '<div class="muted small" style="margin-top:6px">Quedan <b>' + dud0 + '</b> dudosa(s) en esta hoja. <button id="cuQuita" class="small">Quitarlas</button> <button id="cuAcepta" class="small">Darlas por buenas</button></div>';
