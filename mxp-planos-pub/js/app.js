@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.N';
+  var APP_VERSION = 'v34.O';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5386,6 +5386,7 @@
     vsearch: 'BUSCAR IGUALES: encierra en un marco UN símbolo del plano del ingeniero (dos toques, esquina y esquina) y te busco todos los que se ven igual',
     leyenda: 'LEER LA LEYENDA: encierra con dos toques la TABLA DE SÍMBOLOS del ingeniero (solo la tabla) y el cerebro te saca las categorías del Count ya nombradas',
     cuenta: 'CUÉNTAME LOS DEVICES: encierra con dos toques la zona del plano (esquina y esquina) y el cerebro marca cada símbolo de tus categorías · Esc para salir',
+    notas: 'LEE LAS NOTAS: encierra con dos toques el bloque de notas del ingeniero (esquina y esquina) y el cerebro las transcribe y saca los «cuidado con esto» · Esc para salir',
     count: 'COUNT: toca cada pieza para contarla — el ▾ del botón elige QUÉ cuentas · Esc para salir',
     text: 'Clic donde quieras colocar el texto',
     calibrate: 'CALIBRAR: clic en dos puntos del plano de fondo cuya distancia real conozcas',
@@ -5436,6 +5437,7 @@
     // la leyenda NO se cierra al cambiar de herramienta: la lista tarda 30-60 s en llegar y mientras se sigue trabajando
     if (t !== 'leyenda' && drawing && drawing.mode === 'leyenda') { drawing = null; G.prev.innerHTML = ''; }
     if (t !== 'cuenta' && drawing && drawing.mode === 'cuenta') { drawing = null; G.prev.innerHTML = ''; }
+    if (t !== 'notas' && drawing && drawing.mode === 'notas') { drawing = null; G.prev.innerHTML = ''; }
     /* Lo pendiente del cofre solo vale para la herramienta que se encendió con
        él: si cambias de herramienta por otro camino, se olvida (si no, el
        siguiente texto saldría con el tamaño de la nota guardada). */
@@ -5702,6 +5704,10 @@
         if (drawing && drawing.mode === 'cuenta') { var aC = drawing.a; drawing = null; G.prev.innerHTML = ''; cuentaFin(aC, rawP); }
         else { drawing = { mode: 'cuenta', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente de la zona'); }
         return;
+      case 'notas':
+        if (drawing && drawing.mode === 'notas') { var aN = drawing.a; drawing = null; G.prev.innerHTML = ''; notasFin(aN, rawP); }
+        else { drawing = { mode: 'notas', a: [rawP[0], rawP[1]] }; setHint('Ahora el segundo toque, en la esquina de enfrente del bloque de notas'); }
+        return;
       case 'place': return placeDown(p);
       case 'align': return alignDown(p);
     }
@@ -5739,7 +5745,7 @@
         '<line class="wall-edge" x1="' + drawing.last[0] + '" y1="' + drawing.last[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke-width="' + (t * 2) + '" stroke="#9a968a"/>' + gp +
         '<text class="lbl" x="' + ((drawing.last[0] + b[0]) / 2 + 8) + '" y="' + ((drawing.last[1] + b[1]) / 2 - 8) + '" font-size="9" font-weight="bold">' + fmtFtIn(len) + '</text></g>';
       drawing.cursor = b;
-    } else if (drawing && (drawing.mode === 'vsearch' || drawing.mode === 'leyenda' || drawing.mode === 'cuenta')) {
+    } else if (drawing && (drawing.mode === 'vsearch' || drawing.mode === 'leyenda' || drawing.mode === 'cuenta' || drawing.mode === 'notas')) {
       var vx = Math.min(drawing.a[0], p[0]), vy = Math.min(drawing.a[1], p[1]);
       G.prev.innerHTML = '<g class="preview"><rect x="' + vx + '" y="' + vy + '" width="' + Math.abs(p[0] - drawing.a[0]) +
         '" height="' + Math.abs(p[1] - drawing.a[1]) + '" fill="rgba(11,132,255,.10)" stroke="#0b84ff" stroke-width="1.2" stroke-dasharray="5 4"/></g>';
@@ -11176,11 +11182,12 @@
   /* Partir la zona en losas. Cada eje se reparte en n tramos iguales de lado
      `lado` que se solapan al menos CUENTA_SOLAPE. Sin papel conocido, la losa
      es un cuarto del lado largo del plano. */
-  function cuentaLosas(r) {
+  function cuentaLosas(r, pulgOpc) {
     var bg = state.bg; if (!bg || !bg.url) return null;
     var q = rectEnFondo(r); if (!q) return null;
+    var pulg = pulgOpc || CUENTA_LOSA_PULG;
     var ppu = bg.paperW && bg.w ? bg.paperW / bg.w : null;   // pulgadas de papel por unidad de mundo
-    var lado = ppu ? CUENTA_LOSA_PULG / ppu : Math.max(bg.w, bg.h) / 4;
+    var lado = ppu ? pulg / ppu : Math.max(bg.w, bg.h) / (pulgOpc ? 4.5 : 4);
     lado = Math.max(40, Math.min(lado, Math.max(q.W, q.H)));
     function ejes(a, L) {
       if (L <= lado * 1.02) return [[a, a + L]];
@@ -11251,7 +11258,8 @@
       if (cuenta !== C || C.cancel) return;
       if (!rec) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': ' + err); pintaCuenta(); cuentaLanza(); return; }
       var b64 = rec.b64; rec.cv.width = 1; rec.cv.height = 1;
-      pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, conteo: { simbolos: C.simb, losa: i + 1, de: C.losas.length } }).then(function (d) {
+      var ctx = notasContexto();
+      pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, conteo: { simbolos: C.simb, losa: i + 1, de: C.losas.length, contexto: ctx.length ? ctx : undefined } }).then(function (d) {
         if (cuenta !== C || C.cancel) return;
         if (!d || d.error || !d.conteo) { falla((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 220) : '') : 'el cerebro no contestó en formato de conteo (¿worker viejo? git pull · wrangler deploy)'); return; }
         cuentaRecibeLosa(d, rec.rect, i);
@@ -11568,6 +11576,281 @@
     pinta: function () { abreCuenta(); pintaCuenta(); },
     cfg: function (o) { if (o && o.paralelo) CUENTA_PARALELO = o.paralelo; if (o && o.px) CUENTA_PX = o.px; if (o && o.pulg) CUENTA_LOSA_PULG = o.pulg; return { paralelo: CUENTA_PARALELO, px: CUENTA_PX, pulg: CUENTA_LOSA_PULG, duda: CUENTA_DUDA }; }
   };
+  /* ================= LEE LAS NOTAS → CUIDADO CON ESTO (E29, 19/09) =================
+     Edgar: «que lea el plano de notas para que tenga un background de toda la
+     información, y las cosas que él crea que hay que tener cuidado me las
+     ponga… que estemos implicados los dos dentro de la app». Y hoy mismo, sin
+     pedírselo, el cerebro señaló en la E-2.2 el tag AE (emergencia) y los
+     switches D/OS: lo que las notas dicen y la leyenda no.
+
+     Dos pasadas. 1) La zona de notas que Edgar encierra se parte en losas
+     (8" de papel: la letra de 3/32" sale a 18 px y se lee) y cada losa va al
+     cerebro a TRANSCRIBIR, tal cual, sin resumir. 2) Todas las notas juntas,
+     con las categorías del Count y las recetas del estimador, van en UNA
+     llamada de solo texto a sacar los CUIDADOS: lo que cambia dinero, horas o
+     alcance, con la categoría afectada, la acción, y si falta una categoría o
+     casa una receta. La lista es revisable (visto / no aplica), se guarda CON
+     el proyecto, y lo que queda vivo viaja después como contexto del conteo. */
+  var notas = null;   // la pasada en marcha: { hoja, losas, hechas, corriendo, sig, leidas, sinLeer, fallos, uso, modelo, t0, enVuelo, cancel, fase }
+  var NOTAS_LOSA_PULG = 8;
+  function proyNotas() { return (state.project && state.project.notas && typeof state.project.notas === 'object') ? state.project.notas : null; }
+  function abreNotas() { var b = $('#notasBox'); if (b) b.classList.remove('oculto'); }
+  function cierraNotas() {
+    if (notas && notas.enVuelo) notasCancela();
+    var b = $('#notasBox'); if (b) b.classList.add('oculto');
+    notas = null;
+    if (tool === 'notas') setTool('select');
+  }
+  function notasHojaNom(i) { var sh = (state.sheets || [])[i]; return (sh && sh.no) ? sh.no : ('hoja ' + (i + 1)); }
+  function notasArranca(r) {
+    if (notas && notas.enVuelo) { setHint('Ya hay una lectura de notas en marcha'); return; }
+    abreNotas();
+    var c = cerebroCfg();
+    if (!c.url) { pintaNotas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!state.bg || !state.bg.url) { pintaNotas(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
+    var losas = cuentaLosas(r, NOTAS_LOSA_PULG);
+    if (!losas || !losas.length) { pintaNotas(null, 'La zona quedó vacía o fuera del plano. Encierra el bloque de notas.'); return; }
+    notas = { hoja: state.curSheet, losas: losas, hechas: 0, corriendo: 0, sig: 0, leidas: [], sinLeer: [], fallos: [], uso: { in: 0, out: 0 },
+              modelo: '', t0: Date.now(), enVuelo: true, cancel: false, fase: 'leer' };
+    pintaNotas();
+    notasLanza();
+  }
+  function notasLanza() {
+    if (!notas || notas.cancel) return;
+    while (notas.corriendo < CUENTA_PARALELO && notas.sig < notas.losas.length) notasLosa(notas.sig++);
+    if (!notas.corriendo && notas.hechas >= notas.losas.length) notasCuidados();
+  }
+  function notasLosa(i, reintento) {
+    var N = notas, L = N.losas[i];
+    N.corriendo++;
+    function hecho() {
+      if (notas !== N || N.cancel) return;
+      N.corriendo--; N.hechas++;
+      setHint('Cerebro leyendo notas: losa ' + N.hechas + ' de ' + N.losas.length + ' · ' + N.leidas.length + ' nota(s)');
+      pintaNotas(); notasLanza();
+    }
+    function falla(msg) {
+      if (notas !== N || N.cancel) return;
+      if (!reintento) { setTimeout(function () { if (notas === N && !N.cancel) { N.corriendo--; notasLosa(i, true); } }, 1500); return; }
+      N.fallos.push('losa ' + (i + 1) + ': ' + msg); hecho();
+    }
+    fondoRecorte(L, CUENTA_PX, function (rec, err) {
+      if (notas !== N || N.cancel) return;
+      if (!rec) { N.corriendo--; N.hechas++; N.fallos.push('losa ' + (i + 1) + ': ' + err); pintaNotas(); notasLanza(); return; }
+      var b64 = rec.b64; rec.cv.width = 1; rec.cv.height = 1;
+      pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, notas: { losa: i + 1, de: N.losas.length, hoja: notasHojaNom(N.hoja) } }).then(function (d) {
+        if (notas !== N || N.cancel) return;
+        if (!d || d.error || !d.notas) { falla((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 200) : '') : 'el cerebro no contestó en formato de notas (¿worker viejo? git pull · wrangler deploy)'); return; }
+        if (d.modelo) N.modelo = String(d.modelo);
+        if (d.uso) { N.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); N.uso.out += +d.uso.output_tokens || 0; }
+        var hoja = notasHojaNom(N.hoja);
+        (Array.isArray(d.notas.notas) ? d.notas.notas : []).slice(0, 80).forEach(function (n) {
+          var t = String((n && n.texto) || '').replace(/\s+/g, ' ').trim().slice(0, 600); if (!t) return;
+          N.leidas.push({ id: String((n && n.id) || '').slice(0, 12), tema: String((n && n.tema) || 'otro').slice(0, 24), texto: t, hoja: hoja, losa: i + 1 });
+        });
+        var sl = String((d.notas && d.notas.sin_leer) || '').trim(); if (sl) N.sinLeer.push(sl.slice(0, 200) + ' (losa ' + (i + 1) + ')');
+        hecho();
+      }, function (e) { falla('sin respuesta (' + (e && e.message ? e.message : 'red') + ')'); });
+    });
+  }
+  /* Dos losas que se solapan leen la misma nota dos veces: se queda una. */
+  function notasDepura(lista) {
+    var out = [], vistas = {};
+    lista.forEach(function (n) {
+      var k = normTxt2(n.texto).replace(/[^a-z0-9áéíóúñ ]+/g, '').slice(0, 90);
+      if (!k || vistas[k]) return;
+      vistas[k] = 1; out.push(n);
+    });
+    return out;
+  }
+  /* La segunda pasada: pensar los cuidados con TODAS las notas (las de esta
+     lectura y las que el proyecto ya tenía). Se puede volver a llamar sola —
+     «volver a pensar»— cuando cambian las categorías. */
+  function notasCuidados() {
+    var N = notas, P = proyNotas() || {};
+    var nuevas = N ? N.leidas : [];
+    var todas = notasDepura((P.leidas || []).concat(nuevas));
+    if (!todas.length) {
+      if (N) { N.enVuelo = false; N.fase = 'fin'; }
+      pintaNotas(null, 'No se leyó ninguna nota en esa zona.' + (N && N.sinLeer.length ? ' El cerebro dice: ' + N.sinLeer.join(' · ') : ' Encierra el bloque de texto de las notas, no el dibujo.'));
+      return;
+    }
+    if (N) { N.fase = 'pensar'; pintaNotas(); } else { abreNotas(); pintaNotas('Volviendo a pensar los cuidados con las categorías de ahora…'); }
+    var cats = catsCount().map(function (c) { return { nom: c.nom, tag: c.tag || '' }; });
+    listaDe('recetas').then(function (recetas) {
+      return pideCerebro({ cuidados: { notas: todas, categorias: cats, recetas: recetas || [], scope: (state.project && state.project.scope) || '',
+        proyecto: [state.project.name, state.project.client, state.project.address].filter(Boolean).join(' · ') } });
+    }).then(function (d) {
+      if (N && (notas !== N || N.cancel)) return;
+      if (!d || d.error || !d.cuidados) {
+        var msg = (d && d.error) ? String(d.error) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 200) : '') : 'el cerebro no contestó en formato de cuidados (¿worker viejo? git pull · wrangler deploy)';
+        if (N) { N.enVuelo = false; N.fase = 'fin'; N.fallos.push('cuidados: ' + msg); }
+        // las notas leídas se guardan igual: la lectura costó dinero y vale
+        notasGuarda(todas, P.cuidados || [], P.quien_pone || [], P.resumen || '', N);
+        pintaNotas(); return;
+      }
+      if (d.uso && N) { N.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); N.uso.out += +d.uso.output_tokens || 0; }
+      var K = d.cuidados, viejos = P.cuidados || [];
+      var cu = (Array.isArray(K.cuidados) ? K.cuidados : []).slice(0, 20).map(function (x) {
+        var o = { titulo: String((x && x.titulo) || '').slice(0, 140), por_que: String((x && x.por_que) || '').slice(0, 400), accion: String((x && x.accion) || '').slice(0, 300),
+                  importancia: (x && x.importancia === 'alta') ? 'alta' : 'media',
+                  afecta: (Array.isArray(x && x.afecta) ? x.afecta : []).map(String).slice(0, 8),
+                  nota_ids: (Array.isArray(x && x.nota_ids) ? x.nota_ids : []).map(String).slice(0, 8) };
+        if (x && x.categoria_nueva && x.categoria_nueva.nom) o.categoria_nueva = { nom: String(x.categoria_nueva.nom).slice(0, 60), tag: String(x.categoria_nueva.tag || '').slice(0, 12) };
+        if (x && x.receta) o.receta = String(x.receta).slice(0, 90);
+        // lo que Edgar ya marcó en uno igual se conserva
+        var k = normTxt2(o.titulo), v = null; viejos.forEach(function (q) { if (normTxt2(q.titulo) === k) v = q; });
+        if (v && v.visto) o.visto = true; if (v && v.fuera) o.fuera = true;
+        return o;
+      }).filter(function (o) { return o.titulo; });
+      var qp = (Array.isArray(K.quien_pone) ? K.quien_pone : []).slice(0, 20).map(function (x) { return { que: String((x && x.que) || '').slice(0, 120), quien: String((x && x.quien) || '').slice(0, 80) }; }).filter(function (x) { return x.que; });
+      if (N) { N.enVuelo = false; N.fase = 'fin'; N.modelo = d.modelo || N.modelo; }
+      notasGuarda(todas, cu, qp, String(K.resumen || '').slice(0, 600), N);
+      pintaNotas();
+      var altas = cu.filter(function (x) { return x.importancia === 'alta'; }).length;
+      setHint('✔ Notas leídas: ' + todas.length + ' · ' + cu.length + ' cuidado(s), ' + altas + ' de peso · quedan guardados con el proyecto');
+    }).catch(function (e) {
+      if (N) { N.enVuelo = false; N.fase = 'fin'; N.fallos.push('cuidados: sin respuesta (' + (e && e.message ? e.message : 'red') + ')'); }
+      notasGuarda(todas, P.cuidados || [], P.quien_pone || [], P.resumen || '', N);
+      pintaNotas();
+    });
+  }
+  function notasGuarda(leidas, cuidados, quienPone, resumen, N) {
+    if (!state.project) state.project = {};
+    var P = proyNotas() || {};
+    var hojas = (P.hojas || []).slice(); if (N) { var hn = notasHojaNom(N.hoja); if (hojas.indexOf(hn) < 0) hojas.push(hn); }
+    state.project.notas = { leidas: leidas, cuidados: cuidados, quien_pone: quienPone, resumen: resumen, hojas: hojas,
+                            fecha: new Date().toISOString().slice(0, 10), modelo: N ? N.modelo : (P.modelo || '') };
+    scheduleAutosave();
+  }
+  function notasCancela() {
+    var N = notas; if (!N || !N.enVuelo) return;
+    N.cancel = true; N.enVuelo = false; N.fase = 'fin';
+    // lo leído hasta aquí se guarda: la lectura costó dinero
+    if (N.leidas.length) { var P = proyNotas() || {}; notasGuarda(notasDepura((P.leidas || []).concat(N.leidas)), P.cuidados || [], P.quien_pone || [], P.resumen || '', N); }
+    pintaNotas();
+  }
+  function notasOlvida() {
+    if (!state.project) return;
+    delete state.project.notas; scheduleAutosave(); notas = null; pintaNotas();
+    setHint('Notas olvidadas: el proyecto vuelve a no saber nada de ellas');
+  }
+  /* Lo que viaja al conteo como contexto: los cuidados vivos (no «no aplica»). */
+  function notasContexto() {
+    var P = proyNotas(); if (!P || !Array.isArray(P.cuidados)) return [];
+    return P.cuidados.filter(function (c) { return !c.fuera; }).slice(0, 12).map(function (c) {
+      return c.titulo + (c.accion ? ' — ' + c.accion : '') + (c.afecta && c.afecta.length ? ' (afecta: ' + c.afecta.join(', ') + ')' : '');
+    });
+  }
+  /* «Crear categoría»: el cerebro propone, Edgar confirma con un toque. */
+  function notasCreaCategoria(i) {
+    var P = proyNotas(); var c = P && P.cuidados && P.cuidados[i]; if (!c || !c.categoria_nueva) return null;
+    var nom = c.categoria_nueva.nom, ya = null;
+    catsCount().forEach(function (k) { if (normTxt2(k.nom) === normTxt2(nom)) ya = k; });
+    if (ya) { setHint('«' + nom + '» ya existe'); c.creada = true; scheduleAutosave(); pintaNotas(); return ya.id; }
+    pushUndo();
+    var nc = nuevaCatCount(nom, {});
+    if (c.categoria_nueva.tag) nc.tag = c.categoria_nueva.tag;
+    if (c.receta) nc.receta = c.receta;
+    c.creada = true;
+    catActiva = nc.id;
+    refreshCounts(); scheduleAutosave(); pintaNotas();
+    setHint('✔ Categoría «' + nom + '» creada' + (nc.tag ? ' con tag ' + nc.tag : '') + (nc.receta ? ' · receta: ' + nc.receta : '') + ' — cuéntala con el cerebro o a mano');
+    return nc.id;
+  }
+
+  /* --- lo que se ve --- */
+  var NOTAS_TEMA_NOM = { quien_pone: 'quién pone qué', materiales: 'materiales', rama_critica: 'rama crítica', horario_acceso: 'horario / acceso', seguridad_icra: 'seguridad / ICRA', codigo_norma: 'código / norma', demolicion_existente: 'demolición / existente', coordinacion: 'coordinación', otro: 'otro' };
+  function pintaNotas(estado, err) {
+    var c = $('#notasCuerpo'); if (!c) return;
+    if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="ntOtra" style="width:100%;margin-top:8px">Volver</button>'; enganchaNotasBotones(); return; }
+    if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
+    var N = notas, P = proyNotas(), h = '';
+    if (N && N.enVuelo) {
+      if (N.fase === 'leer') {
+        h += '<div class="vN"><b>Losa ' + Math.min(N.losas.length, N.hechas + N.corriendo) + ' de ' + N.losas.length + '</b> · ' + N.leidas.length + ' nota(s) leídas</div>';
+        h += '<div class="cuBarra"><div style="width:' + Math.round(N.hechas / Math.max(1, N.losas.length) * 100) + '%"></div></div>';
+      } else h += '<div class="vN"><b>Pensando los cuidados</b> con ' + N.leidas.length + ' nota(s), tus categorías y tus recetas…</div>';
+      h += ayudaHtml('notas2', 'Cada losa tarda 20–60 s. Después, una sola llamada más junta todas las notas con la leyenda y las recetas.');
+      h += '<button id="ntCancela" style="width:100%;margin-top:6px">Parar aquí y quedarme con lo leído</button>';
+      c.innerHTML = h; enganchaNotasBotones(); return;
+    }
+    if (!P) {
+      h += '<div class="bMuted">Encierra con dos toques el <b>bloque de notas</b> del ingeniero (general notes, key notes, specs).</div>';
+      h += ayudaHtml('notas1', 'El cerebro las transcribe tal cual y después saca los <b>«cuidado con esto»</b>: lo que cambia el dinero, las horas o el alcance —hospital grade, rama crítica, ICRA, quién pone qué— con la categoría a la que afecta y qué hacer en el estimado. Se guardan con el proyecto, y lo que dejes vivo se lo dice al cerebro cuando cuente.', true);
+      h += '<button id="ntZona" style="width:100%;margin-top:6px"' + (state.bg && state.bg.url ? '' : ' disabled') + '>Encerrar la zona de notas <span class="muted">· dos toques</span></button>';
+      if (N && N.fallos.length) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + N.fallos.slice(0, 4).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
+      c.innerHTML = h; enganchaNotasBotones(); return;
+    }
+    var cu = P.cuidados || [], vivos = cu.filter(function (x) { return !x.fuera; }), altas = vivos.filter(function (x) { return x.importancia === 'alta'; }).length;
+    h += '<div class="vN"><b>' + vivos.length + '</b> cuidado(s)' + (altas ? ' · <b>' + altas + '</b> de peso' : '') + ' <span class="muted">· ' + (P.leidas || []).length + ' nota(s) de ' + (P.hojas || []).join(', ') + (P.fecha ? ' · ' + P.fecha : '') + '</span></div>';
+    if (P.resumen) h += '<div class="muted small">' + esc(P.resumen) + '</div>';
+    if (cu.length) {
+      h += '<div class="vLista ntLista" id="ntLista">';
+      cu.forEach(function (x, i) {
+        var ya = x.categoria_nueva ? catsCount().some(function (k) { return normTxt2(k.nom) === normTxt2(x.categoria_nueva.nom); }) : false;
+        h += '<div class="ntFila' + (x.fuera ? ' fuera' : '') + (x.visto ? ' visto' : '') + '" data-i="' + i + '">' +
+          '<div class="ntCab"><span class="recibo-chip ' + (x.importancia === 'alta' ? 'por_leer' : 'leido') + '">' + (x.importancia === 'alta' ? 'PESA' : 'saber') + '</span>' +
+          '<b class="ntTit">' + esc(x.titulo) + '</b>' +
+          '<span class="ntBtns"><button class="vX" data-visto="' + i + '" title="' + (x.visto ? 'Quitar el visto' : 'Visto: ya lo tengo en cuenta') + '">' + (x.visto ? '☑' : '☐') + '</button>' +
+          '<button class="vX" data-fuera="' + i + '" title="' + (x.fuera ? 'Volver a tenerlo en cuenta' : 'No aplica a este trabajo') + '">' + (x.fuera ? '↺' : '✗') + '</button></span></div>' +
+          (x.por_que ? '<div class="ntPor">' + esc(x.por_que) + '</div>' : '') +
+          (x.accion ? '<div class="ntAcc">→ ' + esc(x.accion) + '</div>' : '') +
+          (x.afecta && x.afecta.length ? '<div class="ntAf">afecta: ' + x.afecta.map(esc).join(' · ') + '</div>' : '') +
+          (x.receta ? '<div class="ntAf">receta: <b>' + esc(x.receta) + '</b></div>' : '') +
+          (x.categoria_nueva ? '<div class="ntAf">' + (ya || x.creada ? '✔ categoría «' + esc(x.categoria_nueva.nom) + '» ya está' : '<button class="small" data-crea="' + i + '">＋ Crear categoría «' + esc(x.categoria_nueva.nom) + '»' + (x.categoria_nueva.tag ? ' (tag ' + esc(x.categoria_nueva.tag) + ')' : '') + '</button>') + '</div>' : '') +
+          '</div>';
+      });
+      h += '</div>';
+    } else h += '<div class="bMuted">El cerebro no encontró nada que cambie el dinero o el alcance en esas notas.</div>';
+    if (P.quien_pone && P.quien_pone.length) h += '<details><summary class="muted small" style="cursor:pointer">Quién pone qué (' + P.quien_pone.length + ')</summary><div class="muted small">' + P.quien_pone.map(function (q) { return '• ' + esc(q.que) + ' → <b>' + esc(q.quien) + '</b>'; }).join('<br>') + '</div></details>';
+    if (P.leidas && P.leidas.length) h += '<details><summary class="muted small" style="cursor:pointer">Las notas, tal cual (' + P.leidas.length + ')</summary><div class="muted small">' + P.leidas.map(function (n) { return '<div style="margin:3px 0">[' + esc(n.id || '·') + ' · ' + esc(NOTAS_TEMA_NOM[n.tema] || n.tema) + (n.hoja ? ' · ' + esc(n.hoja) : '') + '] ' + esc(n.texto) + '</div>'; }).join('') + '</div></details>';
+    if (N && (N.fallos.length || N.sinLeer.length)) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + N.fallos.concat(N.sinLeer).slice(0, 6).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
+    if (N && (N.uso.in || N.uso.out)) h += '<div class="muted small" style="margin-top:4px">' + (N.modelo ? esc(N.modelo) + ' · ' : '') + Math.round((Date.now() - N.t0) / 1000) + ' s · ' + N.uso.in.toLocaleString() + ' / ' + N.uso.out.toLocaleString() + ' tokens ≈ $' + cuentaCosto(N.uso, N.modelo).toFixed(2) + '</div>';
+    h += '<div class="row" style="margin-top:6px"><button id="ntZona" style="flex:1" title="Otra zona de notas, u otra hoja: se suman a las que ya hay">Leer más notas</button><button id="ntRepiensa" style="flex:1" title="Volver a sacar los cuidados con las categorías de ahora (una llamada de texto, barata)">Volver a pensar</button></div>';
+    h += ayudaHtml('notas3', 'Lo que dejes <b>vivo</b> (sin ✗) se lo dice el cerebro cuando cuente los símbolos, para clasificar mejor. «Volver a pensar» vale cuando creas categorías nuevas: no relee las notas, solo las piensa otra vez. «Olvidar» borra todo esto del proyecto.');
+    h += '<div class="row"><button id="ntOlvida" class="small" style="flex:none">Olvidar las notas</button></div>';
+    c.innerHTML = h; enganchaNotasBotones();
+  }
+  function enganchaNotasBotones() {
+    var b;
+    if ((b = $('#ntZona'))) b.addEventListener('click', function () { setTool('notas'); setHint(HINTS.notas); });
+    if ((b = $('#ntCancela'))) b.addEventListener('click', notasCancela);
+    if ((b = $('#ntOtra'))) b.addEventListener('click', function () { notas = null; pintaNotas(); });
+    if ((b = $('#ntRepiensa'))) b.addEventListener('click', function () { notas = null; notasCuidados(); });
+    if ((b = $('#ntOlvida'))) b.addEventListener('click', function () { uiConfirm('¿Olvidar las notas y los cuidados de este proyecto?', function (ok) { if (ok) notasOlvida(); }); });
+    var lista = $('#ntLista');
+    if (lista) lista.addEventListener('click', function (ev) {
+      var t = ev.target.closest && ev.target.closest('button'); if (!t) return;
+      var P = proyNotas(); if (!P) return;
+      if (t.dataset.crea != null) { notasCreaCategoria(+t.dataset.crea); return; }
+      var i = t.dataset.visto != null ? +t.dataset.visto : t.dataset.fuera != null ? +t.dataset.fuera : -1;
+      var x = P.cuidados && P.cuidados[i]; if (!x) return;
+      if (t.dataset.visto != null) x.visto = !x.visto; else x.fuera = !x.fuera;
+      scheduleAutosave(); pintaNotas();
+    });
+  }
+  function notasFin(a, b) {
+    notasArranca({ x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]), x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]) });
+  }
+  (function () {
+    var b = $('#notasBox'); if (!b) return;
+    arrastraPanel($('#notasCab'), b);
+    var bc = $('#notasCerrar'); if (bc) bc.addEventListener('click', cierraNotas);
+  })();
+  window.__notasDbg = {
+    arranca: notasArranca,
+    estado: function () { return notas ? { enVuelo: notas.enVuelo, fase: notas.fase, hechas: notas.hechas, losas: notas.losas.length, leidas: notas.leidas.length, fallos: notas.fallos.slice(), uso: notas.uso } : null; },
+    proyecto: function () { return proyNotas() ? JSON.parse(JSON.stringify(proyNotas())) : null; },
+    contexto: notasContexto,
+    crea: notasCreaCategoria,
+    repiensa: function () { notas = null; notasCuidados(); },
+    olvida: notasOlvida,
+    cierra: cierraNotas,
+    pinta: function () { abreNotas(); pintaNotas(); },
+    losas: function (r) { return cuentaLosas(r, NOTAS_LOSA_PULG); }
+  };
+
   window.__ocrDbg = { lee: ocrLee, recorte: ocrRecorte, carga: ocrCarga };
   window.__leyendaDbg = {
     lee: function (rect) { leyendaFin([rect.x0, rect.y0], [rect.x1, rect.y1]); },
@@ -22433,6 +22716,7 @@
       html += '<div class="tmHead">Lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__leyenda"><span><b>Leer la leyenda</b> del plano… <span class="muted">· saca las categorías con su nombre</span></span></div>';
       html += '<div class="tmItem" data-k="__cerebro"><span><b>Cuéntame los devices</b> con el cerebro… <span class="muted">· marca cada símbolo, tú revisas</span></span></div>';
+      html += '<div class="tmItem" data-k="__notas"><span><b>Lee las notas</b> del ingeniero… <span class="muted">· ' + (proyNotas() ? (proyNotas().cuidados || []).filter(function (x) { return !x.fuera; }).length + ' cuidado(s) guardados' : 'saca los «cuidado con esto»') + '</span></span></div>';
       var cAl = catCount(catActiva) || catsM[0];
       if (catsM.length) {
         html += '<div class="tmHead">La categoría activa' + (cAl ? ' — ' + esc(cAl.nom) : '') + '</div>';
@@ -22680,6 +22964,7 @@
           if (k === '__visual') { tm.hidden = true; setTool('vsearch'); return; }
           if (k === '__leyenda') { tm.hidden = true; setTool('leyenda'); abreLey(); pintaLey(); return; }
           if (k === '__cerebro') { tm.hidden = true; abreCuenta(); pintaCuenta(); setTool('cuenta'); return; }
+          if (k === '__notas') { tm.hidden = true; abreNotas(); pintaNotas(); if (!proyNotas()) setTool('notas'); return; }
           if (k === '__tlib') { tm.hidden = true; abreTlib(); return; }
           if (k === '__nueva') { tm.hidden = true; pideNuevaCat(); return; }
           if (k === '__doc') { tm.hidden = true; abreDoc(); return; }
