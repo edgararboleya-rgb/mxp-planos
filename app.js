@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.J';
+  var APP_VERSION = 'v34.K';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -11284,6 +11284,20 @@
     C.cancel = true;      // las losas que lleguen después se ignoran
     cuentaTermina();      // lo que ya llegó se depura y entra igual
   }
+  /* TODO lo que puso el cerebro en esta hoja (lleve la confianza que lleve).
+     Hace falta para MEDIR: una medición se repite —cambiando la zona, la losa
+     o el modelo— y Ctrl+Z ya no alcanza media hora después. Lo puesto a mano
+     no se toca: no lleva `ia`. */
+  function cuentaMarcasIA() { return state.counts.filter(function (q) { return q.ia != null; }); }
+  function cuentaQuitaIA() {
+    var d = cuentaMarcasIA(); if (!d.length) return 0;
+    pushUndo();
+    var ids = {}; d.forEach(function (q) { ids[q.id] = 1; });
+    state.counts = state.counts.filter(function (q) { return !ids[q.id]; });
+    renderConteo(); refreshCounts(); scheduleAutosave(); pintaCuenta();
+    setHint('✔ ' + d.length + ' marca(s) del cerebro quitadas de esta hoja · lo tuyo a mano sigue igual · Ctrl+Z las devuelve');
+    return d.length;
+  }
   /* Las dudosas de ESTA hoja (de esta pasada o de otra): quitarlas o darlas por buenas. */
   function cuentaDudosas() { return state.counts.filter(function (q) { return q.ia != null && q.ia < CUENTA_DUDA; }); }
   function cuentaQuitaDudosas() {
@@ -11334,8 +11348,9 @@
       else if (nCats > 40) h += '<div class="muted small">Solo van las 40 primeras categorías (tope del cerebro).</div>';
       h += '<button id="cuTodo" style="width:100%;margin-top:6px"' + (nCats && nL ? '' : ' disabled') + '>Contar toda la hoja' + (nL ? ' <span class="muted">· ' + nL + ' losa' + (nL === 1 ? '' : 's') + ' · ≈ $' + (nL * 0.18).toFixed(2) + '</span>' : '') + '</button>';
       h += '<button id="cuZona" style="width:100%;margin-top:4px"' + (nCats ? '' : ' disabled') + '>Encerrar una zona <span class="muted">· dos toques, esquina y esquina</span></button>';
-      var dud0 = cuentaDudosas().length;
+      var dud0 = cuentaDudosas().length, ia0 = cuentaMarcasIA().length;
       if (dud0) h += '<div class="muted small" style="margin-top:6px">Quedan <b>' + dud0 + '</b> dudosa(s) en esta hoja. <button id="cuQuita" class="small">Quitarlas</button> <button id="cuAcepta" class="small">Darlas por buenas</button></div>';
+      if (ia0) h += '<div class="muted small" style="margin-top:6px">Esta hoja tiene <b>' + ia0 + '</b> marca(s) puestas por el cerebro. Para <b>medir en limpio</b> —volver a contar cambiando la zona o el modelo y comparar— quítalas antes: <button id="cuQuitaIA" class="small">Quitar las del cerebro</button> <span class="muted">(lo que tocaste a mano no se toca)</span></div>';
       c.innerHTML = h; enganchaCuentaBotones(); return;
     }
     var C = cuenta;
@@ -11451,6 +11466,10 @@
     if ((b = $('#cuCancela'))) b.addEventListener('click', cuentaCancela);
     if ((b = $('#cuQuita'))) b.addEventListener('click', cuentaQuitaDudosas);
     if ((b = $('#cuAcepta'))) b.addEventListener('click', cuentaAceptaDudosas);
+    if ((b = $('#cuQuitaIA'))) b.addEventListener('click', function () {
+      var n = cuentaMarcasIA().length;
+      uiConfirm('¿Quitar las ' + n + ' marcas que puso el cerebro en esta hoja?\n\nLas que tocaste TÚ a mano se quedan.\nCtrl+Z lo devuelve todo.', function (ok) { if (ok) cuentaQuitaIA(); });
+    });
     if ((b = $('#cuOtra'))) b.addEventListener('click', function () { cuenta = null; pintaCuenta(); setTool('cuenta'); });
     var lista = $('#cuLista');
     if (lista) lista.addEventListener('click', function (ev) {
@@ -11479,6 +11498,8 @@
     estado: function () { return cuenta ? { enVuelo: cuenta.enVuelo, hechas: cuenta.hechas, losas: cuenta.losas.length, marcas: cuenta.marcas.length, nuevas: cuenta.nuevas ? cuenta.nuevas.length : null, dudas: cuenta.dudas.slice(), fallos: cuenta.fallos.slice(), dep: cuenta.dep || null, resumen: cuenta.resumen, uso: cuenta.uso, modelo: cuenta.modelo, cancel: cuenta.cancel } : null; },
     cancela: cuentaCancela,
     dudosas: function () { return cuentaDudosas().map(function (q) { return { id: q.id, ia: q.ia, cat: q.cat }; }); },
+    marcasIA: function () { return cuentaMarcasIA().length; },
+    quitaIA: cuentaQuitaIA,
     quitaDudosas: cuentaQuitaDudosas,
     aceptaDudosas: cuentaAceptaDudosas,
     cierra: cierraCuenta,
