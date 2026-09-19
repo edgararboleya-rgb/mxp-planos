@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.L';
+  var APP_VERSION = 'v34.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10042,7 +10042,10 @@
     pliega: pliegaSeccion,
     prGrupos: function () { return Object.assign({}, layout.prGrupos); },
     dock: function (id, d) { DOCKS.forEach(function (k) { layout.docks[k] = layout.docks[k].filter(function (x) { return x !== id; }); }); layout.docks[d].push(id); guardaLayout(); pintaBarras(); },
-    abre: abrePanelBarras
+    abre: abrePanelBarras,
+    visible: function (id) { return toolVisible(id); },
+    escondidas: function () { return nomEscondidas(); },
+    usada: function (id) { return toolUsada(id); }
   };
   window.__rutasDbg = {
     tipos: rutaTipos,
@@ -11004,6 +11007,23 @@
     cierraLey();
     refresh(); refreshCounts(); scheduleAutosave();
     var conMolde = nuevas.filter(function (c) { return c.moldeRect; });
+    /* UN SOLO FLUJO (E28, 19/09). Edgar: «selecciono la leyenda, me sale la
+       lista… esa parte de marcar en el plano quiero que vaya con la IA: que me
+       proponga aquí tenemos tantos tomas, tantos switches, y yo reviso. Un
+       solo flujo, no tres herramientas». Así que al terminar de crear las
+       categorías se ofrece contar AQUÍ MISMO, sin ir a buscar el menú.
+       Si dice que no y hay moldes, sigue el camino de siempre (comparar
+       dibujos), que no se quita: es gratis y a veces basta. */
+    if (cerebroCfg().url && nuevas.length) {
+      setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : ''));
+      uiConfirm('✔ ' + nuevas.length + ' categoría(s) creadas.\n\n¿Que el CEREBRO las cuente ahora en esta hoja?\n\nMira la hoja por losas y marca cada símbolo; tú revisas antes de que nada vaya al estimador.\n\nCancelar = las dejo creadas y cuentas tú' + (conMolde.length ? ' (o con «buscar iguales», que compara dibujos y es gratis)' : '') + '.',
+        function (ok) {
+          if (ok) { abreCuenta(); pintaCuenta(); setTool('cuenta'); return; }
+          if (conMolde.length) leyBarre(conMolde, rectLey, hojaLey);
+          else setHint('Las categorías están en Count ▾ y en el panel Conteo.');
+        });
+      return;
+    }
     setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : '') + (conMolde.length ? ' — buscando los símbolos en el plano…' : ' — están en Count ▾ y en el panel Conteo.'));
     if (conMolde.length) leyBarre(conMolde, rectLey, hojaLey);
   }
@@ -11410,6 +11430,11 @@
     h += '<div class="muted small" style="margin-top:6px">' + (C.modelo ? esc(C.modelo) + ' · ' : '') + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in.toLocaleString() + ' / ' + C.uso.out.toLocaleString() + ' tokens ≈ $' + $c.toFixed(2) + '</div>';
     h += '<button id="cuOtra" style="width:100%;margin-top:6px">Contar otra zona</button>';
     h += '<div class="muted small" style="margin-top:4px">Ctrl+Z quita TODAS las de esta pasada. Lo que ya estaba contado no se duplicó.</div>';
+    /* (19/09) El cerebro mira DIBUJOS. Lo que decide el precio de verdad en un
+       hospital —hospital grade, rama crítica, quién pone la luz— no está en el
+       dibujo: está en la leyenda, en las notas y en la receta. Decirlo aquí,
+       donde se revisa, y no darlo por sabido. */
+    h += '<div class="muted small" style="margin-top:6px;border-top:1px solid var(--mp-line);padding-top:6px">El cerebro cuenta <b>dibujos</b>. No sabe si ese receptáculo es <b>hospital grade</b>, si va en <b>rama crítica</b>, si lleva tubo rojo o si la luminaria la pone otro: eso lo dicen la leyenda, las notas del ingeniero y la receta de cada categoría. Cuenta bien lo que hay; <b>qué es cada cosa lo decides tú</b>.</div>';
     c.innerHTML = h; enganchaCuentaBotones();
   }
   function cuentaErrorTxt(vio, tu) {
@@ -12928,6 +12953,20 @@
   function codigoDeCat(c) { return (c && esCodigo(c.codigo)) ? c.codigo : CODIGO_DEFECTO; }
   /* Resumen por partida de una lista de renglones: lo que se enseña al
      confirmar el envío y lo que sale en el CSV. */
+  /* El desglose, en palabras. Vacío si no hay más de una hoja con lineales:
+     con una sola, el total ya lo dice todo y sería ruido. */
+  function textoLinealesPorHoja() {
+    var ls = (takeoffPorHoja || []).filter(function (q) { return q.tubo >= 1 || q.cable >= 1; });
+    if (ls.length < 2) return '';
+    var nom = function (i) { var sh = (state.sheets || [])[i]; return (sh && sh.no) ? sh.no : ('hoja ' + (i + 1)); };
+    var tT = 0, tC = 0;
+    ls.forEach(function (q) { tT += q.tubo; tC += q.cable; });
+    return 'PIES POR HOJA (tubo / cable):\n' + ls.map(function (q) {
+      return '• ' + nom(q.i) + ' — ' + Math.round(q.tubo).toLocaleString() + ' ft de tubo · ' + Math.round(q.cable).toLocaleString() + ' ft de cable';
+    }).join('\n') + '\n• TOTAL — ' + Math.round(tT).toLocaleString() + ' ft de tubo · ' + Math.round(tC).toLocaleString() + ' ft de cable';
+  }
+  window.__takeoffHojas = function () { return (takeoffPorHoja || []).map(function (q) { return { i: q.i, tubo: Math.round(q.tubo), cable: Math.round(q.cable) }; }); };
+  window.__takeoffHojasTxt = textoLinealesPorHoja;
   function resumenPorPartida(entries) {
     var m = {};
     (entries || []).forEach(function (e) { var c = e.codigo || CODIGO_DEFECTO; if (!m[c]) m[c] = { codigo: c, renglones: 0, qty: 0 }; m[c].renglones++; m[c].qty += (+e.qty || 0); });
@@ -12938,6 +12977,14 @@
   // paisajismo (engordaban la lista SIN MAPEAR del estimador)
   function vaAlEstimador(d) { return d && d.layer !== 'furniture' && d.cat !== 'elev' && d.cat !== 'plumbing' && d.cat !== 'notas'; }
   window.__takeoffDbg = function () { try { return buildTakeoffEntries(true); } catch (e) { return [{ name: 'EXC ' + e.message }]; } };
+  /* PIES POR HOJA (E28, 19/09). Edgar: «las dos hojas, power y luces, de tubo
+     y cable: que el envío diga cuántos pies van de cada hoja». En Nicklaus el
+     tubo y el cable salían sumados de todo el set, así que si un número no
+     cuadraba no había manera de saber en cuál de las dos hojas mirar.
+     Se calcula en el MISMO recorrido que arma el takeoff —no en otro aparte—
+     para que no pueda decir una cosa distinta de lo que se manda. */
+  var takeoffPorHoja = [];
+  var ES_TUBO_TXT = function (n) { return /\bEMT\b|CONDUIT|\bIMC\b|\bGRS\b|\bPVC\b|FLEX|\bRMC\b|TUBER[IÍ]A/i.test(String(n || '')); };
   function buildTakeoffEntries(soloHoja) {
     syncSheet();
     var out = [];
@@ -12946,7 +12993,11 @@
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
-    fuentes.forEach(function (d) {
+    takeoffPorHoja = [];
+    fuentes.forEach(function (d, iF) {
+      var ph = { i: soloHoja ? state.curSheet : iF, tubo: 0, cable: 0 };
+      takeoffPorHoja.push(ph);
+      var suma = function (item, ft) { if (ft > 0) ph[ES_TUBO_TXT(item) ? 'tubo' : 'cable'] += ft; };
       (d.symbols || []).forEach(function (s) { if (SYMBOLS[s.key] && vaAlEstimador(SYMBOLS[s.key])) byKey[s.key] = (byKey[s.key] || 0) + 1; });
       // aberturas huérfanas (pared borrada) no se cotizan — igual que en Materiales
       var wids = {}; (d.walls || []).forEach(function (w) { wids[w.id] = 1; });
@@ -12954,6 +13005,7 @@
       (d.wires || []).forEach(function (w) {
         var key = w.label || WIRE_STYLE_NAMES[w.style || 'dashed'] || 'Cableado';
         wg[key] = (wg[key] || 0) + wireLen(w);
+        suma(key, wireLen(w));
       });
       // homeruns: el cable sale con el nombre que el estimador ya entiende
       // ('12/2' → '12/2   ROMEX' via alias_takeoff) y con el drop sumado
@@ -12966,12 +13018,13 @@
         // con hilos y tamaño puestos, la ruta sale como lo que se COMPRA: el
         // tubo exacto y los conductores (15/09); si no, por tipo, como siempre
         var pr = partidasRuta(ar);
-        if (pr) { var codR = (rutaTipo(ar.ruta.tipo) || {}).codigo || '08-ROUGH'; pr.forEach(function (q) { var kq = codR + '\u0001' + q.item; rp[kq] = (rp[kq] || 0) + q.ft; }); return; }
+        if (pr) { var codR = (rutaTipo(ar.ruta.tipo) || {}).codigo || '08-ROUGH'; pr.forEach(function (q) { var kq = codR + '\u0001' + q.item; rp[kq] = (rp[kq] || 0) + q.ft; suma(q.item, q.ft); }); return; }
         rt[ar.ruta.tipo] = (rt[ar.ruta.tipo] || 0) + Lr;
+        ph.tubo += Lr;
       });
       (d.areas || []).forEach(function (ar) {
         if (!ar.open || !ar.circ) return;
-        partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; });
+        partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; suma(q.item, q.ft); });
         circAreas.push(ar);   // los breakers se cuentan al final, por circuito y no por tramo
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
@@ -13289,6 +13342,7 @@
               + (nFull ? ', y ' + nFull + ' de ellos CON su tubo y su cable (los marcaste como stub)' : '')
               + (nPuntos - nFull ? '. Los otros ' + (nPuntos - nFull) + ' van SIN tubo ni cable: esos los mediste tú sobre el plano' : '') : '') +
             '\n\nPor partida:\n' + porCod.map(function (r) { return '• ' + r.codigo + ' ' + nombreCodigo(r.codigo) + ' — ' + r.renglones + ' renglón(es)'; }).join('\n') +
+            (textoLinealesPorHoja() ? '\n\n' + textoLinealesPorHoja() : '') +
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (sinColumnaLineal ? '\n\n⚠ El estimador aún no tiene la columna "sin_lineales" en estimado_ensambles: las recetas fueron CON su tubo y su cable, así que ese material está DOS VECES. SQL listo en docs/sql/e17-punto-completo.sql.' : '') +
             (porAlias.length ? '\n\n🔁 CATEGORÍAS QUE YA SABEN SU RECETA (por la tabla de alias — no hay que marcarlas una por una):\n• ' + porAlias.map(function (a) { return a.name + ' ×' + a.qty + ' → ' + a.receta + (a.full ? ' (con su tubo)' : ''); }).join('\n• ') : '') +
@@ -21454,17 +21508,43 @@
      debe inflarse con los cambios de herramienta que hace la app sola. */
   function marcaTocada(id) {
     if (!layout || !defDe(id)) return;
-    if (SIMPLE_FUERA.indexOf(id) < 0) return;        // solo importan las que se pueden esconder
+    // en «Lo de siempre» solo se pueden esconder las de la lista corta, pero en
+    // «Solo lo que uso» se puede esconder cualquiera: hay que apuntarlas todas
+    if (SIMPLE_FUERA.indexOf(id) < 0 && (layout.modo || 'simple') !== 'usadas') return;
     if (!layout.tocadas) layout.tocadas = [];
     if (layout.tocadas.indexOf(id) >= 0) return;
     layout.tocadas.push(id); guardaLayoutLuego();
   }
+  /* ¿La ha tocado alguna vez en este proyecto? Uso, toque o Mis herramientas. */
+  function toolUsada(id) {
+    if (!layout) return true;
+    if (layout.uso && layout.uso[id] > 0) return true;
+    if (layout.tocadas && layout.tocadas.indexOf(id) >= 0) return true;
+    if (layout.favs && layout.favs.indexOf(id) >= 0) return true;
+    return false;
+  }
+  /* Un grupo del que no ha tocado NADA se queda entero: si no, en un proyecto
+     recién abierto desaparecería media barra y no habría por dónde empezar. */
+  function grupoSinUso(grp) {
+    if (!grp) return true;
+    for (var i = 0; i < TOOL_DEFS.length; i++) if (TOOL_DEFS[i].grp === grp && toolUsada(TOOL_DEFS[i].id)) return false;
+    return true;
+  }
   function toolVisible(id) {
-    if (!layout || layout.modo !== 'simple') return true;
+    if (!layout) return true;
+    var m = layout.modo || 'simple';
+    if (m === 'todo') return true;
+    /* MODO «SOLO LO QUE USO» (E28, 19/09). Edgar: «medir con los clics de
+       verdad qué se toca y qué no, y esconder por dato, no por opinión». Con
+       `layout.tocadas` ya apuntando cada herramienta que enciende, esto
+       esconde TODAS las que no ha tocado en este proyecto — no una lista que
+       elegí yo. Un grupo sin nada tocado se queda entero. */
+    if (m === 'usadas') {
+      if (toolUsada(id)) return true;
+      return grupoSinUso(defDe(id) && defDe(id).grp);
+    }
     if (SIMPLE_FUERA.indexOf(id) < 0) return true;
-    if (layout.uso && layout.uso[id] > 0) return true;                // la ha usado
-    if (layout.tocadas && layout.tocadas.indexOf(id) >= 0) return true;  // la ha tocado alguna vez
-    if (layout.favs && layout.favs.indexOf(id) >= 0) return true;     // está en Mis herramientas
+    if (toolUsada(id)) return true;
     // un grupo entero nunca se esconde: ver grupoIntocable
     if (grupoIntocable(defDe(id) && defDe(id).grp)) return true;
     return false;
@@ -21492,8 +21572,14 @@
     }
     return !!GRUPO_INTOCABLE[grp];
   }
-  function nEscondidas() { return (layout && layout.modo) === 'simple' ? SIMPLE_FUERA.filter(function (id) { return !toolVisible(id); }).length : 0; }
-  function nomEscondidas() { return SIMPLE_FUERA.filter(function (id) { return !toolVisible(id); }).map(function (id) { return defDe(id).nom; }); }
+  // en «Solo lo que uso» se puede esconder cualquiera, así que se cuentan todas
+  function escondidasIds() {
+    if (!layout || layout.modo === 'todo') return [];
+    var lista = layout.modo === 'usadas' ? TOOL_DEFS.map(function (d) { return d.id; }) : SIMPLE_FUERA;
+    return lista.filter(function (id) { return !toolVisible(id); });
+  }
+  function nEscondidas() { return escondidasIds().length; }
+  function nomEscondidas() { return escondidasIds().map(function (id) { return (defDe(id) || {}).nom || id; }); }
   var TAM_BARRAS = ['chicas', 'normales', 'grandes'];
   var TAM_NOM = { chicas: 'Chicas', normales: 'Normales', grandes: 'Grandes' };
   var PANEL_W_MIN = 200, PANEL_W_MAX = 460;
@@ -21980,7 +22066,9 @@
     html += '<div class="bpSec">Qué herramientas se ven</div>';
     html += '<div class="bpRow bpTam">' +
       '<button data-bp="modo" data-m="simple"' + ((layout.modo || 'simple') === 'simple' ? ' class="cur"' : '') + ' title="Solo las que usas en un takeoff: contar, medir, tubería, cableado, texto, calibrar. Lo de dibujar la casa desde cero se esconde.">Lo de siempre</button>' +
+      '<button data-bp="modo" data-m="usadas"' + (layout.modo === 'usadas' ? ' class="cur"' : '') + ' title="Esconde TODAS las que no has tocado en este proyecto. No es una lista mía: es lo que tú has usado. Un grupo del que no tocaste nada se queda entero.">Solo lo que uso</button>' +
       '<button data-bp="modo" data-m="todo"' + (layout.modo === 'todo' ? ' class="cur"' : '') + ' title="Todas las herramientas, como antes">Mostrar todo</button></div>';
+    html += '<p class="bpNota">«Solo lo que uso» esconde por <b>dato</b>: las que has tocado en este proyecto se quedan, las demás no. Si te hace falta una escondida, vuelve aquí y pon «Mostrar todo» — nada se borra.</p>';
     var escN = nomEscondidas();
     html += '<p class="bpNota">' + (layout.modo === 'todo'
       ? 'Ahora mismo están TODAS a la vista. «Lo de siempre» escondería la geometría fina y copiar formato.'
@@ -22067,10 +22155,11 @@
       return;
     }
     if (bp === 'modo') {
-      layout.modo = t.dataset.m === 'todo' ? 'todo' : 'simple';
+      layout.modo = t.dataset.m === 'todo' ? 'todo' : t.dataset.m === 'usadas' ? 'usadas' : 'simple';
       cierraToolMenu();   // un desplegable de grupo abierto se quedaba con la lista vieja
       guardaLayout(); pintaBarras(); pintaPanelBarras();
-      setHint(layout.modo === 'simple' ? 'Lo de siempre — ' + nEscondidas() + ' herramienta(s) escondida(s); en ⋮⋮ Barras vuelven' : 'Todas las herramientas a la vista');
+      setHint(layout.modo === 'todo' ? 'Todas las herramientas a la vista'
+        : (layout.modo === 'usadas' ? 'Solo lo que uso' : 'Lo de siempre') + ' — ' + nEscondidas() + ' herramienta(s) escondida(s); en ⋮⋮ Barras vuelven');
       return;
     }
     if (bp === 'tam') {
