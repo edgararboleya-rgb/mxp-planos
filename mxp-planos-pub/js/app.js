@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.R';
+  var APP_VERSION = 'v34.S';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -360,6 +360,7 @@
   window.__pdfVecDbg = function (cb) { pdfEncimaDelOriginal(cb); };
   window.__idbDbg = function (k, cb) { idbGet(k, cb); };
   window.__pdfLiveDbg = function () { return pdfLive[state.curSheet]; };
+  window.__pdfLiveDbg.reset = function () { pdfLive = {}; };   // gancho de pruebas: «otro aparato»
   window.__dxfDbg = {
     exporta: function () { try { return dxfDelPlano(); } catch (e) { return { err: 'EXC ' + e.message }; } },
     importa: function (txt) { var out = null; try { importaDxf(txt, function (r) { out = r; }); } catch (e) { return { err: 'EXC ' + e.message }; } return out; },
@@ -998,6 +999,8 @@
   // sube el blob y la ficha; al terminar, la copia local recuerda con qué rev quedó sincronizada
   function subeBlob(uid, id, o, blob, payloadLen, done) {
     var pj = (o.state && o.state.project) || {}, path = rutaNube(uid, id);
+    // (20/09) los PDF de sus hojas se apuntan para subir: van por su cola, no frenan al proyecto
+    try { pdfsDe(o).forEach(encolaPdfNube); } catch (e) {}
     sbFetch(urlObjeto(path), { method: 'POST', rawBody: blob, blob: false, headers: { 'Content-Type': 'application/gzip', 'x-upsert': 'true' } })
       .then(function () {
         return sbFetch('/rest/v1/planos_proyectos', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal',
@@ -1347,7 +1350,7 @@
         var rq = st.getAllKeys();
         rq.onsuccess = function () {
           (rq.result || []).forEach(function (k) {
-            if (typeof k === 'string' && k.indexOf('pdfbin_') === 0 && !enUso[k]) { try { st.delete(k); borrados++; } catch (e) {} }
+            if (typeof k === 'string' && k.indexOf('pdfbin_') === 0 && !enUso[k]) { try { st.delete(k); st.delete('pdfnube_' + k); borrados++; } catch (e) {} }
           });
           if (done) done(borrados);
         };
@@ -4990,14 +4993,88 @@
   var hiresTimer = null, hiresTok = 0, hiresTask = null;
   function scheduleHires() { clearTimeout(hiresTimer); hiresTimer = setTimeout(updateHires, 400); }
   function hiresClear() { var el = document.getElementById('bgHires'); if (el && el.parentNode) el.parentNode.removeChild(el); }
-  // tras recargar la página, el PDF vivo se rehidrata desde IndexedDB
-  var pdfBinLoading = {};
-  function loadPdfLive(bg) {
-    var key = bg.pdfId;
-    if (!key || pdfBinLoading[key] || typeof pdfjsLib === 'undefined') return;
+  /* ================= EL PDF EN LA NUBE (20/09, lo decidió Edgar) =================
+     Hasta hoy el PDF crudo vivía solo en IndexedDB del aparato donde se
+     importó, y el proyecto llevaba DENTRO una imagen enorme de cada hoja para
+     que se viera en el iPad. Eso es lo que topaba en 15 hojas (medido: 1,5 MB
+     por hoja, y la nube corta a 50 MB).
+     Ahora es como Bluebeam: el PDF se guarda UNA vez —aquí y en la nube, en el
+     bucket `planos-pdf` que ya existía sin usar (100 MB por archivo)— y cada
+     hoja solo lleva una VISTA GENERAL ligera. El detalle, al acercarse, al
+     contar o al leer la leyenda, sale del PDF vivo, que en otro aparato baja
+     solo la primera vez que hace falta. El proyecto pasa de pesar megas por
+     hoja a pesar kilobytes, y caben las 80 hojas de un hospital. */
+  var NUBE_BUCKET_PDF = 'planos-pdf';
+  /* La VISTA GENERAL: lo que se guarda dentro del proyecto cuando el PDF quedó
+     a salvo. 2000 px de lado largo en JPEG (medido: ~0,4 MB por hoja ARCH D,
+     contra 1,5 MB de antes; a 80 hojas, 32 MB en vez de 120). Vale para verla
+     entera y moverse; el detalle lo da el PDF vivo al acercarse. */
+  var VISTA_PX = 2000, VISTA_AREA = 4e6, VISTA_JPEG = 0.85;
+  function rutaPdfNube(uid, pdfId) { return uid + '/pdf/' + pdfId + '.pdf'; }
+  function urlPdfObjeto(path) { return '/storage/v1/object/' + NUBE_BUCKET_PDF + '/' + path; }
+  var pdfNube = { pendientes: {}, subiendo: false, timer: null, fallos: {} };
+  /* Apuntar un PDF para que suba. Sube en cuanto haya sesión; si falla, se
+     reintenta con espera creciente; lo ya subido (marca pdfnube_<id>) no se
+     vuelve a mandar. */
+  function encolaPdfNube(pdfId) {
+    if (!pdfId) return;
+    pdfNube.pendientes[pdfId] = 1;
+    clearTimeout(pdfNube.timer); pdfNube.timer = setTimeout(subePdfCola, 1500);
+  }
+  function subePdfCola() {
+    if (pdfNube.subiendo) return;
+    var uid = nubeUid(); if (!uid) return;   // sin sesión: se queda apuntado, sube cuando la haya
+    var ids = Object.keys(pdfNube.pendientes); if (!ids.length) return;
+    var id = ids[0];
+    pdfNube.subiendo = true;
+    idbGet('pdfnube_' + id, function (marca) {
+      if (marca === uid) { delete pdfNube.pendientes[id]; pdfNube.subiendo = false; setTimeout(subePdfCola, 50); return; }
+      idbGet(id, function (bytes) {
+        if (!bytes) { delete pdfNube.pendientes[id]; pdfNube.subiendo = false; setTimeout(subePdfCola, 50); return; }   // no está aquí: nada que subir
+        var blob = new Blob([bytes], { type: 'application/pdf' });
+        if (blob.size > 100 * 1024 * 1024) { delete pdfNube.pendientes[id]; pdfNube.fallos[id] = 'pesa más de 100 MB'; pdfNube.subiendo = false; setTimeout(subePdfCola, 50); return; }
+        sbFetch(urlPdfObjeto(rutaPdfNube(uid, id)), { method: 'POST', rawBody: blob, blob: false, headers: { 'Content-Type': 'application/pdf', 'x-upsert': 'true' } })
+          .then(function () {
+            idbSet('pdfnube_' + id, uid);
+            delete pdfNube.pendientes[id]; delete pdfNube.fallos[id]; pdfNube.intentos = 0;
+            pdfNube.subiendo = false; setTimeout(subePdfCola, 50);
+          }, function (e) {
+            pdfNube.fallos[id] = (e && e.message) || 'red';
+            pdfNube.intentos = (pdfNube.intentos || 0) + 1;
+            pdfNube.subiendo = false;
+            clearTimeout(pdfNube.timer); pdfNube.timer = setTimeout(subePdfCola, NUBE_REINTENTO[Math.min(pdfNube.intentos, NUBE_REINTENTO.length - 1)]);
+          });
+      });
+    });
+  }
+  /* Bajar un PDF de la nube a este aparato. cb(bytes | null). */
+  function bajaPdfNube(pdfId, cb) {
+    var uid = nubeUid(); if (!uid) { cb(null, 'sin sesión'); return; }
+    sbFetch(urlPdfObjeto(rutaPdfNube(uid, pdfId)), { blob: true })
+      .then(function (blob) { return blob.arrayBuffer(); })
+      .then(function (buf) {
+        if (!buf || buf.byteLength < 100) { cb(null, 'vacío'); return; }
+        idbSet(pdfId, buf.slice(0));
+        idbSet('pdfnube_' + pdfId, uid);   // ya está en la nube: no hay que volver a subirlo
+        cb(buf);
+      }, function (e) { cb(null, (e && e.message) || 'red'); });
+  }
+  // tras recargar la página, el PDF vivo se rehidrata desde IndexedDB — y si
+  // no está aquí (otro aparato), baja de la nube. Quien lo necesite YA (el
+  // conteo, la leyenda) espera con un callback; el zoom simplemente reintenta.
+  var pdfBinLoading = {}, pdfBinCbs = {}, pdfSinNube = {};
+  function loadPdfLive(bg, cb) {
+    var key = bg && bg.pdfId;
+    if (!key || typeof pdfjsLib === 'undefined') { if (cb) cb(false); return; }
+    if (cb) (pdfBinCbs[key] = pdfBinCbs[key] || []).push(cb);
+    if (pdfBinLoading[key]) return;
     pdfBinLoading[key] = true;
-    idbGet(key, function (bytes) {
-      if (!bytes) { delete pdfBinLoading[key]; return; }   // reintenta en el próximo zoom
+    function fin(ok) {
+      delete pdfBinLoading[key];
+      var cbs = pdfBinCbs[key] || []; delete pdfBinCbs[key];
+      cbs.forEach(function (f) { try { f(ok); } catch (e) {} });
+    }
+    function abre(bytes) {
       try { pdfjsLib.GlobalWorkerOptions.workerSrc = window.MXP_PDF_WORKER_URL || 'js/vendor/pdf.worker.min.js'; } catch (e) {}
       pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise.then(function (doc) {
         // el mismo archivo sirve a todas las hojas que salieron de él
@@ -5008,9 +5085,27 @@
           if (o.bg && o.bg.pdfId === key) pdfLive[i] = { doc: doc, page: o.bg.pdfPage || 1 };
         });
         scheduleHires();
-      }).catch(function () { delete pdfBinLoading[key]; });
+        fin(true);
+      }).catch(function () { fin(false); });
+    }
+    idbGet(key, function (bytes) {
+      if (bytes) { abre(bytes); return; }
+      // no está en este aparato: a la nube
+      if (pdfSinNube[key]) { fin(false); return; }   // ya se intentó y no estaba: no se martillea
+      bajaPdfNube(key, function (buf, err) {
+        if (buf) { abre(buf); return; }
+        pdfSinNube[key] = err || 'no está';
+        if (!pdfSinNube.__avisado) {
+          pdfSinNube.__avisado = true;
+          setHint('⚠ El PDF de esta hoja no está en este aparato ni en la nube' + (err === 'sin sesión' ? ' (entra en el estimador para que baje)' : '') + ': se ve la vista general. Ábrelo desde el aparato donde lo importaste para que suba.');
+        }
+        fin(false);
+      });
     });
   }
+  window.__pdfNubeDbg = { encola: encolaPdfNube, cola: subePdfCola, baja: bajaPdfNube, carga: loadPdfLive,
+    estado: function () { return { pendientes: Object.keys(pdfNube.pendientes), fallos: pdfNube.fallos, sinNube: Object.keys(pdfSinNube).filter(function (k) { return k !== '__avisado'; }) }; },
+    olvidaSinNube: function () { pdfSinNube = {}; } };
   function updateHires() {
     var tok = ++hiresTok;
     var b = state.bg, rec = pdfLive[state.curSheet];
@@ -10283,15 +10378,28 @@
   function fondoRecorte(r, maxPx, cb) {
     var bg = state.bg;
     if (!bg || !bg.url) { cb(null, 'Esta hoja no tiene plano de fondo.'); return; }
+    /* (20/09) Si la hoja salió de un PDF y el PDF vivo todavía no está (recién
+       abierto el proyecto, u otro aparato), se espera a tenerlo: del raster de
+       vista general saldría una losa borrosa y el cerebro contaría mal. */
+    if (bg.pdfId && !pdfLive[state.curSheet] && !bg.origUrl && !pdfSinNube[bg.pdfId]) {
+      var hojaEsp = state.curSheet;
+      loadPdfLive(bg, function () { if (state.curSheet === hojaEsp) fondoRecorte2(r, maxPx, cb); else cb(null, 'cambiaste de hoja'); });
+      return;
+    }
+    fondoRecorte2(r, maxPx, cb);
+  }
+  function fondoRecorte2(r, maxPx, cb) {
+    var bg = state.bg;
+    if (!bg || !bg.url) { cb(null, 'Esta hoja no tiene plano de fondo.'); return; }
     var q = rectEnFondo(r);
     if (!q) { cb(null, 'El marco quedó vacío o fuera del plano.'); return; }
     var x0 = q.x0, y0 = q.y0, x1 = q.x1, y1 = q.y1, W = q.W, H = q.H;
     var MAX = maxPx || 1568, k = MAX / Math.max(W, H);
     var cw = Math.max(1, Math.round(W * k)), ch = Math.max(1, Math.round(H * k));
     var rec = pdfLive[state.curSheet];
-    function listo(cv) {
+    function listo(cv, delRasterVista) {
       var b64 = cv.toDataURL('image/jpeg', 0.88).split(',')[1];
-      cb({ cv: cv, w: cw, h: ch, b64: b64, rect: { x0: x0, y0: y0, x1: x1, y1: y1 } });
+      cb({ cv: cv, w: cw, h: ch, b64: b64, rect: { x0: x0, y0: y0, x1: x1, y1: y1 }, borroso: !!delRasterVista });
     }
     function delRaster() {
       var im = new Image();
@@ -10302,7 +10410,8 @@
         var sx = (x0 - bg.x) / bg.w * im.naturalWidth, sy = (y0 - bg.y) / bg.h * im.naturalHeight;
         var sw = W / bg.w * im.naturalWidth, sh = H / bg.h * im.naturalHeight;
         ctx.drawImage(im, sx, sy, sw, sh, 0, 0, cw, ch);
-        listo(cv);
+        // del raster: si es solo la vista general (el PDF no está), el trozo sale borroso y se dice
+        listo(cv, !!bg.vista && !rec);
       };
       im.onerror = function () { cb(null, 'No pude leer la imagen del plano de fondo.'); };
       im.src = bg.url;
@@ -11381,6 +11490,7 @@
       if (cuenta !== C || C.cancel) return;
       if (!rec) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': ' + err); pintaCuenta(); cuentaLanza(); return; }
       var b64 = rec.b64; rec.cv.width = 1; rec.cv.height = 1;
+      if (rec.borroso && !C.avisoBorroso) { C.avisoBorroso = true; C.dudas.push('esta hoja no tiene su PDF en este aparato: las losas salen de la vista general y el conteo puede fallar. Entra en el estimador para que baje de la nube (o importa el PDF) y vuelve a contar'); }
       var ctx = notasContexto();
       pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, conteo: { simbolos: C.simb, losa: i + 1, de: C.losas.length, contexto: ctx.length ? ctx : undefined } }).then(function (d) {
         if (cuenta !== C || C.cancel) return;
@@ -11688,6 +11798,7 @@
   })();
   window.__cuentaDbg = {
     arranca: function (rect) { cuentaArranca(rect); },
+    recorte: function (rect, cb) { fondoRecorte(rect, CUENTA_PX, cb); },
     todo: function () { var r = cuentaRectHoja(); if (r) cuentaArranca(r); return r; },
     losas: function (rect) { return cuentaLosas(rect || cuentaRectHoja()); },
     simbolos: cuentaSimbolos,
@@ -12126,48 +12237,78 @@
   function rutasSinRespuesta(R, e) { return 'sin respuesta (' + (e && e.message ? e.message : 'red') + ')'; }
 
   /* --- 1 · localizar los paneles --- */
+  /* (20/09, revisión del paso 8) La hoja ENTERA a 1568 px no sirve para leer
+     nombres: en una ARCH D de 36" son 43 px por pulgada y el rótulo de un
+     panel (1/8") mide 5 px. Ahora la hoja se parte en LOSAS de 18" de papel
+     (una ARCH D son 2×2) y cada losa va aparte: 87 px por pulgada, el rótulo
+     a 11 px, que Fable sí lee. Lo que aparezca dos veces por el solape se
+     queda una vez, por su nombre. */
+  var PANELES_LOSA_PULG = 18;
+  function panelesLosas() { var r = cuentaRectHoja(); return r ? cuentaLosas(r, PANELES_LOSA_PULG) : null; }
   function rutasLocaliza() {
     if (rutasProp && rutasProp.enVuelo) { setHint('Ya hay una pasada en marcha'); return; }
     abreRutas();
     if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
-    var r = cuentaRectHoja();
-    if (!r) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
-    var R = rutasProp = { fase: 'paneles', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], paneles: null, resultados: [], puestos: 0 };
+    var losas = panelesLosas();
+    if (!losas || !losas.length) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
+    var R = rutasProp = { fase: 'paneles', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], paneles: null, resultados: [], puestos: 0,
+                          losas: losas, hechas: 0, corriendo: 0, sig: 0, cands: [], notasCerebro: [] };
     pintaRutas();
-    fondoRecorte(r, CUENTA_PX, function (rec, err) {
+    var conocidos = panelesConocidos();
+    function lanza() {
       if (rutasProp !== R || R.cancel) return;
-      if (!rec) { R.enVuelo = false; R.fallos.push(err); pintaRutas(); return; }
-      var b64 = rec.b64, RR = rec.rect; rec.cv.width = 1; rec.cv.height = 1;
-      pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, paneles: { conocidos: panelesConocidos() } }).then(function (d) {
+      while (R.corriendo < CUENTA_PARALELO && R.sig < losas.length) losa(R.sig++);
+      if (!R.corriendo && R.hechas >= losas.length) termina();
+    }
+    function losa(i) {
+      var L = losas[i]; R.corriendo++; pintaRutas();
+      function hecho() { if (rutasProp !== R || R.cancel) return; R.corriendo--; R.hechas++; pintaRutas(); lanza(); }
+      if (state.curSheet !== R.hoja) { R.fallos.push('losa ' + (i + 1) + ': cambiaste de hoja, no se miró'); hecho(); return; }
+      fondoRecorte(L, CUENTA_PX, function (rec, err) {
         if (rutasProp !== R || R.cancel) return;
-        R.enVuelo = false;
-        if (!d || d.error || !d.paneles) { R.fallos.push((d && d.error) ? String(d.error) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 200) : '') : 'el cerebro no contestó en formato de paneles (¿worker viejo? git pull · wrangler deploy)'); pintaRutas(); return; }
-        rutasUso(R, d);
-        if (d.incompleto) R.fallos.push('la respuesta del cerebro se cortó por larga: puede faltar algún panel');
-        if (rutasHojaCambio(R, 'buscaba los paneles')) return;
-        var lista = Array.isArray(d.paneles.paneles) ? d.paneles.paneles.slice(0, 30) : [];
-        var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0, nuevos = [], yaEstaban = [], otros = [], undoHecho = false;
-        lista.forEach(function (p) {
-          var n = nombreTablero(p && p.nombre); if (!n) return;
-          var px = +p.x, py = +p.y; if (!isFinite(px) || !isFinite(py)) return;
-          px = Math.max(0, Math.min(100, px)); py = Math.max(0, Math.min(100, py));
-          var tipo = (p && TABLERO_PREFIJOS[p.tipo]) ? String(p.tipo) : 'panel';
-          var cat = catTablero(n, true, tipo);
-          // si Edgar ya lo colocó (o lo mudó), lo suyo manda: no se toca
-          if (state.counts.some(function (q) { return q.cat === cat.id; })) { yaEstaban.push(cat.panel); return; }
-          // la instantánea del undo, justo antes de la primera marca (y solo si hay alguna)
-          if (!undoHecho) { pushUndo(); undoHecho = true; }
-          var m = { id: uid(), x: Math.round(RR.x0 + px / 100 * W), y: Math.round(RR.y0 + py / 100 * H), cat: cat.id };
-          var det = [tipo !== 'panel' ? tipo.replace('_', ' ') : '', p.cuarto ? String(p.cuarto) : '', p.existente ? 'existente' : '', isFinite(+p.confianza) ? Math.round(+p.confianza) + ' %' : ''].filter(Boolean).join(' · ');
-          if (det) m.iaNota = det.slice(0, 120);
-          state.counts.push(m); R.puestos++;
-          if (esPanelDeRutas(cat)) nuevos.push(cat.panel); else otros.push(cat.panel + ' (' + tipo.replace('_', ' ') + ')');
-        });
-        R.paneles = { nuevos: nuevos, yaEstaban: yaEstaban, otros: otros, notas: String(d.paneles.notas || '').slice(0, 300), vistos: lista.length };
-        renderConteo(); refreshCounts(); if (R.puestos) scheduleAutosave(); pintaRutas();
-        setHint('✔ Paneles: ' + nuevos.length + ' localizado(s)' + (otros.length ? ' · ' + otros.length + ' cuarto(s)/equipo(s)' : '') + (yaEstaban.length ? ' · ' + yaEstaban.length + ' ya estaban (lo tuyo manda)' : '') + ' — muévelos si el cerebro se equivocó');
-      }, function (e) { if (rutasProp !== R || R.cancel) return; R.enVuelo = false; R.fallos.push(rutasSinRespuesta(R, e)); pintaRutas(); });
-    });
+        if (!rec) { R.fallos.push('losa ' + (i + 1) + ': ' + err); hecho(); return; }
+        var b64 = rec.b64, RR = rec.rect; rec.cv.width = 1; rec.cv.height = 1;
+        pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, paneles: { conocidos: conocidos, losa: i + 1, de: losas.length } }).then(function (d) {
+          if (rutasProp !== R || R.cancel) return;
+          if (!d || d.error || !d.paneles) { R.fallos.push('losa ' + (i + 1) + ': ' + ((d && d.error) ? String(d.error) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 160) : '') : 'el cerebro no contestó en formato de paneles (¿worker viejo? git pull · wrangler deploy)')); hecho(); return; }
+          rutasUso(R, d);
+          if (d.incompleto) R.fallos.push('losa ' + (i + 1) + ': la respuesta se cortó por larga; puede faltar algún panel');
+          var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0;
+          (Array.isArray(d.paneles.paneles) ? d.paneles.paneles.slice(0, 30) : []).forEach(function (p) {
+            var n = nombreTablero(p && p.nombre); if (!n) return;
+            var px = +p.x, py = +p.y; if (!isFinite(px) || !isFinite(py)) return;
+            px = Math.max(0, Math.min(100, px)); py = Math.max(0, Math.min(100, py));
+            R.cands.push({ n: n, tipo: (p && TABLERO_PREFIJOS[p.tipo]) ? String(p.tipo) : 'panel',
+                           x: Math.round(RR.x0 + px / 100 * W), y: Math.round(RR.y0 + py / 100 * H),
+                           conf: isFinite(+p.confianza) ? +p.confianza : 50, cuarto: p.cuarto ? String(p.cuarto) : '', existente: !!p.existente, losa: i + 1 });
+          });
+          var nt = String(d.paneles.notas || '').trim(); if (nt) R.notasCerebro.push(nt.slice(0, 200));
+          hecho();
+        }, function (e) { if (rutasProp !== R || R.cancel) return; R.fallos.push('losa ' + (i + 1) + ': ' + rutasSinRespuesta(R, e)); hecho(); });
+      });
+    }
+    function termina() {
+      R.enVuelo = false;
+      if (rutasHojaCambio(R, 'buscaba los paneles')) return;
+      // el mismo panel visto en dos losas (el solape) es UNO: se queda el que el cerebro vio más claro
+      var porClave = {};
+      R.cands.forEach(function (c) { var k = clavePanel(c.n); if (!porClave[k] || c.conf > porClave[k].conf) porClave[k] = c; });
+      var nuevos = [], yaEstaban = [], otros = [], undoHecho = false;
+      Object.keys(porClave).forEach(function (k) {
+        var c = porClave[k], cat = catTablero(c.n, true, c.tipo);
+        if (state.counts.some(function (q) { return q.cat === cat.id; })) { yaEstaban.push(cat.panel); return; }
+        if (!undoHecho) { pushUndo(); undoHecho = true; }
+        var m = { id: uid(), x: c.x, y: c.y, cat: cat.id };
+        var det = [c.tipo !== 'panel' ? c.tipo.replace('_', ' ') : '', c.cuarto, c.existente ? 'existente' : '', Math.round(c.conf) + ' %'].filter(Boolean).join(' · ');
+        if (det) m.iaNota = det.slice(0, 120);
+        state.counts.push(m); R.puestos++;
+        if (esPanelDeRutas(cat)) nuevos.push(cat.panel); else otros.push(cat.panel + ' (' + c.tipo.replace('_', ' ') + ')');
+      });
+      R.paneles = { nuevos: nuevos, yaEstaban: yaEstaban, otros: otros, notas: R.notasCerebro.join(' · ').slice(0, 300), vistos: Object.keys(porClave).length, losas: losas.length };
+      renderConteo(); refreshCounts(); if (R.puestos) scheduleAutosave(); pintaRutas();
+      setHint('✔ Paneles: ' + nuevos.length + ' localizado(s) en ' + losas.length + ' losa(s)' + (otros.length ? ' · ' + otros.length + ' cuarto(s)/equipo(s)' : '') + (yaEstaban.length ? ' · ' + yaEstaban.length + ' ya estaban (lo tuyo manda)' : '') + ' — muévelos si el cerebro se equivocó');
+    }
+    lanza();
   }
   /* Colocar un panel a mano: la categoría nace y Count queda listo para el toque. */
   function rutasColocaPanel(nombre) {
@@ -12216,27 +12357,35 @@
     }
     var R = rutasProp = { fase: 'rutas', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], tareas: tareas, hechas: 0, resultados: [], paneles: null, puestos: 0, undoHecho: false, maxTubo: rutasMaxTubo() };
     pintaRutas();
-    fondoRecorte(r, CUENTA_PX, function (rec, err) {
+    var i = 0;
+    function sig() {
       if (rutasProp !== R || R.cancel) return;
-      if (!rec) { R.enVuelo = false; R.fallos.push(err); pintaRutas(); return; }
-      var b64 = rec.b64, RR = rec.rect; rec.cv.width = 1; rec.cv.height = 1;
-      var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0;
-      var pct = function (x, y) { return { x: Math.round((x - RR.x0) / W * 1000) / 10, y: Math.round((y - RR.y0) / H * 1000) / 10 }; };
-      var i = 0;
-      function sig() {
+      if (i >= tareas.length) {
+        R.enVuelo = false;
+        refresh(); pintaRutas();
+        var ft = propuestasDeHoja().reduce(function (a, q) { return a + largoHomerun(q) / 12; }, 0);
+        setHint('✔ Rutas propuestas: ' + propuestasDeHoja().length + ' tubo(s), ≈ ' + Math.round(ft).toLocaleString() + ' ft · acéptalas, arrástralas o quítalas' + (R.puestos ? ' · Ctrl+Z quita las de esta pasada' : ''));
+        return;
+      }
+      var t = tareas[i++];
+      pintaRutas();
+      if (state.curSheet !== R.hoja) { rutasHojaCambio(R, 'proponía las rutas del ' + t.panel); return; }
+      /* (20/09, revisión del paso 8) NO la hoja entera: el trozo que abarca el
+         panel y sus dispositivos, con margen para los pasillos. Un panel que
+         alimenta media hoja sale al doble de resolución; uno que alimenta un
+         rincón, a cuatro veces. Los pasillos entre el panel y sus piezas están
+         dentro del trozo, que es lo que el cerebro necesita ver. */
+      var rt = rutasRectDe(t, r);
+      fondoRecorte(rt, CUENTA_PX, function (rec, err) {
         if (rutasProp !== R || R.cancel) return;
-        if (i >= tareas.length) {
-          R.enVuelo = false;
-          refresh(); pintaRutas();
-          var ft = propuestasDeHoja().reduce(function (a, q) { return a + largoHomerun(q) / 12; }, 0);
-          setHint('✔ Rutas propuestas: ' + propuestasDeHoja().length + ' tubo(s), ≈ ' + Math.round(ft).toLocaleString() + ' ft · acéptalas, arrástralas o quítalas' + (R.puestos ? ' · Ctrl+Z quita las de esta pasada' : ''));
-          return;
-        }
-        var t = tareas[i++], pp = pct(t.marca.x, t.marca.y);
-        pintaRutas();
+        if (!rec) { R.fallos.push(t.panel + ': ' + err); R.hechas++; sig(); return; }
+        var b64 = rec.b64, RR = rec.rect; rec.cv.width = 1; rec.cv.height = 1;
+        var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0;
+        var pct = function (x, y) { return { x: Math.round((x - RR.x0) / W * 1000) / 10, y: Math.round((y - RR.y0) / H * 1000) / 10 }; };
+        var pp = pct(t.marca.x, t.marca.y);
         pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, rutas: { panel: { nombre: t.panel, x: pp.x, y: pp.y },
           circuitos: t.ckts.map(function (k) { return { ckt: k.ckt, dispositivos: k.devs.map(function (d) { return pct(d.x, d.y); }) }; }),
-          max_por_tubo: R.maxTubo, hoja: notasHojaNom(R.hoja) } }).then(function (d) {
+          max_por_tubo: R.maxTubo, hoja: notasHojaNom(R.hoja), recorte: (W < (r.x1 - r.x0) * 0.98 || H < (r.y1 - r.y0) * 0.98) } }).then(function (d) {
           if (rutasProp !== R || R.cancel) return;
           var rot = t.panel + (t.parte ? ' (parte ' + t.parte + ')' : '');
           if (!d || d.error || !d.rutas) R.fallos.push(rot + ': ' + ((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 160) : '') : 'el cerebro no contestó en formato de rutas (¿worker viejo?)'));
@@ -12249,9 +12398,27 @@
           }
           R.hechas++; sig();
         }, function (e) { if (rutasProp !== R || R.cancel) return; R.fallos.push(t.panel + ': ' + rutasSinRespuesta(R, e)); R.hechas++; sig(); });
-      }
-      sig();
-    });
+      });
+    }
+    sig();
+  }
+  /* El trozo de hoja para pedir las rutas de un panel: la caja que abarca su
+     marca y todos sus dispositivos, más un margen (el 20 % del lado, y nunca
+     menos de 6" de papel) para que quepan los pasillos por los que va el tubo.
+     Recortado a la hoja. Si eso es casi la hoja entera, va la hoja entera. */
+  function rutasRectDe(t, hoja) {
+    var xs = [t.marca.x], ys = [t.marca.y];
+    t.ckts.forEach(function (k) { k.devs.forEach(function (d) { xs.push(d.x); ys.push(d.y); }); });
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    var bg = state.bg, ppu = (bg && bg.paperW && bg.w) ? bg.paperW / bg.w : null;
+    var minM = ppu ? 6 / ppu : Math.max(hoja.x1 - hoja.x0, hoja.y1 - hoja.y0) * 0.1;
+    var m = Math.max(minM, (x1 - x0) * 0.2, (y1 - y0) * 0.2);
+    var rt = { x0: Math.max(hoja.x0, x0 - m), y0: Math.max(hoja.y0, y0 - m), x1: Math.min(hoja.x1, x1 + m), y1: Math.min(hoja.y1, y1 + m) };
+    // que no salga un trozo enano: al menos un tercio de la hoja por lado, para que se vea dónde está
+    var minW = (hoja.x1 - hoja.x0) / 3, minH = (hoja.y1 - hoja.y0) / 3;
+    if (rt.x1 - rt.x0 < minW) { var cx = (rt.x0 + rt.x1) / 2; rt.x0 = Math.max(hoja.x0, cx - minW / 2); rt.x1 = Math.min(hoja.x1, rt.x0 + minW); }
+    if (rt.y1 - rt.y0 < minH) { var cy = (rt.y0 + rt.y1) / 2; rt.y0 = Math.max(hoja.y0, cy - minH / 2); rt.y1 = Math.min(hoja.y1, rt.y0 + minH); }
+    return rt;
   }
   /* Las rutas de un panel, a homeruns «propuesta». Devuelve cuántas puso. */
   function rutasRecibe(d, t, RR, R) {
@@ -12329,9 +12496,9 @@
     if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
     var R = rutasProp, h = '';
     if (R && R.enVuelo) {
-      h += R.fase === 'paneles' ? '<div class="vN"><b>Buscando los paneles</b> en la hoja entera…</div>'
+      h += R.fase === 'paneles' ? '<div class="vN"><b>Buscando los paneles</b> · losa ' + Math.min(R.losas ? R.losas.length : 1, (R.hechas || 0) + 1) + ' de ' + (R.losas ? R.losas.length : 1) + '</div>' + (R.losas && R.losas.length > 1 ? '<div class="cuBarra"><div style="width:' + Math.round((R.hechas || 0) / R.losas.length * 100) + '%"></div></div>' : '')
         : '<div class="vN"><b>Proponiendo rutas</b> · panel ' + Math.min(R.tareas.length, R.hechas + 1) + ' de ' + R.tareas.length + '</div><div class="cuBarra"><div style="width:' + Math.round(R.hechas / Math.max(1, R.tareas.length) * 100) + '%"></div></div>';
-      h += ayudaHtml('rutas2', 'Una llamada por panel con la hoja entera delante: 30–90 s cada una. Los dispositivos no se vuelven a mirar, van como datos.');
+      h += ayudaHtml('rutas2', R.fase === 'paneles' ? 'La hoja se parte en losas de 18" para que los rótulos de los paneles se lean (a hoja entera miden 5 px). Cada losa tarda 20–40 s.' : 'Una llamada por panel, con el trozo de la hoja que abarca el panel y sus dispositivos: 30–90 s cada una. Los dispositivos no se vuelven a mirar, van como datos.');
       h += '<button id="rtCancela" style="width:100%;margin-top:6px">Parar aquí</button>';
       c.innerHTML = h; enganchaRutasBotones(); return;
     }
@@ -12362,6 +12529,17 @@
     } else if (state.bg && state.bg.url) h += '<div class="bMuted">Todavía no hay paneles ni dispositivos con circuito en esta hoja. Empieza por <b>1 · Localizar los paneles</b>; y cuenta las piezas con el cerebro para que lea sus circuitos.</div>';
     var ileg = Object.keys(C.ilegibles);
     if (ileg.length) h += '<div class="muted small">Rótulos que no entiendo como circuito (panel-número): ' + ileg.slice(0, 8).map(function (k) { return '«' + esc(k) + '» ×' + C.ilegibles[k]; }).join(' · ') + '</div>';
+    /* (20/09, revisión del paso 8) El sufijo de letra: NHI-2 y NHI-2A llevan el
+       mismo NÚMERO, y el breaker se cuenta por número — así que salen como UN
+       breaker. Unas veces es verdad (2A es una derivación del 2); otras son
+       dos circuitos. Eso no lo sabe la app: lo dice, y Edgar decide. */
+    var conLetra = [];
+    Object.keys(C.porPanel).forEach(function (pn) {
+      var porNum = {};
+      Object.keys(C.porPanel[pn].ckts).forEach(function (k) { var q = C.porPanel[pn].ckts[k]; (porNum[q.num] = porNum[q.num] || []).push(k); });
+      Object.keys(porNum).forEach(function (n) { if (porNum[n].length > 1) conLetra.push(porNum[n].join(' y ')); });
+    });
+    if (conLetra.length) h += '<div class="muted small" style="color:#a33">⚠ Comparten número, así que en el conteo son UN breaker: ' + conLetra.slice(0, 6).map(esc).join(' · ') + '. Si son circuitos distintos, cámbiale el número a uno (el ckt de la marca) antes de aceptar las rutas.</div>';
     if (R && R.resultados.length) {
       R.resultados.forEach(function (x) {
         if (x.sinRuta.length || x.notas) h += '<div class="muted small">' + esc(x.panel) + ': ' + x.puestos + ' ruta(s) para ' + x.circuitos + ' circuito(s)' + (x.sinRuta.length ? ' · sin ruta: ' + x.sinRuta.map(esc).join(', ') : '') + (x.notas ? ' · ' + esc(x.notas) : '') + '</div>';
@@ -12423,6 +12601,7 @@
   window.__rutasPropDbg = {
     localiza: rutasLocaliza, propon: rutasPropon, para: function () { rutasPara(rutasProp); pintaRutas(); },
     parse: parseCkt, parseTodos: parseCkts, clave: clavePanel, nombre: nombreTablero, maxTubo: rutasMaxTubo,
+    losas: panelesLosas, rectDe: function (t, hoja) { return rutasRectDe(t, hoja || cuentaRectHoja()); },
     circuitos: circuitosDeHoja, tableros: function () { return tablerosDeHoja().map(function (t) { return { panel: t.panel, clave: t.clave, tipo: t.tipo, rutas: t.rutas, marca: t.marca ? { x: t.marca.x, y: t.marca.y } : null }; }); },
     conocidos: panelesConocidos,
     propuestas: function () { return propuestasDeHoja().map(function (a) { return { id: a.id, panel: a.circ.panel, nums: numsCirc(a.circ), ckts: a.circ.ckts, pts: a.pts, ft: Math.round(largoHomerun(a) / 12), conf: a.rutaProp && a.rutaProp.conf }; }); },
@@ -17142,6 +17321,8 @@
     // (20/09) una hoja traída con el set no se ha encuadrado nunca: la primera
     // vez que se entra, el plano se ajusta a la pantalla y ya no se vuelve a tocar
     if (sh._zf) { delete sh._zf; try { zoomFit(); } catch (e) {} }
+    // (20/09) el PDF vivo de esta hoja se pide ya, no al primer zoom: así el conteo y la leyenda lo encuentran listo
+    try { if (state.bg && state.bg.pdfId && !pdfLive[i]) loadPdfLive(state.bg); } catch (e) {}
     if (loadSheetData.fallo) {
       // (auditoría robustez 03/09) antes la hoja salía vacía en silencio y al
       // volver a cambiar de hoja syncSheet la pisaba: pérdida definitiva
@@ -17427,19 +17608,19 @@
   }
   /* El fondo tal y como lo deja insertBackground, para una hoja que todavía no
      existe: mismo ancho de 50 pies y mismos campos. */
-  function bgDePagina(url, pxW, pxH, paperW, paperH, pdfId, pdfPage) {
+  function bgDePagina(url, pxW, pxH, paperW, paperH, pdfId, pdfPage, vista) {
     var w = 600;
     var bg = { url: url, x: 0, y: 0, w: w, h: w * pxH / pxW, pxW: pxW, pxH: pxH,
                opacity: (+($('#bgOpacity') || {}).value || 100) / 100 };
     if (paperW) { bg.paperW = paperW; bg.paperH = paperH; }
-    if (pdfId) { bg.pdfId = pdfId; bg.pdfPage = pdfPage; }
+    if (pdfId) { bg.pdfId = pdfId; bg.pdfPage = pdfPage; if (vista) bg.vista = 1; }
     return bg;
   }
   /* Lo que va a pesar lo marcado: medido de verdad sobre hojas ARCH D (1,5 MB
      en el PC, 0,85 en el iPad). Es lo que decide si cabe, no un número fijo. */
   function setPesoEstimado(n) {
-    var lite = document.body.classList.contains('touch');
-    return n * (lite ? 0.85e6 : 1.5e6) + pesoAprox();
+    // vista general (el PDF va aparte, a la nube): ~0,4 MB por hoja ARCH D, medido
+    return n * 0.4e6 + pesoAprox();
   }
   function pintaSet() {
     var S = setPdf; if (!S) return;
@@ -17494,7 +17675,7 @@
     bi.hidden = !n;
     bi.textContent = n ? ('Traer ' + n + ' hoja(s) al proyecto') : '';
     pe.innerHTML = n
-      ? ('Va a pesar unos <b>' + pesoTxt(peso) + '</b>. ' + (peso > PESO_NUBE
+      ? ('Va a pesar unos <b>' + pesoTxt(peso) + '</b> (el PDF va aparte a la nube, una sola vez). ' + (peso > PESO_NUBE
           ? '<span style="color:#a33">Pasa del tope de la nube (50 MB): se guardaría solo en este aparato, sin sincronizar con el iPad.</span>'
           : 'Cabe en la nube y se sincroniza.') +
          (n > 25 ? ' Tarda cerca de ' + Math.round(n * 0.6) + ' s en entrar.' : ''))
@@ -17520,7 +17701,8 @@
         if (setPdf !== S || S.cancel) { finSet(S); return; }
         var vp1 = page.getViewport({ scale: 1 });
         var lite = document.body.classList.contains('touch');
-        var MAXDIM = lite ? 4096 : 6000, AREA = lite ? 13e6 : 26e6;
+        var vista = !!ar.pdfKey;   // el PDF quedó guardado: vista general, y el detalle del PDF
+        var MAXDIM = vista ? VISTA_PX : (lite ? 4096 : 6000), AREA = vista ? VISTA_AREA : (lite ? 13e6 : 26e6);
         var escala = Math.min(6, MAXDIM / vp1.width, MAXDIM / vp1.height, Math.sqrt(AREA / (vp1.width * vp1.height)));
         var vp = page.getViewport({ scale: escala });
         var cv = document.createElement('canvas');
@@ -17530,7 +17712,7 @@
         return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
           if (setPdf !== S || S.cancel) { cv.width = 1; cv.height = 1; finSet(S); return; }
           var big = cv.width * cv.height > 9e6;
-          var url = (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
+          var url = vista ? cv.toDataURL('image/jpeg', VISTA_JPEG) : (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
           cv.width = 1; cv.height = 1;
           var nom = q.num || ('PG-' + q.pg);
           if (S.puestas === 0 && vacia) {
@@ -17541,10 +17723,10 @@
             syncProjectInputs();
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: ar.doc, page: q.pg };
-            if (ar.pdfKey) { state.bg.pdfId = ar.pdfKey; state.bg.pdfPage = q.pg; }
+            if (ar.pdfKey) { state.bg.pdfId = ar.pdfKey; state.bg.pdfPage = q.pg; if (vista) state.bg.vista = 1; }
           } else {
             // las demás se arman enteras, sin activarlas: así no se pierde el undo
-            S.nuevas.push({ hoja: hojaConFondo(nom, bgDePagina(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72, ar.pdfKey, q.pg)), doc: ar.doc, pg: q.pg });
+            S.nuevas.push({ hoja: hojaConFondo(nom, bgDePagina(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72, ar.pdfKey, q.pg, vista)), doc: ar.doc, pg: q.pg });
           }
           S.puestas++; S.hechas++;
           pintaSet();
@@ -17564,6 +17746,8 @@
       pdfLive[state.sheets.length - 1] = { doc: x.doc, page: x.pg };
     });
     S.nombres = (S.usoActiva ? [state.sheets[state.curSheet].no] : []).concat((S.nuevas || []).map(function (x) { return x.hoja.no; }));
+    // los PDF del set a la nube: uno por archivo, no por hoja
+    (S.archivos || []).forEach(function (a) { if (a.pdfKey) encolaPdfNube(a.pdfKey); });
     renderSheetTabs(); refresh(); scheduleAutosave();
     /* No se cierra: se enseña lo que entró y se ofrece DESHACER de verdad.
        Ctrl+Z no vale aquí — la pila de deshacer es por hoja y se borra al
@@ -17681,8 +17865,10 @@
         // aquí se rasteriza una vez, así que hay que rasterizar grande). Límite de
         // Safari iOS por canvas: ~16.7 MP → presupuesto de área con margen.
         var lite = document.body.classList.contains('touch');
-        var MAXDIM = lite ? 4096 : 6000;
-        var AREA = lite ? 13e6 : 26e6;
+        // (20/09) con el PDF guardado, el fondo es solo la vista general: el detalle lo da el PDF
+        var vista = !!pdfKey && !cb;
+        var MAXDIM = vista ? VISTA_PX : (lite ? 4096 : 6000);
+        var AREA = vista ? VISTA_AREA : (lite ? 13e6 : 26e6);
         var scale = Math.min(6,
           MAXDIM / vp1.width, MAXDIM / vp1.height,
           Math.sqrt(AREA / (vp1.width * vp1.height)));
@@ -17695,13 +17881,13 @@
           // el PDF sabe su tamaño de papel real (72 puntos = 1"): con eso la escala del plano es exacta
           // JPEG para hojas grandes (el PNG de 20+ MP pesa demasiado en memoria)
           var big = cv.width * cv.height > 9e6;
-          var url = (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
+          var url = vista ? cv.toDataURL('image/jpeg', VISTA_JPEG) : (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
           cv.width = 1; cv.height = 1;   // libera la memoria del canvas de una
           if (cb) cb(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
           else {
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: doc, page: pageNum };
-            if (pdfKey) { state.bg.pdfId = pdfKey; state.bg.pdfPage = pageNum; }
+            if (pdfKey) { state.bg.pdfId = pdfKey; state.bg.pdfPage = pageNum; if (vista) state.bg.vista = 1; encolaPdfNube(pdfKey); }
             if (!state.sheets[state.curSheet].no) {
               state.sheets[state.curSheet].no = 'PG-1';
               state.project.sheetNo = 'PG-1';
@@ -17784,7 +17970,8 @@
       return;
     }
     saveFile(baseN + '.mxp.json', data);
-    setHint('Proyecto guardado (archivo descargado)');
+    var hayVista = false; try { hayVista = (state.sheets || []).some(function (sh) { return sh && typeof sh.data === 'string' && sh.data.indexOf('"vista":1') >= 0; }) || !!(state.bg && state.bg.vista); } catch (e) {}
+    setHint(hayVista ? 'Proyecto guardado (archivo descargado) · los PDF de fondo están en la nube: en otro aparato bajan solos al abrirlo' : 'Proyecto guardado (archivo descargado)');
   });
 
   /* --- FASE 5: importar un escaneo de casa (Apple RoomPlan / MXP Scan) ---
@@ -23635,7 +23822,7 @@
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la activa…</span></div>';
       }
-      html += '<div class="tmItem tmMas" data-k="__mas"><span>' + (countMas ? '▾' : '▸') + ' Más…' + (countMas ? '' : ' <span class="muted">· renombrar, color, partida, ítem del catálogo, buscar iguales, listas</span>') + '</span></div>';
+      html += '<div class="tmItem tmMas" data-k="__mas"><span>' + (countMas ? '▾' : '▸') + ' Más…' + (countMas ? '' : ' <span class="muted">· renombrar, color, partida, ítem del catálogo, listas</span>') + '</span></div>';
       if (countMas) {
         if (catsM.length) {
           html += '<div class="tmItem" data-k="__renombra"><span>Renombrar la activa…</span></div>';
@@ -23645,7 +23832,13 @@
             (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
           html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
         }
-        html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos…</span></div>';
+        /* (20/09) «Buscar iguales» se queda ESCONDIDO salvo en «Mostrar todo» o si
+           ya lo usó. Diagnóstico (17/09, sobre planos reales): barre a 72 px por
+           pulgada —un receptáculo son 12 px— y no gira el molde, así que no
+           puede acertar; el camino que sí cuenta es el cerebro (78 de 78
+           luminarias en la E-2.2). No se borra: se enciende desde ⋮⋮ Barras →
+           Mostrar todo, para medirlo el día que haya un plano real delante. */
+        if ((layout && layout.modo === 'todo') || toolUsada('vsearch')) html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos… <span class="muted">· prueba: no acierta a la resolución del plano</span></span></div>';
         html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
         if (catsM.length) {
           html += '<div class="tmItem" data-k="__doc"><span>Leer un conteo de un documento… <span class="muted">· pega la tabla tal cual</span></span></div>';
