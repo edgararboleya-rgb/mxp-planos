@@ -74,7 +74,7 @@
     </div>
     </div>
     <div class="dock horiz" id="dockTop"></div>
-    <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" hidden>
+    <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" multiple hidden>
     <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>
     <input type="file" id="fileOpen" accept=".json,application/json,application/pdf,.pdf,image/*" hidden>
     <input type="file" id="fileProyectos" accept=".json,application/json" multiple hidden>
@@ -538,6 +538,26 @@
       <div class="mbtns"><button id="aiClose" data-ico="close">Cerrar</button></div>
     </div>
     <div id="aiBody" class="pbody"></div>
+  </div>
+</div>
+
+<div id="setModal" class="modal" hidden style="z-index:78">
+  <div class="modalBox" style="width:min(860px,96vw)">
+    <div class="modalHead">
+      <b>📚 EL SET DE PLANOS — elige qué hojas entran</b>
+      <div class="mbtns"><button id="setCerrar" data-ico="close">Cerrar</button></div>
+    </div>
+    <div class="pbody">
+      <div id="setEstado" class="bMuted"></div>
+      <div id="setBotones" class="row" hidden>
+        <button id="setTodas" style="flex:1">Todas</button>
+        <button id="setNinguna" style="flex:1">Ninguna</button>
+        <button id="setElectricas" style="flex:1" title="Las hojas cuyo número empieza por E (E-1, ED-2.2, EP-3): las eléctricas">Solo las E‑*</button>
+      </div>
+      <div id="setLista" class="setLista"></div>
+      <div id="setPeso" class="muted small"></div>
+      <button id="setImporta" style="padding:10px;font-weight:700" hidden></button>
+    </div>
   </div>
 </div>
 

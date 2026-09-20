@@ -1352,3 +1352,15 @@ td.pmAcc button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.
 
 /* LEYENDA LOCAL (17/09): la receta por fila */
 .lyRec { margin-top: 3px; }
+
+/* ===== EL SET DE PLANOS (20/09): la lista de páginas para elegir qué entra ===== */
+.setLista { max-height: 46vh; overflow-y: auto; border: 1px solid var(--mp-line); border-radius: 10px; margin: 8px 0; }
+.setFila { display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-bottom: 1px solid var(--mp-line); cursor: pointer; }
+.setFila:last-child { border-bottom: 0; }
+.setFila:hover { background: rgba(7,26,46,.04); }
+.setFila input { margin: 0; flex: none; }
+.setFila .sfNum { font-weight: 700; min-width: 5.5rem; }
+.setFila .sfPapel { color: var(--mp-muted); font-size: 12px; min-width: 5rem; }
+.setFila .sfArch { color: var(--mp-muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setFila.sfGrande .sfPapel { color: var(--mp-ink); font-weight: 600; }
+.setCab { background: rgba(7,26,46,.06); font-weight: 700; padding: 5px 9px; font-size: 12px; }

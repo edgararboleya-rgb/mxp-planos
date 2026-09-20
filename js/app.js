@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.Q';
+  var APP_VERSION = 'v34.R';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -467,6 +467,68 @@
     return JSON.stringify({ app: 'mxp-planos', version: 1, state: st, view: view });
   }
   window.__payloadDbg = function () { return payloadProyecto(); };
+  /* ================= EL BLINDAJE DEL GUARDADO (20/09) =================
+     La revisión adversaria del 20/09 encontró tres maneras de perder el
+     trabajo EN SILENCIO, y las tres se dan ya hoy, no solo con muchas hojas:
+       · doAutosave envolvía TODO en un catch vacío: si el proyecto crecía
+         hasta donde JSON.stringify no puede (un string de V8 revienta a los
+         512 MB), no se guardaba nada y no lo decía nadie.
+       · el botón de rescate de la barra roja llama al MISMO payload que acaba
+         de fallar, dentro de otro catch vacío: no descargaba nada.
+       · una hoja con los datos dañados hacía invisible su PDF, y la limpieza
+         de PDF crudos se lo llevaba por delante.
+     Aquí van las tres cosas que lo evitan: medir ANTES de construir el
+     string, un rescate que SIEMPRE baja algo, y una limpieza que no borra
+     cuando no está segura. */
+  var PESO_NUBE = 60e6;      // ~50 MB comprimidos: el tope del bucket de la nube
+  var PESO_LIMITE = 380e6;   // margen real antes del muro de 512 MB de V8
+  var pesoAvisado = 0;
+  /* Lo que va a pesar el payload, SIN construirlo (construirlo es justo lo que
+     revienta). Los fondos son casi todo: un dataURL de una hoja ARCH D son
+     1-7 MB. */
+  function pesoTxt(n) { return n >= 1e6 ? (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + ' MB' : Math.round(n / 1000) + ' KB'; }
+  function pesoAprox() {
+    var n = 2000;
+    try {
+      (state.sheets || []).forEach(function (sh) { if (sh && typeof sh.data === 'string') n += sh.data.length; });
+      if (state.bg && state.bg.url) n += String(state.bg.url).length;
+      if (state.bg2 && state.bg2.url) n += String(state.bg2.url).length;
+    } catch (e) {}
+    return n;
+  }
+  /* El proyecto SIN las imágenes de fondo. Es el rescate: las medidas, el
+     conteo y los circuitos —el trabajo de verdad, el que no se puede rehacer—
+     pesan kilobytes; los fondos se vuelven a importar del PDF en un minuto. */
+  function payloadSinFondos() {
+    syncSheet();
+    function pela(bg) {
+      if (!bg || typeof bg !== 'object') return bg || null;
+      var o = Object.assign({}, bg); delete o.url; delete o.origUrl; o.sinImagen = 1; return o;
+    }
+    var hojas = (state.sheets || []).map(function (sh) {
+      if (!sh || typeof sh.data !== 'string') return sh;
+      var d; try { d = JSON.parse(sh.data); } catch (e) { return sh; }   // una hoja ilegible se deja tal cual: mejor eso que perderla
+      if (d.bg) d.bg = pela(d.bg);
+      if (d.bg2) d.bg2 = pela(d.bg2);
+      return Object.assign({}, sh, { data: JSON.stringify(d) });
+    });
+    var st = Object.assign({}, state, { bg: pela(state.bg), bg2: pela(state.bg2), sheets: hojas, sinFondos: 1 });
+    return JSON.stringify({ app: 'mxp-planos', version: 1, state: st, view: view });
+  }
+  /* El payload que SIEMPRE devuelve algo: el completo si cabe, y si no, el de
+     rescate. `cb(texto, completo)`. */
+  function payloadSeguro() {
+    try { return { txt: payloadProyecto(), completo: true }; }
+    catch (e) {
+      try { return { txt: payloadSinFondos(), completo: false }; }
+      catch (e2) { return { txt: null, completo: false }; }
+    }
+  }
+  window.__pesoDbg = { peso: pesoAprox, sinFondos: payloadSinFondos, seguro: payloadSeguro,
+    avisa: function (v) { if (v !== undefined) pesoAvisado = v; return pesoAvisado; },
+    topes: function (o) { if (o && o.nube) PESO_NUBE = o.nube; if (o && o.limite) PESO_LIMITE = o.limite; return { nube: PESO_NUBE, limite: PESO_LIMITE }; },
+    autosave: function () { return doAutosave(); },
+    idsEnUso: pdfIdsEnUso, purga: purgaPdfBin, pdfsDe: function (o) { var r = pdfsDe(o); return { ids: r, parcial: !!pdfsDe.parcial }; } };
   // abrir lo que payloadProyecto escribió: es el viaje completo guardar → abrir
   window.__abreDbg = function (txt) { try { restoreProject(JSON.parse(txt)); return 1; } catch (e) { return 'EXC ' + e.message; } };
   /* FASE 7.1 — BIBLIOTECA LOCAL DE PROYECTOS. Hasta aquí había UNA ranura
@@ -516,25 +578,31 @@
       id: m.id, nombre: String(m.nombre || ''), cliente: String(m.cliente || ''), job: String(m.job || ''), direccion: String(m.direccion || ''),
       rev: Number.isInteger(+m.rev) ? +m.rev : 0, updatedAt: String(m.updatedAt || ''), hojas: +m.hojas || 1, tam: +m.tam || 0,
       revNube: (m.revNube != null && Number.isInteger(+m.revNube) && +m.revNube >= 0) ? +m.revNube : null,
-      pdfs: Array.isArray(m.pdfs) ? m.pdfs.filter(function (x) { return typeof x === 'string'; }) : []
+      pdfs: Array.isArray(m.pdfs) ? m.pdfs.filter(function (x) { return typeof x === 'string'; }) : [],
+      // (20/09) la ficha no pudo leer todas las hojas: sus PDF no se borran a ciegas
+      pdfsParcial: m.pdfsParcial ? true : undefined
     } : null;
   }
   // los pdfId de un proyecto (objeto ya parseado): fondo de cada hoja
   function pdfsDe(o) {
-    var ids = {};
+    var ids = {}, parcial = false;
     function mete(bg) { if (bg && bg.pdfId) ids[bg.pdfId] = 1; }
     var st = o && o.state ? o.state : o;
-    if (!st) return [];
+    if (!st) { pdfsDe.parcial = false; return []; }
     mete(st.bg); mete(st.bg2);
     (st.sheets || []).forEach(function (sh) {
-      if (!sh || typeof sh.data !== 'string') return;
-      try { var d = JSON.parse(sh.data); mete(d.bg); mete(d.bg2); } catch (e) {}
+      if (!sh) return;
+      if (typeof sh.data !== 'string') { if (sh.data != null) parcial = true; return; }
+      try { var d = JSON.parse(sh.data); mete(d.bg); mete(d.bg2); } catch (e) { parcial = true; }
     });
+    // (20/09) una hoja ilegible esconde su PDF: la ficha lo dice y la limpieza se abstiene
+    pdfsDe.parcial = parcial;
     return Object.keys(ids);
   }
   function fichaDe(pj, st, tam) {
+    var pdfs = pdfsDe({ state: st });
     return metaDe({ id: pj.id, nombre: pj.name, cliente: pj.client, job: pj.job, direccion: pj.address, rev: pj.rev, updatedAt: pj.updatedAt,
-      revNube: pj.revNube, hojas: (st.sheets || []).length, tam: tam, pdfs: pdfsDe({ state: st }) });
+      revNube: pj.revNube, hojas: (st.sheets || []).length, tam: tam, pdfs: pdfs, pdfsParcial: pdfsDe.parcial || undefined });
   }
   // ¿hay algo que valga la pena registrar? (J) un proyecto en blanco y sin nombre, no
   function hayAlgoQueGuardar() {
@@ -863,6 +931,16 @@
         if (Object.keys(nube.pendientes).length) { clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400); }
       } else if (msg === 'conflicto') {
         // lo resuelve el diálogo; la cola sigue después
+      } else if (msg && /m[aá]s de 50 MB/i.test(msg)) {
+        /* (20/09) NO se reintenta lo que no puede caber: antes se quedaba en
+           la cola y cada 60 s volvía a stringificar y re-comprimir el proyecto
+           entero para fallar igual — con 40 hojas eso es congelar la app para
+           siempre. Se saca de la cola y se dice una vez, con lo que hay que
+           hacer. El trabajo sigue guardado en el aparato. */
+        delete nube.pendientes[id];
+        nube.intentos = 0;
+        nubeSet('error', 'No cabe en la nube (tope 50 MB): este proyecto solo se guarda en este aparato. Quita hojas de fondo o baja una copia con 💾.');
+        if (Object.keys(nube.pendientes).length) { clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 800); }
       } else {
         // reintento con espera creciente; no se pierde nada: sigue en la cola
         var esp = NUBE_REINTENTO[Math.min(nube.intentos, NUBE_REINTENTO.length - 1)];
@@ -1158,6 +1236,19 @@
     persistido: function () { return persistido; }, sucio: function () { return sucio; }, soloLectura: function () { return soloLectura; }, listo: function () { return libListo; } };
   function doAutosave() {
     if (restaurando) return;
+    // (20/09) MEDIR ANTES DE CONSTRUIR: pasado el muro de V8, JSON.stringify
+    // lanza y hasta hoy nadie se enteraba. Ahora se avisa con lo que hay que
+    // hacer, y el trabajo se puede bajar aunque el proyecto ya no quepa.
+    var peso = pesoAprox();
+    if (peso > PESO_LIMITE && pesoAvisado < 2) {
+      pesoAvisado = 2; sucio = true;
+      uiAlert('⚠️ Este proyecto es DEMASIADO GRANDE para guardarse entero (' + pesoTxt(peso) + ' de planos de fondo en ' + ((state.sheets || []).length) + ' hoja(s)).\n\nTu trabajo NO se está guardando solo. Usa 💾 Guardar ahora mismo: si el archivo completo no cabe, se baja una copia con TODAS tus medidas y conteos (sin las imágenes de fondo, que se vuelven a importar del PDF).\n\nPara seguir trabajando: quita de este proyecto las hojas que no necesites.');
+      return;
+    }
+    if (peso > PESO_NUBE && peso <= PESO_LIMITE && pesoAvisado < 1) {
+      pesoAvisado = 1;
+      setHint('⚠ El proyecto pesa ' + pesoTxt(peso) + ': se guarda en este aparato, pero ya no cabe en la nube (tope 50 MB) — no se va a sincronizar con el iPad');
+    }
     try {
       var lsOk = true;
       var payload = guardaEnBiblioteca(sucio, function (ok) {
@@ -1182,7 +1273,15 @@
         try { localStorage.setItem('mxp_autosave', payload); }
         catch (e) { lsOk = false; try { localStorage.removeItem('mxp_autosave'); } catch (e2) {} }
       } else { lsOk = false; try { localStorage.removeItem('mxp_autosave'); } catch (e3) {} }
-    } catch (e) {}
+    } catch (e) {
+      // (20/09) ANTES: catch vacío. Si guardar lanzaba —proyecto gigante,
+      // almacenamiento lleno— Edgar seguía trabajando creyendo que se guardaba.
+      sucio = true;
+      if (pesoAvisado < 2) {
+        pesoAvisado = 2;
+        try { uiAlert('⚠️ NO se pudo guardar automáticamente: ' + (e && e.message ? e.message : e) + '\n\nUsa 💾 Guardar ahora para bajar tu trabajo antes de cerrar.'); } catch (e4) {}
+      }
+    }
   }
   function idbKV(mode, cb) {
     try {
@@ -1212,14 +1311,20 @@
      en IndexedDB (pdfbin_*) para el zoom nitido, y nunca se borraba — el
      almacenamiento del navegador crecia con cada plano que Edgar probaba. Se
      conservan solo los que alguna hoja del proyecto abierto sigue usando. */
+  /* (20/09) Si una hoja no se puede leer, su PDF es INVISIBLE aquí — y antes
+     la limpieza se lo llevaba por delante. Ahora se dice, y quien borra se
+     abstiene: un PDF de más ocupa espacio; uno de menos es un plano perdido. */
   function pdfIdsEnUso() {
-    var ids = {};
+    var ids = {}, fiable = true;
     function mete(bg) { if (bg && bg.pdfId) ids[bg.pdfId] = 1; }
     mete(state.bg); mete(state.bg2);
     (state.sheets || []).forEach(function (sh) {
-      if (!sh || typeof sh.data !== 'string') return;
-      try { var d = JSON.parse(sh.data); mete(d.bg); mete(d.bg2); } catch (e) {}
+      if (!sh) return;
+      if (typeof sh.data !== 'string') { if (sh.data != null) fiable = false; return; }
+      try { var d = JSON.parse(sh.data); mete(d.bg); mete(d.bg2); } catch (e) { fiable = false; }
+      if (sh.dataRoto) fiable = false;   // una hoja dañada: su PDF puede estar ahí dentro
     });
+    ids.__fiable = fiable;
     return ids;
   }
   function purgaPdfBin(done) {
@@ -1227,7 +1332,15 @@
     // uso: el índice lleva sus pdfIds. Sin índice fiable no se borra nada.
     if (!libListo) { if (done) done(0); return; }
     var enUso = pdfIdsEnUso(), borrados = 0;
-    libIndex.forEach(function (m) { (m.pdfs || []).forEach(function (id) { enUso[id] = 1; }); });
+    // si el proyecto abierto, o la ficha de CUALQUIER otro, no se pudo leer
+    // entera, no se borra nada: no sabemos qué PDF está en uso
+    var fiable = enUso.__fiable !== false;
+    delete enUso.__fiable;
+    libIndex.forEach(function (m) {
+      if (m && m.pdfsParcial) fiable = false;
+      (m.pdfs || []).forEach(function (id) { enUso[id] = 1; });
+    });
+    if (!fiable) { if (done) done(0); return; }
     idbKV('readwrite', function (st) {
       if (!st || !st.getAllKeys) { if (done) done(0); return; }
       try {
@@ -17026,6 +17139,9 @@
     state.project.sheetNo = sh.no; state.project.sheetTitle = sh.title;
     syncProjectInputs();
     loadSheetData(sh.data);
+    // (20/09) una hoja traída con el set no se ha encuadrado nunca: la primera
+    // vez que se entra, el plano se ajusta a la pantalla y ya no se vuelve a tocar
+    if (sh._zf) { delete sh._zf; try { zoomFit(); } catch (e) {} }
     if (loadSheetData.fallo) {
       // (auditoría robustez 03/09) antes la hoja salía vacía en silencio y al
       // volver a cambiar de hoja syncSheet la pisaba: pérdida definitiva
@@ -17182,8 +17298,8 @@
   cwrap.addEventListener('dragover', function (ev) { ev.preventDefault(); });
   cwrap.addEventListener('drop', function (ev) {
     ev.preventDefault();
-    var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-    if (f) handleBgFile(f);
+    var fs = (ev.dataTransfer && ev.dataTransfer.files) ? [].slice.call(ev.dataTransfer.files) : [];
+    if (fs.length) handleBgFiles(fs);
   });
 
   function insertBackground(url, pxW, pxH, paperW, paperH) {
@@ -17199,6 +17315,311 @@
       : 'Plano importado. Usa "📐 Escala del plano" si conoces la escala y el tamaño de hoja, o CALIBRAR (⌖) con una medida conocida.');
     setTool('calibrate');
   }
+
+
+  /* ================= EL SET DE PLANOS (20/09) =================
+     Edgar: «cuando yo quiera abrir un archivo que no tenga que ser una por
+     una, que pueda escoger varios y se abran como varias hojas dentro de un
+     mismo archivo… o que se puedan abrir más de 15. Algo como lo que tenemos
+     en Bluebeam».
+
+     Lo que había: un archivo cada vez, y de un PDF de varias páginas o elegías
+     UNA o metías las 15 primeras (el tope no era capricho: cada hoja se guarda
+     como una imagen de 1-7 MB DENTRO del proyecto, y la nube corta a los 50 MB).
+
+     Lo que hay ahora, que es como se trabaja de verdad: eliges los PDF que
+     quieras a la vez, la app lee el ÍNDICE del set sin dibujar nada —el número
+     de hoja sale del cajetín del propio plano, como en Bluebeam— y tú marcas
+     las que entran. De 133 páginas de un hospital, las 30 eléctricas de un
+     toque. El medidor dice lo que va a pesar ANTES de importar, así que el
+     tope de 15 sobra: lo que manda es lo que cabe, y se ve.                */
+  var setPdf = null;   // { archivos:[{nombre,doc,pdfKey}], paginas:[…], cancel, fase }
+  var SET_PAPEL = function (w, h) {
+    var a = Math.max(w, h), b = Math.min(w, h), r = function (v) { return Math.round(v * 10) / 10; };
+    var nom = (a > 40 ? 'ARCH E' : a > 34 ? 'ARCH D' : a > 22 ? 'ARCH C' : a > 16 ? 'ARCH B' : a > 12 ? 'ARCH A' : 'carta');
+    return { nom: nom, txt: r(b) + '×' + r(a) + '"', grande: a > 22 };
+  };
+  /* El número de hoja, leído del CAJETÍN del propio plano (abajo a la derecha,
+     el texto más grande que tenga forma de número de hoja: E-2.2, ED-1.1,
+     M-101). Si no se lee, se dice y la hoja entra con su número de página. */
+  function numeroDeCajetin(page, vp1) {
+    return page.getTextContent().then(function (tc) {
+      var W = vp1.width, H = vp1.height, mejor = null;
+      (tc.items || []).forEach(function (it) {
+        var t = String(it.str || '').trim();
+        if (!t || t.length > 14) return;
+        var x = it.transform[4], y = it.transform[5], alto = Math.abs(it.transform[3]);
+        // el cajetín: cuarto inferior derecho de la hoja
+        if (!(x > W * 0.55 && y < H * 0.45)) return;
+        var m = t.match(/^([A-Z]{1,3})-?(\d{1,3})(\.\d{1,2})?$/i);
+        if (!m) return;
+        if (!mejor || alto > mejor.alto) mejor = { t: (m[1] + '-' + m[2] + (m[3] || '')).toUpperCase(), alto: alto };
+      });
+      return mejor ? mejor.t : null;
+    }).catch(function () { return null; });
+  }
+  function abreSet() { var b = $('#setModal'); if (b) b.hidden = false; }
+  function cierraSet() {
+    if (setPdf) setPdf.cancel = true;
+    var b = $('#setModal'); if (b) b.hidden = true;
+    setPdf = null;
+  }
+  /* Leer el índice: NO se dibuja ni una página, solo se pregunta su tamaño y
+     se le lee el cajetín. Son milisegundos por hoja, no medio segundo. */
+  function escaneaSet(files) {
+    abreSet();
+    var S = setPdf = { archivos: [], paginas: [], cancel: false, fase: 'leyendo' };
+    pintaSet();
+    var i = 0;
+    function sigArchivo() {
+      if (setPdf !== S || S.cancel) return;
+      if (i >= files.length) { S.fase = 'elegir'; pintaSet(); return; }
+      var f = files[i++];
+      S.leyendo = f.name; pintaSet();
+      var rd = new FileReader();
+      rd.onerror = function () { S.paginas.push(null); sigArchivo(); };
+      rd.onload = function () {
+        if (setPdf !== S || S.cancel) return;
+        var bytes = rd.result;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = window.MXP_PDF_WORKER_URL || 'js/vendor/pdf.worker.min.js';
+        pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise.then(function (doc) {
+          if (setPdf !== S || S.cancel) return;
+          var key = 'pdfbin_' + uid();
+          try { idbSet(key, bytes.slice(0)); } catch (e) { key = null; }
+          var ai = S.archivos.length;
+          S.archivos.push({ nombre: f.name, doc: doc, pdfKey: key });
+          var pg = 1;
+          function sigPagina() {
+            if (setPdf !== S || S.cancel) return;
+            if (pg > doc.numPages) { sigArchivo(); return; }
+            var n = pg++;
+            doc.getPage(n).then(function (page) {
+              var vp1 = page.getViewport({ scale: 1 });
+              var papel = SET_PAPEL(vp1.width / 72, vp1.height / 72);
+              return numeroDeCajetin(page, vp1).then(function (num) {
+                S.paginas.push({ ai: ai, pg: n, num: num, papel: papel, marcada: false });
+                if (n % 8 === 0) pintaSet();
+                sigPagina();
+              });
+            }).catch(function () { S.paginas.push({ ai: ai, pg: n, num: null, papel: SET_PAPEL(8.5, 11), marcada: false }); sigPagina(); });
+          }
+          sigPagina();
+        }).catch(function (err) {
+          if (setPdf !== S || S.cancel) return;
+          S.fallo = (S.fallo || []).concat([f.name + ': ' + ((err && err.message) || 'no se pudo leer')]);
+          sigArchivo();
+        });
+      };
+      rd.readAsArrayBuffer(f);
+    }
+    sigArchivo();
+  }
+  function setMarcadas() { return setPdf ? setPdf.paginas.filter(function (q) { return q && q.marcada; }) : []; }
+  /* Una hoja nueva con su plano, SIN activarla. Importa: cambiar de hoja
+     BORRA la pila de deshacer (loadSheetData), así que crear 30 hojas una a
+     una dejaba a Edgar sin Ctrl+Z justo cuando más lo necesita — y repintaba
+     el lienzo 30 veces. Así se arman todas y solo se entra en una. */
+  function hojaConFondo(nom, bg) {
+    return { no: nom, title: '', _zf: 1, data: JSON.stringify({
+      walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [],
+      wires: [], leaders: [], bg: bg, bg2: null, guia: [], huecos: [], inks: [], counts: []
+    }) };
+  }
+  /* El fondo tal y como lo deja insertBackground, para una hoja que todavía no
+     existe: mismo ancho de 50 pies y mismos campos. */
+  function bgDePagina(url, pxW, pxH, paperW, paperH, pdfId, pdfPage) {
+    var w = 600;
+    var bg = { url: url, x: 0, y: 0, w: w, h: w * pxH / pxW, pxW: pxW, pxH: pxH,
+               opacity: (+($('#bgOpacity') || {}).value || 100) / 100 };
+    if (paperW) { bg.paperW = paperW; bg.paperH = paperH; }
+    if (pdfId) { bg.pdfId = pdfId; bg.pdfPage = pdfPage; }
+    return bg;
+  }
+  /* Lo que va a pesar lo marcado: medido de verdad sobre hojas ARCH D (1,5 MB
+     en el PC, 0,85 en el iPad). Es lo que decide si cabe, no un número fijo. */
+  function setPesoEstimado(n) {
+    var lite = document.body.classList.contains('touch');
+    return n * (lite ? 0.85e6 : 1.5e6) + pesoAprox();
+  }
+  function pintaSet() {
+    var S = setPdf; if (!S) return;
+    var est = $('#setEstado'), lst = $('#setLista'), bot = $('#setBotones'), bi = $('#setImporta'), pe = $('#setPeso');
+    if (!est || !lst) return;
+    if (S.fase === 'leyendo') {
+      est.innerHTML = 'Leyendo el índice del set…' + (S.leyendo ? ' <b>' + esc(S.leyendo) + '</b>' : '') +
+        ' <span class="muted">· ' + S.paginas.length + ' página(s)</span>';
+      bot.hidden = true; bi.hidden = true; lst.innerHTML = ''; pe.textContent = '';
+      return;
+    }
+    if (S.fase === 'hecho') {
+      est.innerHTML = '✔ <b>' + S.puestas + '</b> hoja(s) traídas al proyecto' +
+        (S.nombres && S.nombres.length ? ' <span class="muted">· ' + esc(S.nombres.slice(0, 12).join(', ')) + (S.nombres.length > 12 ? '…' : '') + '</span>' : '');
+      bot.hidden = true; lst.innerHTML = '';
+      bi.hidden = false; bi.textContent = 'Listo';
+      pe.innerHTML = '<button type="button" id="setDeshace" class="small" style="margin-top:4px">↺ Deshacer: quitar esas ' + S.puestas + ' hoja(s)</button>' +
+        ' <span class="muted">Ponle su 📐 escala a cada hoja antes de medir.</span>';
+      var bd = $('#setDeshace');
+      if (bd) bd.addEventListener('click', function () { deshaceSet(S); });
+      return;
+    }
+    if (S.fase === 'importando') {
+      est.innerHTML = '<b>Importando</b> hoja ' + S.hechas + ' de ' + S.total + '…' +
+        '<div class="cuBarra"><div style="width:' + Math.round(S.hechas / Math.max(1, S.total) * 100) + '%"></div></div>';
+      bot.hidden = true; lst.innerHTML = '';
+      bi.hidden = false; bi.textContent = 'Parar aquí'; pe.textContent = 'Lo que ya entró se queda.';
+      return;
+    }
+    var buenas = S.paginas.filter(Boolean);
+    if (!buenas.length) {
+      est.innerHTML = '<span style="color:#a33">No se pudo leer ninguna página.' + (S.fallo ? ' ' + esc(S.fallo.join(' · ')) : '') + '</span>';
+      bot.hidden = true; bi.hidden = true; return;
+    }
+    var conNum = buenas.filter(function (q) { return q.num; }).length;
+    est.innerHTML = '<b>' + buenas.length + '</b> página(s) en ' + S.archivos.length + ' archivo(s)' +
+      (conNum ? ' · <b>' + conNum + '</b> con su número leído del cajetín' : ' · ningún cajetín legible: entran por número de página') +
+      (S.fallo ? ' <span style="color:#a33">· ' + esc(S.fallo.join(' · ')) + '</span>' : '');
+    bot.hidden = false;
+    var h = '', archAnt = -1;
+    buenas.forEach(function (q, idx) {
+      if (q.ai !== archAnt) { archAnt = q.ai; h += '<div class="setCab">' + esc(S.archivos[q.ai].nombre) + '</div>'; }
+      h += '<label class="setFila' + (q.papel.grande ? ' sfGrande' : '') + '">' +
+        '<input type="checkbox" data-i="' + idx + '"' + (q.marcada ? ' checked' : '') + '>' +
+        '<span class="sfNum">' + esc(q.num || ('pág. ' + q.pg)) + '</span>' +
+        '<span class="sfPapel">' + esc(q.papel.nom) + '</span>' +
+        '<span class="sfArch">' + esc(q.papel.txt) + (q.num ? '' : ' · sin número en el cajetín') + '</span>' +
+        '</label>';
+    });
+    lst.innerHTML = h;
+    var n = setMarcadas().length, peso = setPesoEstimado(n);
+    bi.hidden = !n;
+    bi.textContent = n ? ('Traer ' + n + ' hoja(s) al proyecto') : '';
+    pe.innerHTML = n
+      ? ('Va a pesar unos <b>' + pesoTxt(peso) + '</b>. ' + (peso > PESO_NUBE
+          ? '<span style="color:#a33">Pasa del tope de la nube (50 MB): se guardaría solo en este aparato, sin sincronizar con el iPad.</span>'
+          : 'Cabe en la nube y se sincroniza.') +
+         (n > 25 ? ' Tarda cerca de ' + Math.round(n * 0.6) + ' s en entrar.' : ''))
+      : 'Marca las hojas que quieras. El número sale del cajetín del plano.';
+  }
+  /* Traer las marcadas: la primera va a la hoja de ahora si está vacía, y cada
+     una siguiente a su propia hoja, con su número de cajetín en la pestaña. */
+  function importaSet() {
+    var S = setPdf; if (!S) return;
+    var sel = setMarcadas(); if (!sel.length) return;
+    S.fase = 'importando'; S.hechas = 0; S.total = sel.length; S.puestas = 0;
+    pintaSet();
+    var vacia = !state.bg && !hayContenido();
+    S.usoActiva = false;
+    S.nomAntes = (state.sheets[state.curSheet] || {}).no || '';
+    var i = 0;
+    S.nuevas = [];   // las hojas armadas, que se añaden juntas al final
+    function sig() {
+      if (setPdf !== S || S.cancel) { finSet(S); return; }
+      if (i >= sel.length) { finSet(S); return; }
+      var q = sel[i++], ar = S.archivos[q.ai];
+      ar.doc.getPage(q.pg).then(function (page) {
+        if (setPdf !== S || S.cancel) { finSet(S); return; }
+        var vp1 = page.getViewport({ scale: 1 });
+        var lite = document.body.classList.contains('touch');
+        var MAXDIM = lite ? 4096 : 6000, AREA = lite ? 13e6 : 26e6;
+        var escala = Math.min(6, MAXDIM / vp1.width, MAXDIM / vp1.height, Math.sqrt(AREA / (vp1.width * vp1.height)));
+        var vp = page.getViewport({ scale: escala });
+        var cv = document.createElement('canvas');
+        cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+        var ctx = cv.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        return page.render({ canvasContext: ctx, viewport: vp }).promise.then(function () {
+          if (setPdf !== S || S.cancel) { cv.width = 1; cv.height = 1; finSet(S); return; }
+          var big = cv.width * cv.height > 9e6;
+          var url = (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
+          cv.width = 1; cv.height = 1;
+          var nom = q.num || ('PG-' + q.pg);
+          if (S.puestas === 0 && vacia) {
+            // la hoja en la que ya está: entra como siempre
+            S.usoActiva = true;
+            state.sheets[state.curSheet].no = nom;
+            state.project.sheetNo = nom;
+            syncProjectInputs();
+            insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
+            pdfLive[state.curSheet] = { doc: ar.doc, page: q.pg };
+            if (ar.pdfKey) { state.bg.pdfId = ar.pdfKey; state.bg.pdfPage = q.pg; }
+          } else {
+            // las demás se arman enteras, sin activarlas: así no se pierde el undo
+            S.nuevas.push({ hoja: hojaConFondo(nom, bgDePagina(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72, ar.pdfKey, q.pg)), doc: ar.doc, pg: q.pg });
+          }
+          S.puestas++; S.hechas++;
+          pintaSet();
+          setTimeout(sig, 0);   // deja respirar al navegador entre hojas
+        });
+      }).catch(function () { S.hechas++; setTimeout(sig, 0); });
+    }
+    sig();
+  }
+  function finSet(S) {
+    var n = S ? S.puestas : 0;
+    if (!n) { cierraSet(); return; }
+    // las hojas armadas entran TODAS juntas, sin cambiar de hoja por el camino
+    S.desde = state.sheets.length;
+    (S.nuevas || []).forEach(function (x) {
+      state.sheets.push(x.hoja);
+      pdfLive[state.sheets.length - 1] = { doc: x.doc, page: x.pg };
+    });
+    S.nombres = (S.usoActiva ? [state.sheets[state.curSheet].no] : []).concat((S.nuevas || []).map(function (x) { return x.hoja.no; }));
+    renderSheetTabs(); refresh(); scheduleAutosave();
+    /* No se cierra: se enseña lo que entró y se ofrece DESHACER de verdad.
+       Ctrl+Z no vale aquí — la pila de deshacer es por hoja y se borra al
+       cambiar de hoja (loadSheetData), así que prometerlo sería mentir. */
+    S.fase = 'hecho';
+    pintaSet();
+    setHint('✔ ' + n + ' hoja(s) importadas — cámbialas con las pestañas de abajo y ponle su 📐 escala a cada una');
+  }
+  /* Quitar lo que acaba de entrar: las hojas nuevas y, si la primera cayó en
+     la hoja en la que estaba, también su fondo. */
+  function deshaceSet(S) {
+    if (!S || S.fase !== 'hecho') return;
+    if (S.desde != null && state.sheets.length > S.desde) state.sheets.splice(S.desde);
+    if (state.curSheet >= state.sheets.length) state.curSheet = Math.max(0, state.sheets.length - 1);
+    if (S.usoActiva) {
+      state.bg = null;
+      var sh = state.sheets[state.curSheet];
+      if (sh) { sh.no = S.nomAntes || ''; state.project.sheetNo = sh.no; }
+      syncProjectInputs();
+    }
+    Object.keys(pdfLive).forEach(function (k) { if (+k >= state.sheets.length) delete pdfLive[k]; });
+    var n = S.puestas;
+    renderSheetTabs(); refresh(); scheduleAutosave();
+    cierraSet();
+    setHint('↺ Deshecho: se quitaron las ' + n + ' hoja(s) que se acababan de traer');
+  }
+  (function () {
+    var b;
+    if ((b = $('#setCerrar'))) b.addEventListener('click', cierraSet);
+    if ((b = $('#setTodas'))) b.addEventListener('click', function () { if (setPdf) { setPdf.paginas.forEach(function (q) { if (q) q.marcada = true; }); pintaSet(); } });
+    if ((b = $('#setNinguna'))) b.addEventListener('click', function () { if (setPdf) { setPdf.paginas.forEach(function (q) { if (q) q.marcada = false; }); pintaSet(); } });
+    if ((b = $('#setElectricas'))) b.addEventListener('click', function () {
+      if (!setPdf) return;
+      setPdf.paginas.forEach(function (q) { if (q) q.marcada = !!(q.num && /^E/i.test(q.num)); });
+      pintaSet();
+    });
+    if ((b = $('#setLista'))) b.addEventListener('change', function (ev) {
+      var t = ev.target; if (!t || t.dataset.i == null || !setPdf) return;
+      var buenas = setPdf.paginas.filter(Boolean), q = buenas[+t.dataset.i];
+      if (q) { q.marcada = t.checked; pintaSet(); }
+    });
+    if ((b = $('#setImporta'))) b.addEventListener('click', function () {
+      if (!setPdf) return;
+      if (setPdf.fase === 'hecho') { cierraSet(); return; }
+      if (setPdf.fase === 'importando') { setPdf.cancel = true; return; }
+      importaSet();
+    });
+  })();
+  window.__setDbg = {
+    escanea: escaneaSet, cierra: cierraSet,
+    estado: function () { return setPdf ? { fase: setPdf.fase, archivos: setPdf.archivos.map(function (a) { return a.nombre; }),
+      paginas: setPdf.paginas.filter(Boolean).map(function (q) { return { num: q.num, pg: q.pg, papel: q.papel.nom, ai: q.ai, marcada: q.marcada }; }),
+      puestas: setPdf.puestas || 0, fallo: setPdf.fallo || [] } : null; },
+    marca: function (f) { if (!setPdf) return 0; var n = 0; setPdf.paginas.forEach(function (q) { if (q && f(q)) { q.marcada = true; n++; } }); pintaSet(); return n; },
+    importa: importaSet, peso: setPesoEstimado, deshace: function () { deshaceSet(setPdf); }
+  };
 
   function importPdfBackground(file, deliver) {
     if (typeof pdfjsLib === 'undefined') {
@@ -17217,7 +17638,7 @@
         var opts = password ? { data: data, password: password } : { data: data };
         opts.isEvalSupported = false;   // CVE-2024-4367: una fuente maliciosa en un PDF ajeno ejecutaba JS
         pdfjsLib.getDocument(opts).promise.then(function (doc) {
-          if (!deliver && !pdfKey && !password) {
+          if (!deliver && !pdfKey && !password && doc.numPages === 1) {
             pdfKey = 'pdfbin_' + uid();
             try { idbSet(pdfKey, rd.result.slice(0)); } catch (e) { pdfKey = null; }
           }
@@ -17229,11 +17650,10 @@
               });
               return;
             }
-            uiPrompt('El PDF tiene ' + doc.numPages + ' páginas. Escribe el número de la página que quieres — o TODAS para crear una hoja por página:', 'todas', function (input) {
-              if (input === null) { setHint(''); return; }
-              if (/^t/i.test(String(input).trim())) { importAllPages(doc, Math.min(doc.numPages, 15)); return; }
-              renderPdfPage(doc, Math.max(1, Math.min(doc.numPages, parseInt(input, 10) || 1)));
-            });
+            /* (20/09) Ya no se pregunta «¿qué página?» a pelo ni se meten las
+               15 primeras: se abre el ÍNDICE del set, con el número de cada
+               hoja leído de su cajetín, y Edgar marca las que entran. */
+            escaneaSet([file]);
             return;
           }
           renderPdfPage(doc, 1, deliver);
@@ -17296,40 +17716,31 @@
         setHint('');
       });
     }
-    // TODAS las páginas: página 1 en la hoja actual, cada página siguiente en su propia hoja nueva
-    function importAllPages(doc, n) {
-      var i = 1;
-      function next() {
-        if (i > n) {
-          if (doc.numPages > n) uiAlert('Se importaron las primeras ' + n + ' páginas (límite por memoria del navegador).');
-          setHint('✔ ' + n + ' páginas importadas — muévete entre hojas con las pestañas de abajo y ponle su 📐 escala a cada una');
-          return;
-        }
-        setHint('Importando página ' + i + ' de ' + n + '…');
-        renderPdfPage(doc, i, function (url, pxW, pxH, paperW, paperH) {
-          if (i > 1) addSheet('PG-' + i);
-          else {
-            // el set completo se nombra PG-1, PG-2, … desde la primera página
-            state.sheets[state.curSheet].no = 'PG-1';
-            state.project.sheetNo = 'PG-1';
-            syncProjectInputs();
-          }
-          insertBackground(url, pxW, pxH, paperW, paperH);
-          pdfLive[state.curSheet] = { doc: doc, page: i };
-          if (pdfKey) { state.bg.pdfId = pdfKey; state.bg.pdfPage = i; }
-          i++;
-          next();
-        });
-      }
-      next();
-    }
   }
 
   $('#fileBg').addEventListener('change', function () {
-    var f = this.files[0];
+    var fs = [].slice.call(this.files || []);
     this.value = '';
-    handleBgFile(f);
+    handleBgFiles(fs);
   });
+  /* Varios de golpe: si llega más de un archivo, o un PDF de varias páginas,
+     se abre el ÍNDICE DEL SET y Edgar elige. Un archivo suelto (una imagen, o
+     un PDF de una página) entra directo, como siempre. */
+  function handleBgFiles(fs) {
+    fs = (fs || []).filter(Boolean);
+    if (!fs.length) return;
+    var pdfs = fs.filter(function (f) { return f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''); });
+    var otros = fs.filter(function (f) { return pdfs.indexOf(f) < 0; });
+    if (pdfs.length > 1 || (pdfs.length === 1 && otros.length)) {
+      if (typeof pdfjsLib === 'undefined') { uiAlert('No se encontró el módulo de PDF (js/vendor).'); return; }
+      if (otros.length) setHint('De momento solo se pueden traer varios PDF de golpe; las imágenes, una a una');
+      escaneaSet(pdfs);
+      return;
+    }
+    if (pdfs.length === 1) { importPdfBackground(pdfs[0]); return; }
+    if (otros.length > 1) setHint('Las imágenes entran de una en una: traje la primera');
+    handleBgFile(otros[0]);
+  }
 
   // AUDITORÍA 08/28: _o, _fus y demás marcas de trabajo se guardaban dentro
   // del .mxp.json. Solo ensucian y pueden confundir a una versión futura.
@@ -17358,8 +17769,20 @@
     syncSheet(); limpiaMarcas();
     try { purgaPdfBin(); } catch (e) {}
     clearTimeout(autosaveTimer);
-    var data = guardaEnBiblioteca(sucio); sucio = false;   // el archivo y la biblioteca llevan el mismo rev
     var baseN = (state.project.name || '').replace(/[^\w\-. ]+/g, '').trim().slice(0, 80) || 'proyecto';
+    var data = null;
+    // (20/09) si el proyecto ya no cabe en un string, esto lanzaba y el botón
+    // no bajaba NADA: justo cuando más falta hace. Ahora baja lo que se pueda.
+    try { data = guardaEnBiblioteca(sucio); sucio = false; }
+    catch (e) {
+      var r = payloadSeguro();
+      if (!r.txt) { uiAlert('No se pudo preparar el archivo: ' + (e && e.message ? e.message : e) + '\n\nCierra otras pestañas y vuelve a intentarlo.'); return; }
+      saveFile(baseN + (r.completo ? '' : '-SIN-FONDOS') + '.mxp.json', r.txt);
+      uiAlert(r.completo
+        ? 'El proyecto se bajó, pero no se pudo guardar en este aparato: guarda el archivo en sitio seguro.'
+        : 'El proyecto entero ya no cabe en un archivo. Se bajó una copia con TODO tu trabajo (medidas, conteo, circuitos) SIN las imágenes de fondo — ábrela y vuelve a importar el PDF en las hojas que necesites.\n\nPara seguir: quita de este proyecto las hojas que no uses.');
+      return;
+    }
     saveFile(baseN + '.mxp.json', data);
     setHint('Proyecto guardado (archivo descargado)');
   });
@@ -22085,7 +22508,15 @@
       '<button id="errCerrar" style="padding:5px 10px;border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;cursor:pointer">' + ICO.svg('close') + '</button>';
     errBar.querySelector('#errCerrar').addEventListener('click', function () { errBar.remove(); errBar = null; });
     errBar.querySelector('#errBajar').addEventListener('click', function () {
-      try { saveFile('rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json', payloadProyecto()); } catch (e) {}
+      // (20/09) ANTES: llamaba al MISMO payload que acababa de fallar, dentro
+      // de un catch vacío — con el proyecto demasiado grande no bajaba nada y
+      // no lo decía. Ahora, si el completo no se puede, baja el de rescate:
+      // medidas, conteo y circuitos, que es lo que no se puede rehacer.
+      var nom = 'rescate-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.mxp.json';
+      var r = payloadSeguro();
+      if (!r.txt) { try { uiAlert('No se pudo preparar la copia. Cierra otras pestañas y vuelve a intentarlo; si no, haz una captura de pantalla de lo que tengas a la vista.'); } catch (e) {} return; }
+      try { saveFile(nom, r.txt); } catch (e) { return; }
+      if (!r.completo) { try { uiAlert('Se bajó una copia de RESCATE con todo tu trabajo (medidas, conteo, circuitos) pero SIN las imágenes de fondo: el proyecto entero ya no cabía en un archivo.\n\nÁbrela y vuelve a importar el PDF en las hojas que necesites.'); } catch (e2) {} }
     });
   }
   window.addEventListener('error', function (ev) { muestraError(ev && ev.message || 'error'); });
