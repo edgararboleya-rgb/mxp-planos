@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.T';
+  var APP_VERSION = 'v34.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2553,12 +2553,20 @@
         return out;
       }
     }
+    /* (21/09, verificación) FUERA DEL MODELO NEC, LOS CIRCUITOS TAMBIÉN SE
+       PAGAN. Con el ▾ en romex o MC, «circuitos en el tubo» se queda como
+       estaba —cambiar de sistema no lo reinicia, y no debe: de ahí salen los
+       breakers— pero aquí solo se cobraba UN cable. Tres circuitos en romex
+       son TRES corridas de cable, no una: el takeoff iba corto en silencio.
+       El tubo nombrado a mano sigue siendo uno (los circuitos comparten la
+       tubería); lo que se multiplica son los hilos. */
+    var kc = Math.max(1, Math.min(6, (+c.ckts) || 1));
     var pt = esTubo(c.cable) ? partesTubo(c.cable) : null;
     if (pt) {
-      out.push({ item: pt.tubo + ' CONDUIT', ft: L });                              // el tubo
-      out.push({ item: pt.calibre + ' THHN CU', ft: L * (hilosDe(c) + 1) });        // los hilos + la tierra
+      out.push({ item: pt.tubo + ' CONDUIT', ft: L });                              // el tubo: uno, compartido
+      out.push({ item: pt.calibre + ' THHN CU', ft: L * (hilosDe(c) * kc + 1) });   // los hilos de cada circuito + la tierra
     } else {
-      out.push({ item: c.cable || '12/2', ft: L });
+      out.push({ item: c.cable || '12/2', ft: L * kc });                            // una corrida de cable POR circuito
     }
     return out;
   }
@@ -11234,7 +11242,7 @@
     if (ley.lineas.length) h += '<div class="muted small">Tipos de línea que trae la leyenda (no se cuentan; van por Rutas o por Homerun): ' + esc(ley.lineas.join(' · ')) + '</div>';
     if (ley.notas) h += '<div class="muted small">Notas del cerebro: ' + esc(ley.notas) + '</div>';
     var conMolde = vivas.filter(function (f) { return f.moldeRect; }).length;
-    h += '<button id="leyCrear" style="width:100%;margin-top:6px"' + (vivas.length ? '' : ' disabled') + '>Crear ' + (vivas.length === 1 ? 'la categoría' : 'las ' + vivas.length + ' categorías') + (conMolde ? ' y buscar los símbolos en el plano' : '') + '</button>';
+    h += '<button id="leyCrear" style="width:100%;margin-top:6px"' + (vivas.length ? '' : ' disabled') + '>Crear ' + (vivas.length === 1 ? 'la categoría' : 'las ' + vivas.length + ' categorías') + '</button>';
     h += '<button id="leyOtra" style="width:100%;margin-top:4px">Encerrar otra tabla</button>';
     if (ley.local && cerebroCfg().url) h += '<button id="leyCerebro" style="width:100%;margin-top:4px" title="Que el cerebro lea la misma tabla (segunda opinión): tarda 30-60 s">Leer con el cerebro (segunda opinión)</button>';
     h += '<div class="muted small" style="margin-top:6px">' + (conMolde ? 'Al crear, la app <b>busca cada dibujo en todas las hojas</b> y lo cuenta; las marcas quedan revisables y Ctrl+Z las quita todas.' : 'Esto pone los nombres. Contar: Count a mano, o Buscar iguales con el dibujito de cada fila.') + '</div>';
@@ -11293,20 +11301,33 @@
        proponga aquí tenemos tantos tomas, tantos switches, y yo reviso. Un
        solo flujo, no tres herramientas». Así que al terminar de crear las
        categorías se ofrece contar AQUÍ MISMO, sin ir a buscar el menú.
-       Si dice que no y hay moldes, sigue el camino de siempre (comparar
-       dibujos), que no se quita: es gratis y a veces basta. */
+       (21/09, verificación) LO QUE SÍ SE QUITÓ: que «comparar dibujos» arrancara
+       SOLO. Pasó de ser el camino de siempre a ser un camino que no vale sobre
+       un plano de obra —barre a 72 px por pulgada y un receptáculo son 12 px,
+       por eso está escondido del menú desde v34.S— y aun así se lanzaba al
+       cancelar el conteo del cerebro, o directamente si el cerebro no estaba
+       configurado. Un conteo que no vale, sin que nada lo dijera. Ahora no
+       arranca nunca por su cuenta: se ofrece aparte y con el diagnóstico
+       delante, para que Edgar lo pida sabiendo lo que pide. */
+    function ofreceBarrido() {
+      if (!conMolde.length) { setHint('Las categorías están en Count ▾ y en el panel Conteo.'); return; }
+      uiConfirm('¿Buscar los ' + conMolde.length + ' símbolo(s) comparando dibujos?\n\n⚠ OJO: esto es gratis pero NO es de fiar en un plano de obra. Compara a 72 px por pulgada y un receptáculo mide unos 12 px: se salta piezas y mete falsos. Nunca se ha medido contra un plano real tuyo.\n\nSi el número importa, cuenta tú o usa el cerebro. Esto solo para echar un ojo rápido.',
+        function (si) {
+          if (si) leyBarre(conMolde, rectLey, hojaLey);
+          else setHint('Las categorías están en Count ▾ y en el panel Conteo.');
+        });
+    }
     if (cerebroCfg().url && nuevas.length) {
       setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : ''));
-      uiConfirm('✔ ' + nuevas.length + ' categoría(s) creadas.\n\n¿Que el CEREBRO las cuente ahora en esta hoja?\n\nMira la hoja por losas y marca cada símbolo; tú revisas antes de que nada vaya al estimador.\n\nCancelar = las dejo creadas y cuentas tú' + (conMolde.length ? ' (o con «buscar iguales», que compara dibujos y es gratis)' : '') + '.',
+      uiConfirm('✔ ' + nuevas.length + ' categoría(s) creadas.\n\n¿Que el CEREBRO las cuente ahora en esta hoja?\n\nMira la hoja por losas y marca cada símbolo; tú revisas antes de que nada vaya al estimador.\n\nCancelar = las dejo creadas y cuentas tú' + '.',
         function (ok) {
           if (ok) { abreCuenta(); pintaCuenta(); setTool('cuenta'); return; }
-          if (conMolde.length) leyBarre(conMolde, rectLey, hojaLey);
-          else setHint('Las categorías están en Count ▾ y en el panel Conteo.');
+          ofreceBarrido();
         });
       return;
     }
-    setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : '') + (conMolde.length ? ' — buscando los símbolos en el plano…' : ' — están en Count ▾ y en el panel Conteo.'));
-    if (conMolde.length) leyBarre(conMolde, rectLey, hojaLey);
+    setHint('✔ ' + nuevas.length + ' categoría(s) creadas desde la leyenda' + (saltadas ? ' · ' + saltadas + ' ya estaban' : '') + ' — están en Count ▾ y en el panel Conteo.');
+    ofreceBarrido();
   }
   /* ================= BUSCAR EN EL PLANO CADA SÍMBOLO DE LA LEYENDA =================
      Por el MISMO camino del buscador visual (E3 v2, probado): el rectángulo
@@ -11427,6 +11448,25 @@
   /* Partir la zona en losas. Cada eje se reparte en n tramos iguales de lado
      `lado` que se solapan al menos CUENTA_SOLAPE. Sin papel conocido, la losa
      es un cuarto del lado largo del plano. */
+  /* (21/09, verificación) EL SOLAPE QUE SE PAGA DOS VECES. Dos losas se solapan
+     siempre un poco —CUENTA_SOLAPE— para que ninguna pieza caiga justo en el
+     corte. Pero según cómo quede la zona, el solape se dispara: una apenas un
+     15 % más larga que la losa sale en DOS que comparten el 90 % de la imagen.
+     No se cambia la geometría (bajar a una losa sería leerla con menos
+     resolución, y un conteo mal leído es peor que un dólar de más): se DICE,
+     con lo que costaría recortar la zona un poco. */
+  function cuentaSolape(losas) {
+    if (!losas || losas.length < 2) return 0;
+    var xs = {}, ys = {}, peor = 0;
+    losas.forEach(function (q) { xs[Math.round(q.x0)] = q.x1 - q.x0; ys[Math.round(q.y0)] = q.y1 - q.y0; });
+    [xs, ys].forEach(function (m) {
+      var k = Object.keys(m).map(Number).sort(function (a, b) { return a - b; });
+      if (k.length < 2) return;
+      var lado = m[k[0]], paso = k[1] - k[0];
+      if (lado > 0) peor = Math.max(peor, 1 - paso / lado);
+    });
+    return peor;
+  }
   function cuentaLosas(r, pulgOpc) {
     var bg = state.bg; if (!bg || !bg.url) return null;
     var q = rectEnFondo(r); if (!q) return null;
@@ -11457,9 +11497,36 @@
     var L = cuenta && cuenta.losas && cuenta.losas[0];
     return L ? (L.x1 - L.x0) * 0.02 : 6;
   }
-  function cuentaCosto(uso, modelo) {
+  /* (21/09, verificación) EL COSTO CON MODELOS MEZCLADOS. El worker devuelve
+     el modelo que SIRVIÓ —con un fallback no es el que se pidió— y la pasada
+     solo se quedaba con el último: una pasada mitad Fable mitad Opus se
+     cobraba entera a una sola tarifa, y en pantalla salía un modelo que no
+     hizo todo el trabajo. Ahora el uso se reparte por modelo y el costo se
+     suma tarifa por tarifa. */
+  function apuntaUso(est, d) {
+    if (!est || !d) return;
+    if (d.modelo) est.modelo = String(d.modelo);
+    if (!d.uso) return;
+    var i = (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0);
+    var o = +d.uso.output_tokens || 0;
+    est.uso.in += i; est.uso.out += o;
+    if (!est.porModelo) est.porModelo = {};
+    var k = (d.modelo ? String(d.modelo) : est.modelo) || '?';
+    var e = est.porModelo[k] || (est.porModelo[k] = { in: 0, out: 0 });
+    e.in += i; e.out += o;
+  }
+  function cuentaCosto(uso, modelo, porModelo) {
+    if (porModelo && Object.keys(porModelo).length > 1) {
+      return Object.keys(porModelo).reduce(function (a, k) { return a + cuentaCosto(porModelo[k], k); }, 0);
+    }
     var p = CUENTA_PRECIO[modelo] || CUENTA_PRECIO['claude-fable-5-1'];
     return (uso.in / 1e6) * p[0] + (uso.out / 1e6) * p[1];
+  }
+  /* Lo que se enseña: si hubo más de un modelo se dicen todos, para que un
+     costo raro tenga explicación a la vista. */
+  function modelosDe(est) {
+    var k = (est && est.porModelo) ? Object.keys(est.porModelo) : [];
+    return k.length > 1 ? k.join(' + ') : ((est && est.modelo) || '');
   }
 
   /* --- arrancar --- */
@@ -11476,7 +11543,7 @@
     if (!layerVisible.count) setHint('⚠ La capa Count está apagada: enciéndela en Capas para ver lo que marque el cerebro');
     var porNom = {};
     catsCount().forEach(function (k) { porNom[normTxt2(k.nom)] = k.id; });
-    cuenta = { rect: rectEnFondo(r), hoja: state.curSheet, losas: losas, hechas: 0, corriendo: 0, sig: 0, marcas: [], dudas: [], fallos: [], uso: { in: 0, out: 0 },
+    cuenta = { rect: rectEnFondo(r), hoja: state.curSheet, proj: idProyecto(), losas: losas, hechas: 0, corriendo: 0, sig: 0, marcas: [], dudas: [], fallos: [], uso: { in: 0, out: 0 },
                modelo: '', t0: Date.now(), enVuelo: true, cancel: false, nuevas: null, resumen: null, simb: simb, porNom: porNom, nSimb: catsCount().length };
     pintaCuenta();
     cuentaLanza();
@@ -11505,7 +11572,7 @@
       hecho();
     }
     // la losa se recorta del fondo de la hoja que esté delante: si Edgar cambió de hoja, esa losa no vale
-    if (state.curSheet !== C.hoja) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': cambiaste de hoja, no se leyó'); C.hojaRota = true; pintaCuenta(); cuentaLanza(); return; }
+    if (otroPlano(C)) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': cambiaste de ' + (state.curSheet !== C.hoja ? 'hoja' : 'proyecto') + ', no se leyó'); C.hojaRota = true; pintaCuenta(); cuentaLanza(); return; }
     fondoRecorte(L, CUENTA_PX, function (rec, err) {
       if (cuenta !== C || C.cancel) return;
       if (!rec) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': ' + err); pintaCuenta(); cuentaLanza(); return; }
@@ -11533,8 +11600,7 @@
   }
   function cuentaRecibeLosa(d, R, i) {
     var C = cuenta, K = d.conteo;
-    if (d.modelo) C.modelo = String(d.modelo);
-    if (d.uso) { C.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); C.uso.out += +d.uso.output_tokens || 0; }
+    apuntaUso(C, d);
     var W = R.x1 - R.x0, H = R.y1 - R.y0, sinNombre = {};
     (Array.isArray(K.marcas) ? K.marcas : []).slice(0, 500).forEach(function (m) {
       if (!m) return;
@@ -11576,7 +11642,7 @@
   function cuentaTermina() {
     var C = cuenta; if (!C) return;
     C.enVuelo = false;
-    if (state.curSheet !== C.hoja) { C.fallos.push('cambiaste de hoja mientras contaba: las marcas eran de la hoja ' + (C.hoja + 1) + ' y no se pusieron'); C.nuevas = []; C.resumen = []; pintaCuenta(); return; }
+    if (otroPlano(C)) { C.fallos.push('cambiaste de ' + (state.curSheet !== C.hoja ? 'hoja' : 'proyecto') + ' mientras contaba: las marcas eran de la hoja ' + (C.hoja + 1) + ' y no se pusieron'); C.nuevas = []; C.resumen = []; pintaCuenta(); return; }
     var dep = cuentaDepura(C.marcas);
     C.dep = dep;
     var nuevas = [];
@@ -11670,6 +11736,9 @@
       if (rep.length) h += '<div class="bMuted" style="color:#a33">⚠ Dos categorías con el <b>mismo nombre</b>: ' + rep.map(function (n) { return '«' + esc(n) + '»'; }).join(', ') + '. El cerebro copia nombres y no las distingue: todo lo que cuente cae en UNA. Renómbrale una antes (Count ▾ → Más… → Renombrar) y dile el tag que las diferencia.</div>';
       else if (nCats > 40) h += '<div class="muted small">Solo van las 40 primeras categorías (tope del cerebro).</div>';
       h += '<button id="cuTodo" style="width:100%;margin-top:6px"' + (nCats && nL ? '' : ' disabled') + '>Contar toda la hoja' + (nL ? ' <span class="muted">· ' + nL + ' losa' + (nL === 1 ? '' : 's') + ' · ≈ $' + (nL * CUENTA_COSTO_LOSA).toFixed(2) + ' y ' + Math.ceil(nL * 70 / 60) + ' min</span>' : '') + '</button>';
+      // (21/09) si la hoja cae en losas que se pisan mucho, se dice: es dinero que se paga dos veces
+      var solHoja = cuentaSolape(cuentaLosas(cuentaRectHoja()));
+      if (solHoja > 0.5) h += '<div class="muted small" style="color:#a33;margin-top:4px">⚠ Estas losas se pisan un ' + Math.round(solHoja * 100) + ' %: casi la misma imagen se manda —y se paga— dos veces. Encerrando una zona un poco más corta salen menos losas.</div>';
       h += '<button id="cuZona" style="width:100%;margin-top:4px"' + (nCats ? '' : ' disabled') + '>Encerrar una zona <span class="muted">· dos toques, esquina y esquina</span></button>';
       var dud0 = cuentaDudosas().length, ia0 = cuentaMarcasIA().length;
       if (dud0) h += '<div class="muted small" style="margin-top:6px">Quedan <b>' + dud0 + '</b> dudosa(s) en esta hoja. <button id="cuQuita" class="small">Quitarlas</button> <button id="cuAcepta" class="small">Darlas por buenas</button></div>';
@@ -11722,9 +11791,10 @@
       h += '<div class="row"><button id="cuQuita" style="flex:1">Quitar las dudosas</button><button id="cuAcepta" style="flex:1">Darlas por buenas</button></div>';
     }
     if (C.dudas.length) h += '<div class="muted small" style="margin-top:4px"><b>El cerebro dice:</b><br>' + C.dudas.slice(0, 12).map(function (t) { return '• ' + esc(t); }).join('<br>') + (C.dudas.length > 12 ? '<br>… y ' + (C.dudas.length - 12) + ' más' : '') + '</div>';
+    if (workerAviso()) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + esc(workerAviso()) + '</div>';
     if (C.fallos.length) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + C.fallos.slice(0, 6).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
-    var $c = cuentaCosto(C.uso, C.modelo);
-    h += '<div class="muted small" style="margin-top:6px">' + (C.modelo ? esc(C.modelo) + ' · ' : '') + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in.toLocaleString() + ' / ' + C.uso.out.toLocaleString() + ' tokens ≈ $' + $c.toFixed(2) + '</div>';
+    var $c = cuentaCosto(C.uso, C.modelo, C.porModelo);
+    h += '<div class="muted small" style="margin-top:6px">' + (modelosDe(C) ? esc(modelosDe(C)) + ' · ' : '') + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in.toLocaleString() + ' / ' + C.uso.out.toLocaleString() + ' tokens ≈ $' + $c.toFixed(2) + '</div>';
     h += '<button id="cuOtra" style="width:100%;margin-top:6px">Contar otra zona</button>';
     h += ayudaHtml('cuenta3', 'Ctrl+Z quita TODAS las de esta pasada. Lo que ya estaba contado no se duplicó.');
     /* (19/09) El cerebro mira DIBUJOS. Lo que decide el precio de verdad en un
@@ -11764,7 +11834,7 @@
     if (hay) { var d = vio - tu; L.push('TOTAL | ' + vio + ' | ' + tu + ' | ' + (d > 0 ? '+' : '') + d + (tu ? ' (' + (Math.round(Math.abs(d) / tu * 1000) / 10) + ' %)' : '') + ' | ' + C.resumen.reduce(function (a, r) { return a + (r.dud || 0); }, 0)); }
     var dep = C.dep || {};
     L.push('no puestas: ' + (dep.yaEstaban || 0) + ' ya estaban · ' + (dep.dobles || 0) + ' dobles del solape · ' + (dep.enLey || 0) + ' en la leyenda');
-    L.push('losas ' + C.losas.length + ' · ' + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in + '/' + C.uso.out + ' tokens ≈ $' + cuentaCosto(C.uso, C.modelo).toFixed(2));
+    L.push('losas ' + C.losas.length + ' · ' + Math.round((Date.now() - C.t0) / 1000) + ' s · ' + C.uso.in + '/' + C.uso.out + ' tokens ≈ $' + cuentaCosto(C.uso, C.modelo, C.porModelo).toFixed(2));
     if (C.dudas.length) L.push('el cerebro dice: ' + C.dudas.slice(0, 8).join(' · '));
     return L.join('\n');
   }
@@ -11822,9 +11892,19 @@
     recorte: function (rect, cb) { fondoRecorte(rect, CUENTA_PX, cb); },
     todo: function () { var r = cuentaRectHoja(); if (r) cuentaArranca(r); return r; },
     losas: function (rect) { return cuentaLosas(rect || cuentaRectHoja()); },
+    solape: function (rect) { return cuentaSolape(cuentaLosas(rect || cuentaRectHoja())); },
     simbolos: cuentaSimbolos,
     radio: cuentaRadio,
-    estado: function () { return cuenta ? { enVuelo: cuenta.enVuelo, hechas: cuenta.hechas, losas: cuenta.losas.length, marcas: cuenta.marcas.length, nuevas: cuenta.nuevas ? cuenta.nuevas.length : null, dudas: cuenta.dudas.slice(), fallos: cuenta.fallos.slice(), dep: cuenta.dep || null, resumen: cuenta.resumen, uso: cuenta.uso, modelo: cuenta.modelo, cancel: cuenta.cancel } : null; },
+    estado: function () { return cuenta ? { enVuelo: cuenta.enVuelo, hechas: cuenta.hechas, losas: cuenta.losas.length, marcas: cuenta.marcas.length, nuevas: cuenta.nuevas ? cuenta.nuevas.length : null, dudas: cuenta.dudas.slice(), fallos: cuenta.fallos.slice(), dep: cuenta.dep || null, resumen: cuenta.resumen, uso: cuenta.uso, modelo: cuenta.modelo, porModelo: cuenta.porModelo || null, cancel: cuenta.cancel } : null; },
+    costo: function (uso, modelo, porModelo) { return cuentaCosto(uso, modelo, porModelo); },
+    modelos: function () { return modelosDe(cuenta); },
+    /* (21/09) el reparto del uso por modelo, tal como lo hace una pasada de
+       verdad: se le dan las respuestas del cerebro una tras otra. */
+    usoDe: function (resp) {
+      var e = { uso: { in: 0, out: 0 }, modelo: '' };
+      (resp || []).forEach(function (d) { apuntaUso(e, d); });
+      return { uso: e.uso, modelo: e.modelo, porModelo: e.porModelo || null, modelos: modelosDe(e), costo: cuentaCosto(e.uso, e.modelo, e.porModelo) };
+    },
     cancela: cuentaCancela,
     dudosas: function () { return cuentaDudosas().map(function (q) { return { id: q.id, ia: q.ia, cat: q.cat }; }); },
     marcasIA: function () { return cuentaMarcasIA().length; },
@@ -11869,7 +11949,7 @@
     if (!state.bg || !state.bg.url) { pintaNotas(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
     var losas = cuentaLosas(r, NOTAS_LOSA_PULG);
     if (!losas || !losas.length) { pintaNotas(null, 'La zona quedó vacía o fuera del plano. Encierra el bloque de notas.'); return; }
-    notas = { hoja: state.curSheet, losas: losas, hechas: 0, corriendo: 0, sig: 0, leidas: [], sinLeer: [], fallos: [], uso: { in: 0, out: 0 },
+    notas = { hoja: state.curSheet, proj: idProyecto(), losas: losas, hechas: 0, corriendo: 0, sig: 0, leidas: [], sinLeer: [], fallos: [], uso: { in: 0, out: 0 },
               modelo: '', t0: Date.now(), enVuelo: true, cancel: false, fase: 'leer' };
     pintaNotas();
     notasLanza();
@@ -11893,7 +11973,7 @@
       if (!reintento) { setTimeout(function () { if (notas === N && !N.cancel) { N.corriendo--; notasLosa(i, true); } }, 1500); return; }
       N.fallos.push('losa ' + (i + 1) + ': ' + msg); hecho();
     }
-    if (state.curSheet !== N.hoja) { N.corriendo--; N.hechas++; N.fallos.push('losa ' + (i + 1) + ': cambiaste de hoja, no se leyó'); pintaNotas(); notasLanza(); return; }
+    if (otroPlano(N)) { N.corriendo--; N.hechas++; N.fallos.push('losa ' + (i + 1) + ': cambiaste de ' + (state.curSheet !== N.hoja ? 'hoja' : 'proyecto') + ', no se leyó'); pintaNotas(); notasLanza(); return; }
     fondoRecorte(L, CUENTA_PX, function (rec, err) {
       if (notas !== N || N.cancel) return;
       if (!rec) { N.corriendo--; N.hechas++; N.fallos.push('losa ' + (i + 1) + ': ' + err); pintaNotas(); notasLanza(); return; }
@@ -11901,8 +11981,7 @@
       pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, notas: { losa: i + 1, de: N.losas.length, hoja: notasHojaNom(N.hoja) } }).then(function (d) {
         if (notas !== N || N.cancel) return;
         if (!d || d.error || !d.notas) { falla((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 200) : '') : 'el cerebro no contestó en formato de notas (¿worker viejo? git pull · wrangler deploy)'); return; }
-        if (d.modelo) N.modelo = String(d.modelo);
-        if (d.uso) { N.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); N.uso.out += +d.uso.output_tokens || 0; }
+        apuntaUso(N, d);
         var hoja = notasHojaNom(N.hoja);
         (Array.isArray(d.notas.notas) ? d.notas.notas : []).slice(0, 80).forEach(function (n) {
           var t = String((n && n.texto) || '').replace(/\s+/g, ' ').trim().slice(0, 600); if (!t) return;
@@ -11931,7 +12010,7 @@
   function notasCuidados() {
     if (!notas) {
       // «volver a pensar»: una pasada con su estado, como las demás — se puede parar, y una respuesta tardía no pisa nada
-      notas = { hoja: state.curSheet, losas: [], hechas: 0, corriendo: 0, sig: 0, leidas: [], sinLeer: [], fallos: [], uso: { in: 0, out: 0 },
+      notas = { hoja: state.curSheet, proj: idProyecto(), losas: [], hechas: 0, corriendo: 0, sig: 0, leidas: [], sinLeer: [], fallos: [], uso: { in: 0, out: 0 },
                 modelo: '', t0: Date.now(), enVuelo: true, cancel: false, fase: 'pensar', repensar: true };
     }
     var N = notas, P = proyNotas() || {};
@@ -11950,6 +12029,10 @@
         proyecto: [state.project.name, state.project.client, state.project.address].filter(Boolean).join(' · ') } });
     }).then(function (d) {
       if (N && (notas !== N || N.cancel)) return;
+      /* (21/09) Los cuidados se ESCRIBEN en state.project: si Edgar abrió otro
+         proyecto de la biblioteca mientras el cerebro pensaba, se los quedaba
+         el proyecto nuevo. */
+      if (N && N.proj != null && idProyecto() !== N.proj) { N.enVuelo = false; N.fase = 'fin'; pintaNotas(null, 'Cambiaste de proyecto mientras pensaba los cuidados: no se guardaron. Vuelve a pensarlos aquí.'); return; }
       if (!d || d.error || !d.cuidados) {
         var msg = (d && d.error) ? String(d.error) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 200) : '') : 'el cerebro no contestó en formato de cuidados (¿worker viejo? git pull · wrangler deploy)';
         if (N) { N.enVuelo = false; N.fase = 'fin'; N.fallos.push('cuidados: ' + msg); }
@@ -11957,7 +12040,7 @@
         notasGuarda(todas, P.cuidados || [], P.quien_pone || [], P.resumen || '', N);
         pintaNotas(); return;
       }
-      if (d.uso && N) { N.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); N.uso.out += +d.uso.output_tokens || 0; }
+      if (N) apuntaUso(N, d);
       // lo que el worker no pudo mirar entero, se dice (revisión 20/09: cortaba en silencio)
       if (Array.isArray(d.recortes)) d.recortes.forEach(function (t) { N.fallos.push('cuidados: ' + String(t).slice(0, 160)); });
       if (d.incompleto) N.fallos.push('cuidados: la respuesta se cortó por larga; puede faltar alguno');
@@ -11988,6 +12071,8 @@
   }
   function notasGuarda(leidas, cuidados, quienPone, resumen, N) {
     if (!state.project) state.project = {};
+    // (21/09) nunca escribir las notas de un proyecto en otro
+    if (N && N.proj != null && idProyecto() !== N.proj) return;
     var P = proyNotas() || {};
     var hojas = (P.hojas || []).slice(); if (N && !N.repensar) { var hn = notasHojaNom(N.hoja); if (hojas.indexOf(hn) < 0) hojas.push(hn); }
     state.project.notas = { leidas: leidas, cuidados: cuidados, quien_pone: quienPone, resumen: resumen, hojas: hojas,
@@ -12050,6 +12135,7 @@
       h += '<div class="bMuted">Encierra con dos toques el <b>bloque de notas</b> del ingeniero (general notes, key notes, specs).</div>';
       h += ayudaHtml('notas1', 'El cerebro las transcribe tal cual y después saca los <b>«cuidado con esto»</b>: lo que cambia el dinero, las horas o el alcance —hospital grade, rama crítica, ICRA, quién pone qué— con la categoría a la que afecta y qué hacer en el estimado. Se guardan con el proyecto, y lo que dejes vivo se lo dice al cerebro cuando cuente.', true);
       h += '<button id="ntZona" style="width:100%;margin-top:6px"' + (state.bg && state.bg.url ? '' : ' disabled') + '>Encerrar la zona de notas <span class="muted">· dos toques</span></button>';
+      if (workerAviso()) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + esc(workerAviso()) + '</div>';
       if (N && N.fallos.length) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + N.fallos.slice(0, 4).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
       c.innerHTML = h; enganchaNotasBotones(); return;
     }
@@ -12077,7 +12163,7 @@
     if (P.quien_pone && P.quien_pone.length) h += '<details><summary class="muted small" style="cursor:pointer">Quién pone qué (' + P.quien_pone.length + ')</summary><div class="muted small">' + P.quien_pone.map(function (q) { return '• ' + esc(q.que) + ' → <b>' + esc(q.quien) + '</b>'; }).join('<br>') + '</div></details>';
     if (P.leidas && P.leidas.length) h += '<details><summary class="muted small" style="cursor:pointer">Las notas, tal cual (' + P.leidas.length + ')</summary><div class="muted small">' + P.leidas.map(function (n) { return '<div style="margin:3px 0">[' + esc(n.id || '·') + ' · ' + esc(NOTAS_TEMA_NOM[n.tema] || n.tema) + (n.hoja ? ' · ' + esc(n.hoja) : '') + '] ' + esc(n.texto) + '</div>'; }).join('') + '</div></details>';
     if (N && (N.fallos.length || N.sinLeer.length)) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + N.fallos.concat(N.sinLeer).slice(0, 6).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
-    if (N && (N.uso.in || N.uso.out)) h += '<div class="muted small" style="margin-top:4px">' + (N.modelo ? esc(N.modelo) + ' · ' : '') + Math.round((Date.now() - N.t0) / 1000) + ' s · ' + N.uso.in.toLocaleString() + ' / ' + N.uso.out.toLocaleString() + ' tokens ≈ $' + cuentaCosto(N.uso, N.modelo).toFixed(2) + '</div>';
+    if (N && (N.uso.in || N.uso.out)) h += '<div class="muted small" style="margin-top:4px">' + (modelosDe(N) ? esc(modelosDe(N)) + ' · ' : '') + Math.round((Date.now() - N.t0) / 1000) + ' s · ' + N.uso.in.toLocaleString() + ' / ' + N.uso.out.toLocaleString() + ' tokens ≈ $' + cuentaCosto(N.uso, N.modelo, N.porModelo).toFixed(2) + '</div>';
     h += '<div class="row" style="margin-top:6px"><button id="ntZona" style="flex:1" title="Otra zona de notas, u otra hoja: se suman a las que ya hay">Leer más notas</button><button id="ntRepiensa" style="flex:1" title="Volver a sacar los cuidados con las categorías de ahora (una llamada de texto, barata)">Volver a pensar</button></div>';
     h += ayudaHtml('notas3', 'Lo que dejes <b>vivo</b> (sin ✗) se lo dice el cerebro cuando cuente los símbolos, para clasificar mejor. «Volver a pensar» vale cuando creas categorías nuevas: no relee las notas, solo las piensa otra vez. «Olvidar» borra todo esto del proyecto.');
     h += '<div class="row"><button id="ntOlvida" class="small" style="flex:none">Olvidar las notas</button></div>';
@@ -12247,12 +12333,20 @@
     R.cancel = true; R.enVuelo = false;
     refresh(); if (R.puestos) scheduleAutosave();
   }
-  function rutasUso(R, d) { if (d && d.uso && R) { R.uso.in += (+d.uso.input_tokens || 0) + (+d.uso.cache_read_input_tokens || 0) + (+d.uso.cache_creation_input_tokens || 0); R.uso.out += +d.uso.output_tokens || 0; if (d.modelo) R.modelo = String(d.modelo); } }
+  function rutasUso(R, d) { apuntaUso(R, d); }
   /* Si Edgar cambió de hoja mientras el cerebro pensaba, lo que llegue no es
      de esta hoja: no se pone nada (igual que hace el conteo). */
+  /* (21/09, verificación) LA HOJA NO BASTA PARA SABER DÓNDE CAEN LAS COSAS.
+     Las tres pasadas del cerebro —conteo, notas, rutas— comprueban
+     state.curSheet antes de tocar el plano, pero el índice de hoja es el
+     MISMO en otro proyecto: abrir otro de la biblioteca mientras el cerebro
+     piensa metía las marcas, las notas o las rutas en el proyecto nuevo.
+     Ahora cada pasada apunta también de qué proyecto salió. */
+  function idProyecto() { var p = state.project || {}; return String(p.id || p.name || ''); }
+  function otroPlano(est) { return !est || state.curSheet !== est.hoja || (est.proj != null && idProyecto() !== est.proj); }
   function rutasHojaCambio(R, que) {
-    if (state.curSheet === R.hoja) return false;
-    R.fallos.push('cambiaste de hoja mientras ' + que + ': era de la hoja ' + notasHojaNom(R.hoja) + ' y no se puso nada');
+    if (!otroPlano(R)) return false;
+    R.fallos.push('cambiaste de ' + (state.curSheet !== R.hoja ? 'hoja' : 'proyecto') + ' mientras ' + que + ': era de la hoja ' + notasHojaNom(R.hoja) + ' y no se puso nada');
     R.cancel = true; R.enVuelo = false; pintaRutas();
     return true;
   }
@@ -12273,7 +12367,7 @@
     if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
     var losas = panelesLosas();
     if (!losas || !losas.length) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
-    var R = rutasProp = { fase: 'paneles', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], paneles: null, resultados: [], puestos: 0,
+    var R = rutasProp = { fase: 'paneles', hoja: state.curSheet, proj: idProyecto(), enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], paneles: null, resultados: [], puestos: 0,
                           losas: losas, hechas: 0, corriendo: 0, sig: 0, cands: [], notasCerebro: [] };
     pintaRutas();
     var conocidos = panelesConocidos();
@@ -12285,7 +12379,7 @@
     function losa(i) {
       var L = losas[i]; R.corriendo++; pintaRutas();
       function hecho() { if (rutasProp !== R || R.cancel) return; R.corriendo--; R.hechas++; pintaRutas(); lanza(); }
-      if (state.curSheet !== R.hoja) { R.fallos.push('losa ' + (i + 1) + ': cambiaste de hoja, no se miró'); hecho(); return; }
+      if (otroPlano(R)) { R.fallos.push('losa ' + (i + 1) + ': cambiaste de ' + (state.curSheet !== R.hoja ? 'hoja' : 'proyecto') + ', no se miró'); hecho(); return; }
       fondoRecorte(L, CUENTA_PX, function (rec, err) {
         if (rutasProp !== R || R.cancel) return;
         if (!rec) { R.fallos.push('losa ' + (i + 1) + ': ' + err); hecho(); return; }
@@ -12396,7 +12490,7 @@
       pintaRutas(null, Object.keys(C.porPanel).length ? 'Ningún panel con circuitos pendientes está localizado en esta hoja (o ya tienen su ruta). Localiza los paneles primero, o colócalos tú.' : 'Ningún dispositivo de esta hoja lleva circuito. Cuenta con el cerebro (v34.P o más): el conteo lee el rótulo de circuito junto a cada pieza.');
       return;
     }
-    var R = rutasProp = { fase: 'rutas', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], tareas: tareas, hechas: 0, resultados: [], paneles: null, puestos: 0, undoHecho: false, maxTubo: rutasMaxTubo() };
+    var R = rutasProp = { fase: 'rutas', hoja: state.curSheet, enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], tareas: tareas, hechas: 0, resultados: [], paneles: null, puestos: 0, undoHecho: false, ids: [], proj: idProyecto(), maxTubo: rutasMaxTubo() };
     pintaRutas();
     var i = 0;
     function sig() {
@@ -12405,12 +12499,12 @@
         R.enVuelo = false;
         refresh(); pintaRutas();
         var ft = propuestasDeHoja().reduce(function (a, q) { return a + largoHomerun(q) / 12; }, 0);
-        setHint('✔ Rutas propuestas: ' + propuestasDeHoja().length + ' tubo(s), ≈ ' + Math.round(ft).toLocaleString() + ' ft · acéptalas, arrástralas o quítalas' + (R.puestos ? ' · Ctrl+Z quita las de esta pasada' : ''));
+        setHint('✔ Rutas propuestas: ' + propuestasDeHoja().length + ' tubo(s), ≈ ' + Math.round(ft).toLocaleString() + ' ft · acéptalas, arrástralas o quítalas' + (R.puestos ? ' · «↩ las de esta pasada» las quita de golpe' : ''));
         return;
       }
       var t = tareas[i++];
       pintaRutas();
-      if (state.curSheet !== R.hoja) { rutasHojaCambio(R, 'proponía las rutas del ' + t.panel); return; }
+      if (otroPlano(R)) { rutasHojaCambio(R, 'proponía las rutas del ' + t.panel); return; }
       /* (20/09, revisión del paso 8) NO la hoja entera: el trozo que abarca el
          panel y sus dispositivos, con margen para los pasillos. Un panel que
          alimenta media hoja sale al doble de resolución; uno que alimenta un
@@ -12499,6 +12593,7 @@
       e.rutaProp = { ckts: ckts.map(function (k) { return k.ckt; }), conf: isFinite(+r.confianza) ? Math.round(+r.confianza) : null, nota: String(r.nota || '').slice(0, 160), panel: t.panel, devs: ckts.reduce(function (a, k) { return a + validos[k.ckt].devs.length; }, 0) };
       ckts.forEach(function (k) { cubiertos[k.ckt] = 1; });
       state.areas.push(e); puestos++;
+      if (R && Array.isArray(R.ids)) R.ids.push(e.id);   // (21/09) para poder quitar EXACTAMENTE las de esta pasada
     });
     var sinRuta = t.ckts.filter(function (k) { return !cubiertos[k.ckt]; }).map(function (k) { return k.ckt; });
     if (juntos.length && R) R.fallos.push(t.panel + ': ' + juntos.join(', ') + ' comparte(n) número con otro circuito del mismo tubo — va(n) en su propia ruta');
@@ -12527,6 +12622,33 @@
     refresh(); scheduleAutosave(); pintaRutas();
     setHint('✔ ' + ps.length + ' ruta(s) aceptadas: ya son corridas normales y van al takeoff · Ctrl+Z lo deshace');
     return ps.length;
+  }
+  /* (21/09, verificación) «Ctrl+Z quita las de esta pasada» era MENTIRA en
+     cuanto Edgar tocaba algo entre panel y panel: el undo de la pasada es UNA
+     instantánea, la de antes de la primera ruta, y cualquier edición en medio
+     —aceptar una ruta, mover una marca— se cuela encima y Ctrl+Z se para ahí.
+     Deshacer desde el final tampoco valía: le borraría su edición. Así que la
+     pasada apunta QUÉ rutas puso y esto quita exactamente esas, las que sigan
+     sin aceptar, sin tocar nada suyo. */
+  function rutasPasadaCuenta() {
+    var R = rutasProp; if (!R || !Array.isArray(R.ids) || !R.ids.length) return { quita: 0, ya: 0 };
+    var en = {}; R.ids.forEach(function (i) { en[i] = 1; });
+    var q = 0, ya = 0;
+    (state.areas || []).forEach(function (a) { if (!a || !en[a.id]) return; if (a.propuesta) q++; else ya++; });
+    return { quita: q, ya: ya };
+  }
+  function rutasQuitaPasada() {
+    var R = rutasProp; if (!R || !Array.isArray(R.ids)) return;
+    var en = {}; R.ids.forEach(function (i) { en[i] = 1; });
+    var quitar = {}, ya = 0;
+    (state.areas || []).forEach(function (a) { if (!a || !en[a.id]) return; if (a.propuesta) quitar[a.id] = 1; else ya++; });
+    var n = Object.keys(quitar).length;
+    if (!n) { setHint(ya ? 'De esa pasada ya aceptaste las ' + ya + ': no queda propuesta que quitar' : 'De esa pasada ya no queda ninguna ruta'); return; }
+    pushUndo();
+    state.areas = (state.areas || []).filter(function (a) { return !(a && quitar[a.id]); });
+    R.ids = R.ids.filter(function (i) { return !quitar[i]; });
+    refresh(); scheduleAutosave(); pintaRutas();
+    setHint('✗ ' + n + ' ruta(s) de esa pasada quitadas' + (ya ? ' · las ' + ya + ' que ya aceptaste se quedan' : '') + ' · Ctrl+Z las devuelve');
   }
   function rutasQuitaTodas() {
     var ps = propuestasDeHoja(); if (!ps.length) return 0;
@@ -12604,10 +12726,15 @@
       });
       h += '</div>';
       h += '<div class="row"><button id="rtAceptaTodas" style="flex:1">✓ Aceptar todas</button><button id="rtQuitaTodas" style="flex:1">✗ Quitar todas</button></div>';
+      /* (21/09) «las de esta pasada»: exactamente lo que acaba de poner el
+         cerebro, sin arrastrar las que ya estaban ni lo que Edgar editó en medio. */
+      var pc = rutasPasadaCuenta();
+      if (pc.quita && pc.quita < P.length) h += '<div class="row"><button id="rtQuitaPasada" style="flex:1">↩ Quitar las ' + pc.quita + ' de esta pasada</button></div>';
     }
     if (aceptadas.length) h += '<div class="muted small" style="margin-top:4px">' + aceptadas.length + ' ruta(s) aceptadas en esta hoja · ' + ftDe(aceptadas).toLocaleString() + ' ft — ya son corridas normales: se editan y cuentan como las demás.</div>';
+    if (workerAviso()) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + esc(workerAviso()) + '</div>';
     if (R && R.fallos.length) h += '<div class="muted small" style="color:#a33;margin-top:4px">' + R.fallos.slice(0, 6).map(function (t) { return '⚠ ' + esc(t); }).join('<br>') + '</div>';
-    if (R && (R.uso.in || R.uso.out)) h += '<div class="muted small" style="margin-top:4px">' + (R.modelo ? esc(R.modelo) + ' · ' : '') + Math.round((Date.now() - R.t0) / 1000) + ' s · ' + R.uso.in.toLocaleString() + ' / ' + R.uso.out.toLocaleString() + ' tokens ≈ $' + cuentaCosto(R.uso, R.modelo).toFixed(2) + '</div>';
+    if (R && (R.uso.in || R.uso.out)) h += '<div class="muted small" style="margin-top:4px">' + (modelosDe(R) ? esc(modelosDe(R)) + ' · ' : '') + Math.round((Date.now() - R.t0) / 1000) + ' s · ' + R.uso.in.toLocaleString() + ' / ' + R.uso.out.toLocaleString() + ' tokens ≈ $' + cuentaCosto(R.uso, R.modelo, R.porModelo).toFixed(2) + '</div>';
     h += ayudaHtml('rutas3', 'Las rutas propuestas heredan lo que tengas puesto en el ▾ de la corrida (tubo, calibre, neutro): cámbialo antes de proponer si el trabajo va en otro tubo. Solo EN TUBO se agrupan hasta ' + RUTAS_MAX_TUBO + ' circuitos por ruta; con romex o MC cada circuito es su propio cable y sale una ruta por circuito. El pie de cada ruta sale con el drop del ▾. Lo que el cerebro NO puede saber —si un tramo va por el piso o sobre el techo, si hay un chase— lo corriges arrastrando el vértice.');
     c.innerHTML = h; enganchaRutasBotones();
   }
@@ -12619,6 +12746,7 @@
     if ((b = $('#rtVolver'))) b.addEventListener('click', function () { rutasProp = null; pintaRutas(); });
     if ((b = $('#rtAceptaTodas'))) b.addEventListener('click', rutasAceptaTodas);
     if ((b = $('#rtQuitaTodas'))) b.addEventListener('click', function () { uiConfirm('¿Quitar las ' + propuestasDeHoja().length + ' rutas propuestas de esta hoja?', function (ok) { if (ok) rutasQuitaTodas(); }); });
+    if ((b = $('#rtQuitaPasada'))) b.addEventListener('click', function () { var q = rutasPasadaCuenta().quita; uiConfirm('¿Quitar las ' + q + ' ruta(s) que puso esta pasada? Las que ya aceptaste y las de antes se quedan.', function (ok) { if (ok) rutasQuitaPasada(); }); });
     var c = $('#rutasCuerpo');
     // el cuerpo es el mismo elemento en cada repintado: el listener se pone UNA vez (revisión 20/09: se apilaban)
     if (c && !c.__rutasClick) c.__rutasClick = true, c.addEventListener('click', function (ev) {
@@ -12655,6 +12783,8 @@
     propuestas: function () { return propuestasDeHoja().map(function (a) { return { id: a.id, panel: a.circ.panel, nums: numsCirc(a.circ), ckts: a.circ.ckts, ckts2: a.circ.ckts2 || (a.rutaProp && a.rutaProp.ckts) || [], pts: a.pts, ft: Math.round(largoHomerun(a) / 12), conf: a.rutaProp && a.rutaProp.conf }; }); },
     coloca: rutasColocaPanel, calibrado: planoCalibrado,
     acepta: rutaAcepta, quita: rutaQuita, aceptaTodas: rutasAceptaTodas, quitaTodas: rutasQuitaTodas,
+    quitaPasada: rutasQuitaPasada, pasadaCuenta: rutasPasadaCuenta,
+    aviso: workerAviso, calibradoOk: planoCalibrado,
     estado: function () { return rutasProp ? { fase: rutasProp.fase, hoja: rutasProp.hoja, enVuelo: rutasProp.enVuelo, cancel: rutasProp.cancel, hechas: rutasProp.hechas, puestos: rutasProp.puestos, fallos: rutasProp.fallos.slice(), paneles: rutasProp.paneles, resultados: rutasProp.resultados } : null; },
     pinta: function () { abreRutas(); pintaRutas(); }, cierra: cierraRutas
   };
@@ -14473,9 +14603,16 @@
           uiAlert('✔ Takeoff enviado — ' + items.length + ' renglón(es)' +
             (ensRows.length ? ' · ' + nPuntos + ' punto(s) completo(s) en ' + ensRows.length + ' receta(s)' + (nFull ? ' (' + nFull + ' con su tubo)' : '') : '') +
             '\n' + est.nombre + ' — BORRADOR' +
+            /* (21/09, verificación) EL DOBLE COBRO VA PRIMERO. Este aviso estaba
+               enterrado como un renglón más entre quince y señalaba una ruta que
+               NO existe en este repo: el SQL vive en el panel. Sin la columna,
+               cada receta cobra su tubo y su cable ADEMÁS de los pies que Edgar
+               midió: en un hospital son miles de dólares y más de cien horas
+               hacia arriba, y el bid a mano no cuadra por algo que no es el
+               conteo. */
+            (sinColumnaLineal ? '\n\n🛑 OJO, ESTO CUESTA DINERO: el estimador no tiene la columna «sin_lineales», así que las ' + ensRows.length + ' receta(s) —' + nPuntos + ' punto(s)— fueron CON su tubo y su cable, ADEMÁS de los pies que mediste. Ese material está DOS VECES y el bid sale ALTO.\nArréglalo antes de sacar el número: corre max-power-panel/docs/sql/e17-punto-completo.sql en Supabase y vuelve a mandar el takeoff.' : '') +
             (textoLinealesPorHoja() ? '\n\n' + textoLinealesPorHoja() : '') +
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
-            (sinColumnaLineal ? '\n\n⚠ El estimador aún no tiene la columna "sin_lineales" en estimado_ensambles: las recetas fueron CON su tubo y su cable, así que ese material está DOS VECES. SQL listo en docs/sql/e17-punto-completo.sql.' : '') +
             (porAlias.length ? '\n\n🔁 CATEGORÍAS QUE YA SABEN SU RECETA (por la tabla de alias — no hay que marcarlas una por una):\n• ' + porAlias.map(function (a) { return a.name + ' ×' + a.qty + ' → ' + a.receta + (a.full ? ' (con su tubo)' : ''); }).join('\n• ') : '') +
             (avisoCajas ? '\n\n⚠ CAJAS QUE PUEDEN IR DOS VECES: mandaste puntos completos (cada uno trae su caja, su anillo y su tapa) y además estas cajas contadas aparte:\n• ' + avisoCajas + '\nSi esas cajas son las de los puntos, bórralas del estimado.' : '') +
             (luces.length ? '\n\n💡 LUMINARIAS QUE PONE OTRO — fueron como SOLO INSTALACIÓN (la mano, el whip, la caja; la luz no):\n• ' + luces.map(function (l) { return l.name + ' ×' + l.qty + ' → ' + l.receta; }).join('\n• ') + '\nY la luz en sí, un renglón «COTIZACIÓN PENDIENTE — …» por modelo en $0: cuando llegue la cuota, pon ahí el precio de cada una.' : '') +
@@ -16543,6 +16680,31 @@
     });
     inp.click();
   }
+  /* (21/09, verificación) EL WORKER VIEJO SE VEÍA SANO. Cada vez que el
+     cerebro de Planos aprende algo nuevo hay que redesplegar el worker de
+     Cloudflare a mano, y hasta hoy nada lo comprobaba: si Edgar se olvidaba,
+     la app pedía paneles por losas o rutas recortadas, el worker de antes no
+     lo entendía y el recorte volvía a ser SILENCIOSO — circuitos sin tubo ni
+     breaker en el takeoff, sin un solo aviso. Ahora toda respuesta trae
+     `wver`; si falta o es anterior al que esta versión necesita, se dice una
+     vez y se apunta en el panel. Subir WORKER_MIN junto con WORKER_VER en
+     mxp-brain/worker.js. */
+  var WORKER_MIN = 20260921;
+  var workerViejo = null;   // la versión que contestó, si es vieja
+  function workerAviso() {
+    if (!workerViejo) return '';
+    return '⚠ El cerebro de la nube es VIEJO (' + workerViejo + ', hace falta ' + WORKER_MIN +
+      '): lo que se recorte puede no decirse. Redespliégalo: git pull · cd mxp-brain · wrangler deploy';
+  }
+  function miraWorker(d) {
+    if (!d || d.error) return d;
+    var v = +d.wver || 0;
+    if (v >= WORKER_MIN) { workerViejo = null; return d; }
+    var antes = workerViejo;
+    workerViejo = v || 'sin sello';
+    if (antes !== workerViejo) setHint(workerAviso());
+    return d;
+  }
   function pideCerebro(cuerpo) {
     var c = cerebroCfg();
     cuerpo.token = c.tok;
@@ -16550,7 +16712,7 @@
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-mxp-token': c.tok },
       body: JSON.stringify(cuerpo)
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) { return r.json(); }).then(miraWorker);
   }
   // recorte de un cuarto del plano ORIGINAL (a plena resolución, no del
   // reducido de la pasada 1) con 8% de margen para que se vean las paredes
