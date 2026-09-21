@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.S';
+  var APP_VERSION = 'v34.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9297,9 +9297,11 @@
   /* Si no hay ninguna categoría todavía, se crea una en el acto: contar no
      puede empezar con un formulario. Se llama "Conteo 1" y se renombra
      cuando quiera desde el ▾ o desde Propiedades. */
+  var catPrevio = null;   // a la que se vuelve después de colocar un panel
   function catActivaSegura() {
     var c = catActiva ? catCount(catActiva) : null;
-    // (E30) si hay que elegir una por defecto, nunca un «⚡ PANEL»: eso no es una pieza que se cuenta
+    // (E30) un «⚡ PANEL» no es una pieza que se cuenta: ni por defecto, ni como activa heredada
+    if (c && c.tablero) c = null;
     if (!c) c = catsCount().filter(function (k) { return !k.tablero; })[0] || nuevaCatCount('');
     catActiva = c.id;
     return c;
@@ -9413,6 +9415,20 @@
     cM.cat = ct.id;                    // la categoría activa manda, no la del cofre
     state.counts.push(cM);
     renderConteo(); refreshCounts();
+    /* (21/09, verificación) UN PANEL SE COLOCA UNA VEZ. Tras «colocar» el
+       NHI, la categoría activa es la del tablero: el siguiente toque en el
+       plano metía otro «⚡ PANEL NHI» —que no se cotiza ni se cuenta— en vez
+       del receptáculo que Edgar creía estar marcando. Puesta la marca, se
+       vuelve a la categoría de antes y se sale de Count. */
+    if (ct.tablero) {
+      catActiva = catPrevio && catCount(catPrevio) ? catPrevio : (catsCount().filter(function (k) { return !k.tablero; })[0] || {}).id || null;
+      catPrevio = null;
+      refreshCounts(); setTool('select');
+      if (typeof pintaRutasSiAbierto === 'function') pintaRutasSiAbierto();
+      setHint('✔ ' + ct.panel + ' colocado — muévelo si hace falta; las rutas ya pueden salir de aquí');
+      return;
+    }
+    if (typeof pintaRutasSiAbierto === 'function') pintaRutasSiAbierto();   // el panel Rutas ve el ckt nuevo
     var hj = conteoDeHoja()[ct.id] || 0, pr = conteoDelProyecto()[ct.id] || 0;
     setHint('✔ ' + ct.nom + ' — ' + hj + ' en esta hoja' +
       ((state.sheets || []).length > 1 ? ' · ' + pr + ' en todo el set' : '') +
@@ -11422,6 +11438,10 @@
       // hasta un 10 % más larga que la losa sigue siendo UNA losa (un 2 % partía en dos casi iguales: la misma imagen dos veces)
       if (L <= lado * 1.1) return [[a, a + L]];
       var n = Math.ceil((L - lado) / (lado * (1 - CUENTA_SOLAPE))) + 1, paso = (L - lado) / (n - 1), out = [];
+      /* (21/09, verificación) Si el paso queda por debajo de medio lado, las
+         losas se solapan tanto que se manda —y se paga— casi la misma imagen
+         dos veces. Con una menos siguen cubriendo el largo entero. */
+      while (n > 2 && paso < lado * 0.5) { n--; paso = (L - lado) / (n - 1); }
       for (var i = 0; i < n; i++) out.push([a + i * paso, a + i * paso + lado]);
       return out;
     }
@@ -11571,6 +11591,7 @@
       renderConteo(); refreshCounts(); scheduleAutosave();
     }
     C.nuevas = nuevas;
+    if (typeof pintaRutasSiAbierto === 'function') pintaRutasSiAbierto();   // (21/09) el conteo trae ckts nuevos: el panel Rutas los ve
     var porCat = {}, hoja = conteoDeHoja();
     dep.marcas.forEach(function (m) { var e = porCat[m.cat] = porCat[m.cat] || { n: 0, dud: 0 }; e.n++; if (m.conf < CUENTA_DUDA) e.dud++; });
     // vio = lo que el cerebro contó de verdad (nuevas + las que ya estaban y volvió a ver): es contra lo que se mide
@@ -11922,7 +11943,8 @@
       return;
     }
     N.fase = 'pensar'; N.nTodas = todas.length; abreNotas(); pintaNotas();
-    var cats = catsCount().map(function (c) { return { nom: c.nom, tag: c.tag || '' }; });
+    // (21/09, verificación) los tableros NO son símbolos que se cuentan: no van al cerebro como categorías
+    var cats = catsCount().filter(function (c) { return !c.tablero; }).map(function (c) { return { nom: c.nom, tag: c.tag || '' }; });
     listaDe('recetas').then(function (recetas) {
       return pideCerebro({ cuidados: { notas: todas, categorias: cats, recetas: recetas || [], scope: (state.project && state.project.scope) || '',
         proyecto: [state.project.name, state.project.client, state.project.address].filter(Boolean).join(' · ') } });
@@ -12313,6 +12335,7 @@
   /* Colocar un panel a mano: la categoría nace y Count queda listo para el toque. */
   function rutasColocaPanel(nombre) {
     var cat = catTablero(nombre, true); if (!cat) return;
+    catPrevio = catActiva && catCount(catActiva) && !catCount(catActiva).tablero ? catActiva : null;
     catActiva = cat.id; refreshCounts(); setTool('count');
     setHint('Toca en el plano dónde está el panel «' + cat.panel + '» · Esc para salir');
   }
@@ -12321,15 +12344,32 @@
      es su propio cable: una ruta por circuito (revisión 20/09: un «tubo» de
      3 circuitos en romex cotizaba UN cable). */
   function rutasMaxTubo() { return esTuboCirc(circDefaults()) ? RUTAS_MAX_TUBO : 1; }
+  /* ¿Esta hoja tiene escala de verdad? `paperW` lo pone SOLO el tamaño del
+     papel del PDF y está siempre; lo que dice que los pies son buenos es la
+     calibración (⌖) o la escala del plano. (21/09, verificación.) */
+  function planoCalibrado() { var b = state.bg; return !!(b && (b.cal || b.escala || b.escalaPlano)); }
   /* Los circuitos de un panel que YA tienen su corrida trazada en esta hoja
      (propuesta o de la mano), por su rótulo y por su número — solo los de ESE
      panel (revisión 20/09: una propuesta NHI-2 hacía saltar el CHI-2). */
+  /* (21/09, verificación) EL SUFIJO DE LETRA. NHI-2 y NHI-2A llevan el mismo
+     NÚMERO. Marcando «ya trazado» por número, en cuanto el NHI-2 tenía su
+     corrida el NHI-2A se daba por hecho y se quedaba SIN homerun: pies y
+     breaker de MENOS en el takeoff, en silencio. Ahora el número solo tapa a
+     los circuitos SIN letra; el que tiene letra se reconoce por su rótulo
+     entero. Lo que comparte número sigue compartiendo breaker —eso lo decide
+     el plano, no la app— y el panel Rutas ya avisa para que Edgar lo mire. */
   function rutasYaTrazados(clave) {
     var ya = {};
     (state.areas || []).forEach(function (a) {
       if (!a || !a.circ || clavePanel(a.circ.panel) !== clave) return;
-      numsCirc(a.circ).forEach(function (n) { if (n) ya['#' + n] = 1; });
-      if (a.rutaProp && Array.isArray(a.rutaProp.ckts)) a.rutaProp.ckts.forEach(function (k) { ya[k] = 1; });
+      var ckts = (a.rutaProp && Array.isArray(a.rutaProp.ckts)) ? a.rutaProp.ckts : (Array.isArray(a.circ.ckts2) ? a.circ.ckts2 : []);
+      ckts.forEach(function (k) { ya[String(k).toUpperCase()] = 1; });
+      // el número solo vale para los que NO llevan letra: si no, taparía a su hermano 2A
+      numsCirc(a.circ).forEach(function (n) {
+        if (!n) return;
+        var conLetra = ckts.some(function (k) { return /[A-Z]$/.test(String(k)) && +(String(k).match(/(\d{1,3})[A-Z]?$/) || [])[1] === n; });
+        if (!conLetra) ya['#' + n] = 1;
+      });
     });
     return ya;
   }
@@ -12347,7 +12387,8 @@
       var t = T.filter(function (x) { return x.clave === pn && x.rutas && x.marca; })[0]; if (!t) return;
       var ya = rutasYaTrazados(pn);
       // los circuitos que ya tienen su corrida trazada (propuesta o de la mano) no se vuelven a pedir
-      var ckts = Object.keys(C.porPanel[pn].ckts).map(function (k) { return C.porPanel[pn].ckts[k]; }).filter(function (k) { return !ya[k.ckt] && !ya['#' + k.num]; });
+      var ckts = Object.keys(C.porPanel[pn].ckts).map(function (k) { return C.porPanel[pn].ckts[k]; })
+        .filter(function (k) { return !ya[k.ckt.toUpperCase()] && !(ya['#' + k.num] && !/[A-Z]$/.test(k.ckt)); });
       // por partes si son muchos: el worker no recorta nada y cada llamada cabe
       for (var i = 0; i < ckts.length; i += RUTAS_MAX_CKTS) tareas.push({ panel: t.panel, clave: pn, marca: t.marca, ckts: ckts.slice(i, i + RUTAS_MAX_CKTS), parte: ckts.length > RUTAS_MAX_CKTS ? (Math.floor(i / RUTAS_MAX_CKTS) + 1) : 0 });
     });
@@ -12425,11 +12466,16 @@
     R = R || rutasProp;
     var W = RR.x1 - RR.x0, H = RR.y1 - RR.y0, validos = {}, puestos = 0;
     t.ckts.forEach(function (k) { validos[k.ckt] = k; });
-    var cubiertos = {}, maxTubo = (R && R.maxTubo) || RUTAS_MAX_TUBO;
+    var cubiertos = {}, juntos = [], maxTubo = (R && R.maxTubo) || RUTAS_MAX_TUBO;
     var mx = Math.round(t.marca.x), my = Math.round(t.marca.y), lejos = Math.hypot(W, H) * 0.06;
     var dPanel = function (p) { return Math.hypot(p[0] - mx, p[1] - my); };
     (Array.isArray(d.rutas.rutas) ? d.rutas.rutas : []).slice(0, 80).forEach(function (r) {
       var ckts = (Array.isArray(r.ckts) ? r.ckts : []).map(function (s) { var pc = parseCkt(s); return (pc && validos[pc.ckt] && !cubiertos[pc.ckt]) ? pc : null; }).filter(Boolean).slice(0, maxTubo);
+      /* Dos circuitos del MISMO número en el mismo tubo (NHI-2 y NHI-2A) se
+         pisarían en `nums` —saldría «2, 2» y un solo breaker—: va el primero y
+         el otro se queda para su propia ruta. (21/09, verificación.) */
+      var vistosNum = {};
+      ckts = ckts.filter(function (k) { if (vistosNum[k.num]) { juntos.push(k.ckt); return false; } vistosNum[k.num] = 1; return true; });
       if (!ckts.length) return;
       var pts = (Array.isArray(r.puntos) ? r.puntos : []).slice(0, 40).map(function (p) {
         var x = +p.x, y = +p.y; if (!isFinite(x) || !isFinite(y)) return null;
@@ -12448,12 +12494,14 @@
       var e = { id: uid(), pts: pts, pattern: 'none', rot: 0, open: true, lineStyle: 'homerun', capS: 'arrow', lw: 1.1, color: '#c2255c', propuesta: true };
       e.circ = nuevoCirc();
       e.circ.panel = t.panel; e.circ.num = ckts[0].num; e.circ.nums = ckts.map(function (k) { return k.num; }); e.circ.ckts = ckts.length;
+      e.circ.ckts2 = ckts.map(function (k) { return k.ckt; });   // los rótulos enteros (NHI-2A): sobreviven a aceptar la ruta
       try { normalizaCirc(e.circ); } catch (err) {}
       e.rutaProp = { ckts: ckts.map(function (k) { return k.ckt; }), conf: isFinite(+r.confianza) ? Math.round(+r.confianza) : null, nota: String(r.nota || '').slice(0, 160), panel: t.panel, devs: ckts.reduce(function (a, k) { return a + validos[k.ckt].devs.length; }, 0) };
       ckts.forEach(function (k) { cubiertos[k.ckt] = 1; });
       state.areas.push(e); puestos++;
     });
     var sinRuta = t.ckts.filter(function (k) { return !cubiertos[k.ckt]; }).map(function (k) { return k.ckt; });
+    if (juntos.length && R) R.fallos.push(t.panel + ': ' + juntos.join(', ') + ' comparte(n) número con otro circuito del mismo tubo — va(n) en su propia ruta');
     if (R) {
       R.puestos += puestos;
       R.resultados.push({ panel: t.panel + (t.parte ? ' (parte ' + t.parte + ')' : ''), puestos: puestos, circuitos: t.ckts.length, sinRuta: sinRuta, notas: String(d.rutas.notas || '').slice(0, 200) });
@@ -12546,7 +12594,7 @@
       });
     }
     if (P.length) {
-      h += '<div class="vN" style="margin-top:6px"><b>' + P.length + '</b> ruta(s) propuestas · ≈ <b>' + ftDe(P).toLocaleString() + ' ft</b> <span class="muted">· toca una y el plano va hasta ella · no se cotizan hasta aceptarlas' + (state.bg && state.bg.paperW ? '' : ' · ⚠ el plano no está calibrado: los pies son orientativos') + '</span></div>';
+      h += '<div class="vN" style="margin-top:6px"><b>' + P.length + '</b> ruta(s) propuestas · ≈ <b>' + ftDe(P).toLocaleString() + ' ft</b> <span class="muted">· toca una y el plano va hasta ella · no se cotizan hasta aceptarlas' + (planoCalibrado() ? '' : ' · ⚠ el plano no está calibrado: los pies son orientativos') + '</span></div>';
       h += '<div class="vLista" id="rtLista">';
       P.forEach(function (a) {
         var rp = a.rutaProp || {}, ft = Math.round(largoHomerun(a) / 12);
@@ -12604,7 +12652,8 @@
     losas: panelesLosas, rectDe: function (t, hoja) { return rutasRectDe(t, hoja || cuentaRectHoja()); },
     circuitos: circuitosDeHoja, tableros: function () { return tablerosDeHoja().map(function (t) { return { panel: t.panel, clave: t.clave, tipo: t.tipo, rutas: t.rutas, marca: t.marca ? { x: t.marca.x, y: t.marca.y } : null }; }); },
     conocidos: panelesConocidos,
-    propuestas: function () { return propuestasDeHoja().map(function (a) { return { id: a.id, panel: a.circ.panel, nums: numsCirc(a.circ), ckts: a.circ.ckts, pts: a.pts, ft: Math.round(largoHomerun(a) / 12), conf: a.rutaProp && a.rutaProp.conf }; }); },
+    propuestas: function () { return propuestasDeHoja().map(function (a) { return { id: a.id, panel: a.circ.panel, nums: numsCirc(a.circ), ckts: a.circ.ckts, ckts2: a.circ.ckts2 || (a.rutaProp && a.rutaProp.ckts) || [], pts: a.pts, ft: Math.round(largoHomerun(a) / 12), conf: a.rutaProp && a.rutaProp.conf }; }); },
+    coloca: rutasColocaPanel, calibrado: planoCalibrado,
     acepta: rutaAcepta, quita: rutaQuita, aceptaTodas: rutasAceptaTodas, quitaTodas: rutasQuitaTodas,
     estado: function () { return rutasProp ? { fase: rutasProp.fase, hoja: rutasProp.hoja, enVuelo: rutasProp.enVuelo, cancel: rutasProp.cancel, hechas: rutasProp.hechas, puestos: rutasProp.puestos, fallos: rutasProp.fallos.slice(), paneles: rutasProp.paneles, resultados: rutasProp.resultados } : null; },
     pinta: function () { abreRutas(); pintaRutas(); }, cierra: cierraRutas
