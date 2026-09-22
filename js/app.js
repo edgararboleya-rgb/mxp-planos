@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.W';
+  var APP_VERSION = 'v34.X';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2273,7 +2273,12 @@
     ['THHN #12 en 1/2" EMT', 'THHN #12 · ½" EMT'], ['THHN #10 en 3/4" EMT', 'THHN #10 · ¾" EMT'],
     ['THHN #8 en 3/4" EMT', 'THHN #8 · ¾" EMT'], ['THHN #6 en 1" EMT', 'THHN #6 · 1" EMT']
   ];
-  var BREAKERS = [15, 20, 25, 30, 40, 50, 60, 70, 100];
+  /* (22/09) LOS AMPERAJES SE TOPABAN EN 100 A. Un feeder de chiller, un ATS o un
+     panel de distribución van por encima, y no había cómo elegirlos: había que
+     dejar el breaker en 100 y corregirlo fuera. Ahora salen los tamaños
+     NORMALIZADOS del NEC 240.6(A), que son los que se fabrican. */
+  var BREAKERS = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125,
+                  150, 175, 200, 225, 250, 300, 350, 400, 450, 500, 600];
   // lo último que se puso se recuerda: el siguiente circuito sale con el
   // mismo panel, el mismo cable y el número siguiente (viaja con el proyecto)
   function circDefaults() {
@@ -2611,11 +2616,35 @@
     for (var i = 1; i < k; i++) out.push(+a[i] || 0);
     return out;
   }
+  /* (22/09, Edgar) UN TRIFÁSICO OCUPA TRES NÚMEROS. «al poner en la corrida que
+     es un trifásico… un trifásico tiene realmente tres ckts». Tiene razón y son
+     dos cosas distintas que estaban mezcladas:
+       · «Circuitos en el tubo» es cuántos circuitos COMPARTEN la tubería, y eso
+         lo manda el NEC (los portadores). Ahí un 3P con neutro propio cabe uno.
+       · Pero en el PANEL, un breaker de 3 polos se come TRES números —el 3, el 5
+         y el 7— y uno de 2 polos, dos. Hasta hoy la app apartaba solo el primero,
+         así que el circuito siguiente podía nacer con un número que el trifásico
+         ya tenía cogido, y el rótulo decía «#3» cuando en el schedule es 3-5-7.
+     Los números van de dos en dos porque en un panel las columnas alternan
+     fases: el 3 y el 5 están en fases distintas, que es lo que necesita un 3P. */
+  function numsDeBreaker(c, num) {
+    var p = Math.max(1, Math.min(3, +((c || {}).poles) || 1));
+    var out = [];
+    for (var i = 0; i < p; i++) out.push(num + i * 2);
+    return out;
+  }
+  /* TODOS los números que ocupa una corrida en el panel: los de cada circuito
+     del tubo, y por cada uno los polos de su breaker. */
+  function numsOcupados(c) {
+    var out = [];
+    numsCirc(c).forEach(function (nn) { if (nn) numsDeBreaker(c, nn).forEach(function (q) { out.push(q); }); });
+    return out;
+  }
   function numsUsados(excluirId) {
     var u = {};
     ((state && state.areas) || []).forEach(function (x) {
       if (!x || !x.circ || (excluirId && x.id === excluirId)) return;
-      numsCirc(x.circ).forEach(function (n) { if (n) u[n] = 1; });
+      numsOcupados(x.circ).forEach(function (n) { if (n) u[n] = 1; });   // (22/09) un 3P se come 3-5-7, no solo el 3
     });
     return u;
   }
@@ -2664,11 +2693,58 @@
     if (out[0]) c.num = out[0];
     return c;
   }
-  function rotuloNums(c) { return numsCirc(c).filter(function (n) { return n > 0; }).join(', ') || '?'; }
+  /* (22/09) El rótulo de un 3P dice los TRES números del schedule: «3-5-7».
+     Con un solo polo no cambia nada. */
+  function rotuloNums(c) {
+    var p = Math.max(1, Math.min(3, +((c || {}).poles) || 1));
+    var ns = numsCirc(c).filter(function (n) { return n > 0; });
+    if (!ns.length) return '?';
+    if (p === 1) return ns.join(', ');
+    return ns.map(function (n) { return numsDeBreaker(c, n).join('-'); }).join(', ');
+  }
   var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['ENT', 'ENT (Smurf tube)'], ['FMC', 'Flex metal conduit'], ['IMC', 'IMC']];
   var CALIBRE_OPC = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0'];
   var NEUTRO_OPC = [['propio', 'Neutro propio (uno por circuito)'], ['compartido', 'Neutro compartido (multihilo 120/240)'], ['ninguno', 'Sin neutro (240 V puro)']];
+  /* (22/09, Edgar) AVISAR AL ELEGIR, NO AL MANDAR. La lista «Tubo» ofrece IMC y
+     en su catálogo no hay ni una fila de IMC; el trifásico manda «BREAKER 3P» y
+     tampoco existe (solo 1P y 2P). Eso hoy se veía al MANDAR el takeoff, en un
+     «SIN MAPEAR» entre quince avisos, con el trabajo ya hecho. Ahora se dice en la
+     misma fila donde se elige. Si el catálogo aún no ha bajado, no se dice nada:
+     callarse es mejor que un aviso falso. */
+  var _catSet = null, _catPidiendo = false;
+  function pideCatalogo() {
+    if (_catSet || _catPidiendo) return;
+    _catPidiendo = true;
+    listaDe('catalogo').then(function (l) {
+      _catPidiendo = false;
+      if (!l || !l.length) return;
+      _catSet = {}; l.forEach(function (x) { _catSet[normTxt2(x)] = 1; });
+      try { if (document.getElementById('prCircTubo') || document.getElementById('tmCircTubo')) showProps(); } catch (e) {}
+    }, function () { _catPidiendo = false; });
+  }
+  function faltaEnCatalogo(nombre) {
+    if (!_catSet || !nombre) return false;       // sin catálogo cargado no se opina
+    return !_catSet[normTxt2(String(nombre))];
+  }
+  /* Lo que esta corrida va a pedirle al estimador y él no tiene. */
+  function piezasSinPrecio(c) {
+    if (!hayNEC() || !_catSet) return [];
+    var out = [];
+    try {
+      if (esTuboCirc(c) && c.ckts) {
+        var tam = tamTubo(c);
+        if (tam) {
+          var it = window.NEC.itemTubo(c.tubo || 'EMT', tam);
+          if (faltaEnCatalogo(it)) out.push(it);
+        }
+      }
+      var kb = 'BREAKER ' + (c.poles || 1) + 'P ' + (c.amps || '?') + 'A';
+      if (faltaEnCatalogo(kb)) out.push(kb);
+    } catch (e) {}
+    return out;
+  }
   function filasCircuitoNEC(c, pref) {
+    pideCatalogo();
     var P = pref || 'prCirc', h = '';
     var sis = c.sistema || (esTubo(c.cable) ? 'tubo' : /^MC/i.test(c.cable || '') ? 'mc' : 'romex');
     h += '<div class="row"><label>Sistema</label><select id="' + P + 'Sis">' +
@@ -2696,6 +2772,11 @@
         var pasa = n <= maxC;
         return '<option value="' + n + '"' + ((c.ckts || 1) === n ? ' selected' : '') + (pasa ? '' : ' disabled') + '>' + n + (pasa ? '' : ' — pasa de 6 portadores') + '</option>';
       }).join('') + '</select></div>';
+    /* (22/09, Edgar) Cuando el tope es 1 y con otro neutro serían más, se DICE
+       ahí mismo. Un feeder trifásico al chiller va sin neutro y caben dos; antes
+       se capaba a 1 y no había nada en pantalla que lo explicara. */
+    var pN = pistaNeutro(c);
+    if (pN) h += '<div class="row"><label></label><span class="muted small">Caben <b>' + maxC + '</b> con este neutro.' + esc(pN.replace(/^ · /, ' Pero ')) + '.</span></div>';
     h += '<div class="row"><label>Neutro</label><select id="' + P + 'Neu">' + NEUTRO_OPC.map(function (o) {
       return '<option value="' + o[0] + '"' + ((c.neutro || 'propio') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
     }).join('') + '</select></div>';
@@ -2720,6 +2801,9 @@
         ' · <b>' + r.h.portadores + ' portadores → ' + Math.round(r.h.ajuste * 100) + ' %</b>' + (r.h.pasa ? '' : ' ⚠ pasa de 6') +
         '<br>Al takeoff: ' + esc(it) + ', ' + esc(window.NEC.itemHilo(c.calibre || '#12')) + ' × ' + nFN +
         (r.gnd.n ? ' y tierra ' + esc(window.NEC.itemHilo(r.gnd.calibre)) + ' × 1' : '') + '.</div>';
+      // (22/09) y lo que de esa lista NO tiene precio en su catálogo, dicho aquí
+      var sinP = piezasSinPrecio(c);
+      if (sinP.length) h += '<div class="muted small" style="color:#a33">⚠ Esto no está en tu catálogo: <b>' + sinP.map(esc).join('</b>, <b>') + '</b>. Se puede trazar igual, pero al mandar el takeoff sale «SIN MAPEAR» y NO entra al estimado: dálo de alta con su precio, o elige otro tipo.</div>';
     } else {
       h += '<div class="muted small" style="color:#a33">Con ese calibre y esos hilos no hay tamaño de ' + esc(c.tubo || 'EMT') + ' en la tabla. Baja circuitos o sube de tubo.</div>';
     }
@@ -2750,9 +2834,20 @@
     // un tope de circuitos que se pasó al cambiar polos o neutro se recorta, y se dice
     if (c.sistema === 'tubo' && hayNEC()) {
       var mx = window.NEC.maxCkts(c.poles || 1, c.neutro || 'propio');
-      if ((c.ckts || 1) > mx) { c.ckts = mx; setHint('Con ' + (c.poles || 1) + ' polo(s) y ese neutro caben ' + mx + ' circuito(s) sin pasar de 6 portadores: se recortó'); }
+      if ((c.ckts || 1) > mx) { c.ckts = mx; setHint('Con ' + (c.poles || 1) + ' polo(s) y ese neutro caben ' + mx + ' circuito(s) sin pasar de 6 portadores: se recort\u00f3' + pistaNeutro(c)); }
     }
     return normalizaCirc(c);
+  }
+  /* (22/09, Edgar) «no me deja poner más de 1 ckt». Es verdad y es el NEC, pero
+     la app se lo capaba sin decirle que CAMBIANDO EL NEUTRO se abre: un feeder
+     trifásico a un chiller son 3 hilos y tierra, sin neutro, y así caben dos
+     circuitos justos en 6 portadores. Antes se quedaba en 1 y a callar. */
+  function pistaNeutro(c) {
+    if (!hayNEC()) return '';
+    var ahora = window.NEC.maxCkts(c.poles || 1, c.neutro || 'propio');
+    var sinNeu = window.NEC.maxCkts(c.poles || 1, 'ninguno');
+    if (sinNeu <= ahora || (c.neutro || 'propio') === 'ninguno') return '';
+    return ' · sin neutro (240 V puro / feeder de 3 hilos) caben ' + sinNeu;
   }
   function rotuloCirc(c) {
     var r = resumenNEC(c);
@@ -10337,6 +10432,9 @@
     resumen: resumenNEC, filas: filasCircuitoNEC, rotulo: rotuloCirc, hilos: hilosDe, hayNEC: hayNEC, factorUnidad: factorUnidad, factorAlias: factorAlias,
     // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
     tipo: tipoCorrida, nums: numsCirc, sincroniza: sincronizaNums, proximo: proximoCircLibre,
+    ocupados: numsOcupados, rotuloNums: rotuloNums, pistaNeutro: pistaNeutro,   // (22/09) el 3P ocupa 3 números
+    sinPrecio: piezasSinPrecio, catSet: function (l) { _catSet = null; if (l) { _catSet = {}; l.forEach(function (x) { _catSet[normTxt2(x)] = 1; }); } },
+    breakerOpc: function () { return BREAKERS.slice(); },
     porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc, marcaCkt: marcaCktEnHoja, modoRotulo: modoRotulo,
     breakers: breakersDeCircuitos, cuenta: cuentaCircuitos, normaliza: normalizaCirc
   };
