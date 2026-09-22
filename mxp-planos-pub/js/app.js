@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.X';
+  var APP_VERSION = 'v34.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2345,8 +2345,9 @@
   }
   /* Los grupos de hilos para el llenado: fases+neutros de un calibre, tierra del suyo. */
   function gruposCirc(c, h) {
-    var g = tierraCirc(c), out = [{ calibre: c.calibre || '#12', n: h.hot + h.neu }];
-    if (g.n) out.push({ calibre: g.calibre, n: g.n });
+    // (22/09) las fases y el neutro, del material elegido; la tierra SIEMPRE cobre
+    var g = tierraCirc(c), out = [{ calibre: c.calibre || '#12', n: h.hot + h.neu, mat: matCirc(c) }];
+    if (g.n) out.push({ calibre: g.calibre, n: g.n, mat: 'CU' });
     return out;
   }
   /* El tamaño de tubo que toca: el mínimo en que caben todos los hilos, o el
@@ -2429,6 +2430,7 @@
     d.sistema = c.sistema || d.sistema; d.tubo = c.tubo || d.tubo; d.calibre = c.calibre || d.calibre;
     d.ckts = c.ckts || d.ckts; d.neutro = c.neutro || d.neutro; d.tam = c.tam || null;
     d.gnd = c.gnd || 'si'; d.gndCal = c.gndCal || null;
+    d.mat = matCirc(c);   // (22/09) el conductor elegido viaja a la siguiente corrida
     d.tipo = tipoCorrida(c);
     /* El circuito en curso: la próxima corrida sale con estos MISMOS números.
        Edgar: «si yo después sigo corriendo tuberías pero son los mismos ckts,
@@ -2549,7 +2551,7 @@
       var h = hilosTubo(c), tam = tamTubo(c);
       if (h && tam) {
         out.push({ item: window.NEC.itemTubo(c.tubo || 'EMT', tam), ft: L });
-        out.push({ item: window.NEC.itemHilo(c.calibre || '#12'), ft: L * (h.hot + h.neu) });
+        out.push({ item: window.NEC.itemHilo(c.calibre || '#12', matCirc(c)), ft: L * (h.hot + h.neu) });
         var g = tierraCirc(c);
         if (g.n) {
           var itG = window.NEC.itemHilo(g.calibre);
@@ -2703,7 +2705,21 @@
     return ns.map(function (n) { return numsDeBreaker(c, n).join('-'); }).join(', ');
   }
   var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['ENT', 'ENT (Smurf tube)'], ['FMC', 'Flex metal conduit'], ['IMC', 'IMC']];
-  var CALIBRE_OPC = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0'];
+  /* (22/09, Edgar) «los calibres de los cables solo llegan hasta 4/0». La lista
+     estaba escrita a mano y se paró ahí, pero el NEC de la app YA sabía los MCM:
+     tiene el área del 250 al 600 en cobre THW y en aluminio XHHW compacto, la
+     ampacidad de los dos y la tabla de tierra hasta 2000 A. Y el catálogo de
+     Edgar los tiene con precio. Solo faltaba ofrecerlos. Se toma la lista del
+     NEC, que es la que manda, en vez de repetirla aquí. */
+  var CALIBRE_CORTO = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0'];
+  function calibresDe(mat) {
+    if (!hayNEC()) return CALIBRE_CORTO;
+    var l = mat === 'AL' ? window.NEC.CALIBRES_AL : window.NEC.CALIBRES;
+    return (l && l.length) ? l : CALIBRE_CORTO;
+  }
+  function matCirc(c) { return (c && c.mat === 'AL') ? 'AL' : 'CU'; }
+  /* El nombre para la vista: '250' es '250 MCM', que es como se pide. */
+  function nomCal(k, mat) { return (/^\d{3}$/.test(k) ? k + ' MCM' : k) + (mat === 'AL' ? ' AL' : ''); }
   var NEUTRO_OPC = [['propio', 'Neutro propio (uno por circuito)'], ['compartido', 'Neutro compartido (multihilo 120/240)'], ['ninguno', 'Sin neutro (240 V puro)']];
   /* (22/09, Edgar) AVISAR AL ELEGIR, NO AL MANDAR. La lista «Tubo» ofrece IMC y
      en su catálogo no hay ni una fila de IMC; el trifásico manda «BREAKER 3P» y
@@ -2763,8 +2779,17 @@
     h += '<div class="row"><label>Tubo</label><select id="' + P + 'Tubo">' + TUBO_OPC.map(function (o) {
       return '<option value="' + o[0] + '"' + ((c.tubo || 'EMT') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
     }).join('') + '</select></div>';
-    h += '<div class="row"><label>Calibre</label><select id="' + P + 'Cal">' + CALIBRE_OPC.map(function (k) {
-      return '<option value="' + k + '"' + ((c.calibre || '#12') === k ? ' selected' : '') + '>' + k + ' THHN</option>';
+    /* (22/09) Cobre o aluminio, como en la herramienta Ruta. En un feeder de
+       chiller la diferencia no es un detalle: el 250 MCM va en dos familias
+       distintas del catálogo, con precios muy distintos. */
+    var matC = matCirc(c);
+    h += '<div class="row"><label>Conductor</label><select id="' + P + 'Mat">' +
+      [['CU', 'Cobre (THHN / THW)'], ['AL', 'Aluminio (XHHW compacto)']].map(function (o) {
+        return '<option value="' + o[0] + '"' + (matC === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select></div>';
+    var calL = calibresDe(matC);
+    h += '<div class="row"><label>Calibre</label><select id="' + P + 'Cal">' + calL.map(function (k) {
+      return '<option value="' + k + '"' + ((c.calibre || '#12') === k ? ' selected' : '') + '>' + esc(nomCal(k, matC)) + (matC === 'AL' ? ' XHHW' : ' THHN') + '</option>';
     }).join('') + '</select></div>';
     var maxC = r ? r.maxCkts : 3;
     h += '<div class="row"><label>Circuitos en el tubo</label><select id="' + P + 'Ckts" title="Cuántos circuitos van juntos en este tubo. El tope lo pone el NEC: no más de 6 hilos que lleven corriente, para quedarse en el ajuste del 80 % (310.15(C)(1))">' +
@@ -2784,7 +2809,7 @@
     var gA = window.NEC.tierraPorAmps(c.amps || 20), gSel = c.gnd === 'no' ? 'no' : (c.gndCal || 'auto');
     h += '<div class="row"><label>Tierra</label><select id="' + P + 'Gnd" title="Una tierra por tubo (250.122). Por defecto la que pide el breaker; cámbiala si quieres otra">' +
       '<option value="auto"' + (gSel === 'auto' ? ' selected' : '') + '>Por el breaker de ' + (c.amps || 20) + ' A (250.122): ' + gA + ' THHN</option>' +
-      CALIBRE_OPC.map(function (k) { return '<option value="' + k + '"' + (gSel === k ? ' selected' : '') + '>' + k + ' THHN</option>'; }).join('') +
+      calibresDe('CU').map(function (k) { return '<option value="' + k + '"' + (gSel === k ? ' selected' : '') + '>' + esc(nomCal(k, 'CU')) + ' THHN</option>'; }).join('') +
       '<option value="no"' + (gSel === 'no' ? ' selected' : '') + '>Sin tierra (el tubo metálico hace de tierra)</option></select></div>';
     if (r) {
       // solo los tamaños en que CABE: el 1/2" desaparece solo cuando pones #6
@@ -2821,6 +2846,12 @@
     } else if (campo === 'cable') c.cable = valor;
     else if (campo === 'tubo') { c.tubo = valor; c.tam = null; }
     else if (campo === 'calibre') { c.calibre = valor; c.tam = null; }
+    /* (22/09) Al pasar a aluminio, un calibre que no existe en aluminio (#12) sube
+       al 1/0, que es el primero que Edgar compra — igual que ya hace la Ruta. */
+    else if (campo === 'mat') {
+      c.mat = valor === 'AL' ? 'AL' : 'CU'; c.tam = null;
+      if (calibresDe(matCirc(c)).indexOf(c.calibre) < 0) c.calibre = c.mat === 'AL' ? '1/0' : '#12';
+    }
     else if (campo === 'ckts') { c.ckts = Math.max(1, Math.min(6, parseInt(valor, 10) || 1)); c.tam = null; sincronizaNums(c, c.__id || null); }
     else if (campo === 'neutro') { c.neutro = valor; c.tam = null; }
     else if (campo === 'gnd') {
@@ -9223,6 +9254,7 @@
     on('prCircCable', 'change', function (n) { circNEC('cable', n.value); });
     on('prCircSis', 'change', function (n) { circNEC('sistema', n.value); });
     on('prCircTubo', 'change', function (n) { circNEC('tubo', n.value); });
+    on('prCircMat', 'change', function (n) { circNEC('mat', n.value); });   // (22/09) cobre / aluminio
     on('prCircCal', 'change', function (n) { circNEC('calibre', n.value); });
     on('prCircCkts', 'change', function (n) { circNEC('ckts', n.value); });
     on('prCircNeu', 'change', function (n) { circNEC('neutro', n.value); });
@@ -10433,6 +10465,7 @@
     // (15/09) el tipo de corrida y los breakers por circuito, no por tramo
     tipo: tipoCorrida, nums: numsCirc, sincroniza: sincronizaNums, proximo: proximoCircLibre,
     ocupados: numsOcupados, rotuloNums: rotuloNums, pistaNeutro: pistaNeutro,   // (22/09) el 3P ocupa 3 números
+    calibres: calibresDe, mat: matCirc,   // (22/09) los MCM y el aluminio
     sinPrecio: piezasSinPrecio, catSet: function (l) { _catSet = null; if (l) { _catSet = {}; l.forEach(function (x) { _catSet[normTxt2(x)] = 1; }); } },
     breakerOpc: function () { return BREAKERS.slice(); },
     porPanel: circuitosPorPanel, renombraPanel: renombraPanelCirc, marcaCkt: marcaCktEnHoja, modoRotulo: modoRotulo,
@@ -24360,7 +24393,7 @@
           }
           else if (id === 'tmCircPoles') aplicaCambioNEC(d, 'poles', el.value);
           else {
-            var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircGnd: 'gnd', tmCircTam: 'tam', tmCircAmps: 'amps' }[id];
+            var campo = { tmCircSis: 'sistema', tmCircCable: 'cable', tmCircTubo: 'tubo', tmCircMat: 'mat', tmCircCal: 'calibre', tmCircCkts: 'ckts', tmCircNeu: 'neutro', tmCircGnd: 'gnd', tmCircTam: 'tam', tmCircAmps: 'amps' }[id];
             if (campo) aplicaCambioNEC(d, campo, el.value);
           }
           scheduleAutosave();
