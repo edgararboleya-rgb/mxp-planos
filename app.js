@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.V';
+  var APP_VERSION = 'v34.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -17737,20 +17737,65 @@
   /* El número de hoja, leído del CAJETÍN del propio plano (abajo a la derecha,
      el texto más grande que tenga forma de número de hoja: E-2.2, ED-1.1,
      M-101). Si no se lee, se dice y la hoja entra con su número de página. */
+  /* (22/09) EL NÚMERO DE LA HOJA, LEÍDO DE VERDAD. En el set de Edgar (14 PDF
+     de una página cada uno) no se leyó ni un cajetín y las 14 pestañas salieron
+     como «PG-1». Tres cosas fallaban:
+       · LA ROTACIÓN. it.transform viene en coordenadas del PDF SIN girar; con
+         /Rotate 90 el cuarto inferior derecho del papel NO es el cuarto inferior
+         derecho de esas coordenadas. Comprobado con un PDF girado: el número
+         cae en x=60 (la izquierda) una vez aplicado el viewport. Ahora se pasa
+         todo por vp1.transform, que es lo que ve Edgar en pantalla.
+       · EL TEXTO PARTIDO. pdf.js devuelve lo que hay en el PDF, y «E-0.1» puede
+         llegar como «E-0» + «.1», o como «E» «-» «0.1». Ahora los trozos que
+         están en la misma línea se juntan antes de buscar.
+       · LA ZONA. Algunos cajetines llevan el número más arriba. Si en el cuarto
+         de abajo no hay nada, se mira toda la franja derecha. */
   function numeroDeCajetin(page, vp1) {
     return page.getTextContent().then(function (tc) {
-      var W = vp1.width, H = vp1.height, mejor = null;
+      var W = vp1.width, H = vp1.height;
+      var T = (window.pdfjsLib && pdfjsLib.Util && pdfjsLib.Util.transform) ? pdfjsLib.Util.transform : null;
+      var RE = /^([A-Z]{1,3})-?(\d{1,3})(\.\d{1,2})?$/i;
+      // cada trozo, con sus coordenadas YA en el papel que se ve (y de arriba abajo)
+      var trozos = [];
       (tc.items || []).forEach(function (it) {
         var t = String(it.str || '').trim();
         if (!t || t.length > 14) return;
-        var x = it.transform[4], y = it.transform[5], alto = Math.abs(it.transform[3]);
-        // el cajetín: cuarto inferior derecho de la hoja
-        if (!(x > W * 0.55 && y < H * 0.45)) return;
-        var m = t.match(/^([A-Z]{1,3})-?(\d{1,3})(\.\d{1,2})?$/i);
-        if (!m) return;
-        if (!mejor || alto > mejor.alto) mejor = { t: (m[1] + '-' + m[2] + (m[3] || '')).toUpperCase(), alto: alto };
+        var m = T ? T(vp1.transform, it.transform) : it.transform;
+        var alto = Math.abs(m[3]) || Math.abs(it.transform[3]) || 1;
+        trozos.push({ t: t, x: m[4], y: T ? m[5] : (H - it.transform[5]), alto: alto });
       });
-      return mejor ? mejor.t : null;
+      if (!trozos.length) return null;
+      trozos.sort(function (a, b) { return (a.y - b.y) || (a.x - b.x); });
+      /* Juntar lo que está en la misma línea: mismo alto de letra, misma altura
+         (medio renglón de margen) y pegados de lado. Así «E-0» + «.1» vuelve a
+         ser «E-0.1» sin inventarse nada. */
+      var junto = [];
+      trozos.forEach(function (q) {
+        var u = junto[junto.length - 1];
+        if (u && Math.abs(u.y - q.y) < u.alto * 0.5 && Math.abs(u.alto - q.alto) < u.alto * 0.35
+              && q.x - u.x2 < u.alto * 0.9 && q.x >= u.x - 1 && (u.t + q.t).length <= 14) {
+          u.t += q.t; u.x2 = q.x + q.t.length * q.alto * 0.6;
+          return;
+        }
+        junto.push({ t: q.t, x: q.x, x2: q.x + q.t.length * q.alto * 0.6, y: q.y, alto: q.alto });
+      });
+      // y los trozos sueltos siguen valiendo: «E-0.1» entero no necesita junta
+      var todos = junto.concat(trozos);
+      function busca(dentro) {
+        var mejor = null;
+        todos.forEach(function (q) {
+          if (!dentro(q)) return;
+          // pdf.js entrega «E-0 .1» con el espacio dentro: un número de hoja no lleva espacios
+          var m = q.t.replace(/\s+/g, '').match(RE); if (!m) return;
+          if (!mejor || q.alto > mejor.alto) mejor = { t: (m[1] + '-' + m[2] + (m[3] || '')).toUpperCase(), alto: q.alto };
+        });
+        return mejor ? mejor.t : null;
+      }
+      // 1º el cuarto de abajo a la derecha, que es donde vive el cajetín
+      return busca(function (q) { return q.x > W * 0.55 && q.y > H * 0.55; })
+          // 2º toda la franja derecha, para los cajetines de columna entera
+          || busca(function (q) { return q.x > W * 0.7; })
+          || null;
     }).catch(function () { return null; });
   }
   function abreSet() { var b = $('#setModal'); if (b) b.hidden = false; }
@@ -17792,11 +17837,11 @@
               var vp1 = page.getViewport({ scale: 1 });
               var papel = SET_PAPEL(vp1.width / 72, vp1.height / 72);
               return numeroDeCajetin(page, vp1).then(function (num) {
-                S.paginas.push({ ai: ai, pg: n, num: num, papel: papel, marcada: false });
+                S.paginas.push({ ai: ai, pg: n, num: num, papel: papel, marcada: true });   // (22/09, Edgar) marcadas TODAS de entrada: quitar las que sobran es un toque, marcar 25 son 25
                 if (n % 8 === 0) pintaSet();
                 sigPagina();
               });
-            }).catch(function () { S.paginas.push({ ai: ai, pg: n, num: null, papel: SET_PAPEL(8.5, 11), marcada: false }); sigPagina(); });
+            }).catch(function () { S.paginas.push({ ai: ai, pg: n, num: null, papel: SET_PAPEL(8.5, 11), marcada: true }); sigPagina(); });
           }
           sigPagina();
         }).catch(function (err) {
@@ -17814,6 +17859,17 @@
      BORRA la pila de deshacer (loadSheetData), así que crear 30 hojas una a
      una dejaba a Edgar sin Ctrl+Z justo cuando más lo necesita — y repintaba
      el lienzo 30 veces. Así se arman todas y solo se entra en una. */
+  /* El nombre de una hoja cuando el cajetín no dio número: el del archivo si es
+     de una sola página (el caso de Edgar: un PDF por hoja), y con su página
+     detrás si el archivo trae varias. */
+  function nombreDeFila(S, q) { return q.nom != null ? q.nom : (q.num || nombreDePagina(S, q)); }
+  function nombreDePagina(S, q) {
+    var ar = (S.archivos || [])[q.ai] || {};
+    var base = String(ar.nombre || '').replace(/\.pdf$/i, '').trim().slice(0, 28);
+    var deUna = ar.doc && ar.doc.numPages === 1;
+    if (!base) return 'PG-' + (q.pg || 1);
+    return deUna ? base : (base + ' p.' + q.pg);
+  }
   function hojaConFondo(nom, bg) {
     return { no: nom, title: '', _zf: 1, data: JSON.stringify({
       walls: [], openings: [], symbols: [], texts: [], dims: [], areas: [],
@@ -17879,9 +17935,9 @@
       if (q.ai !== archAnt) { archAnt = q.ai; h += '<div class="setCab">' + esc(S.archivos[q.ai].nombre) + '</div>'; }
       h += '<label class="setFila' + (q.papel.grande ? ' sfGrande' : '') + '">' +
         '<input type="checkbox" data-i="' + idx + '"' + (q.marcada ? ' checked' : '') + '>' +
-        '<span class="sfNum">' + esc(q.num || ('pág. ' + q.pg)) + '</span>' +
+        '<input class="sfNum" type="text" data-nom="' + idx + '" value="' + esc(nombreDeFila(S, q)) + '" title="El nombre de la pestaña. Sale del cajetín; cámbialo si no acertó." maxlength="24">' +
         '<span class="sfPapel">' + esc(q.papel.nom) + '</span>' +
-        '<span class="sfArch">' + esc(q.papel.txt) + (q.num ? '' : ' · sin número en el cajetín') + '</span>' +
+        '<span class="sfArch">' + esc(q.papel.txt) + (q.num ? '' : ' · el cajetín no dio número: va el nombre del archivo') + '</span>' +
         '</label>';
     });
     lst.innerHTML = h;
@@ -17928,7 +17984,10 @@
           var big = cv.width * cv.height > 9e6;
           var url = vista ? cv.toDataURL('image/jpeg', VISTA_JPEG) : (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
           cv.width = 1; cv.height = 1;
-          var nom = q.num || ('PG-' + q.pg);
+          /* (22/09) El nombre de respaldo salía «PG-» + página, y con 14 PDF de UNA
+             página cada uno las 14 pestañas se llamaban «PG-1». Si el cajetín no da
+             número, se usa el nombre del archivo, que es lo que Edgar ya reconoce. */
+          var nom = nombreDeFila(S, q);   // lo que se lee del cajetín, o lo que Edgar escribió encima
           if (S.puestas === 0 && vacia) {
             // la hoja en la que ya está: entra como siempre
             S.usoActiva = true;
@@ -17999,9 +18058,24 @@
       pintaSet();
     });
     if ((b = $('#setLista'))) b.addEventListener('change', function (ev) {
-      var t = ev.target; if (!t || t.dataset.i == null || !setPdf) return;
-      var buenas = setPdf.paginas.filter(Boolean), q = buenas[+t.dataset.i];
-      if (q) { q.marcada = t.checked; pintaSet(); }
+      var t = ev.target; if (!t || !setPdf) return;
+      var buenas = setPdf.paginas.filter(Boolean);
+      if (t.dataset.i != null) { var q = buenas[+t.dataset.i]; if (q) { q.marcada = t.checked; pintaSet(); } return; }
+      /* (22/09) El nombre se escribe aquí. No se repinta al escribir — eso le
+         borraría a Edgar lo que está tecleando—: se guarda y ya. */
+      if (t.dataset.nom != null) {
+        var w = buenas[+t.dataset.nom];
+        if (w) { var v = String(t.value || '').trim().slice(0, 24); w.nom = v || null; }
+      }
+    });
+    // escribir en el nombre no debe marcar ni desmarcar la fila (el <input> vive dentro del <label>)
+    if ((b = $('#setLista'))) b.addEventListener('click', function (ev) {
+      var t = ev.target; if (t && t.dataset && t.dataset.nom != null) ev.preventDefault(), ev.stopPropagation(), t.focus();
+    });
+    if ((b = $('#setLista'))) b.addEventListener('input', function (ev) {
+      var t = ev.target; if (!t || t.dataset.nom == null || !setPdf) return;
+      var q = setPdf.paginas.filter(Boolean)[+t.dataset.nom];
+      if (q) { var v = String(t.value || '').trim().slice(0, 24); q.nom = v || null; }
     });
     if ((b = $('#setImporta'))) b.addEventListener('click', function () {
       if (!setPdf) return;
@@ -18016,7 +18090,8 @@
       paginas: setPdf.paginas.filter(Boolean).map(function (q) { return { num: q.num, pg: q.pg, papel: q.papel.nom, ai: q.ai, marcada: q.marcada }; }),
       puestas: setPdf.puestas || 0, fallo: setPdf.fallo || [] } : null; },
     marca: function (f) { if (!setPdf) return 0; var n = 0; setPdf.paginas.forEach(function (q) { if (q && f(q)) { q.marcada = true; n++; } }); pintaSet(); return n; },
-    importa: importaSet, peso: setPesoEstimado, deshace: function () { deshaceSet(setPdf); }
+    importa: importaSet, peso: setPesoEstimado, deshace: function () { deshaceSet(setPdf); },
+    cajetin: numeroDeCajetin
   };
 
   function importPdfBackground(file, deliver) {
