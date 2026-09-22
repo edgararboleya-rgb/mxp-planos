@@ -30,14 +30,22 @@
   'use strict';
 
   /* Tabla 5 — área aproximada del conductor con aislamiento, in². COBRE, tal
-     como lo compra Edgar (su catálogo, 15/09): THHN/THWN del #14 al 4/0 y
-     **THW** del 250 al 600 MCM (el THW es más gordo que el THHN: 250 MCM THW
-     0,4877 contra 0,3970 — se usa el que se compra, no el más cómodo). */
+     como lo compra Edgar. (22/09) TODO ES THHN/THWN-2, también los MCM: lo
+     confirmó él con la página de su proveedor, donde del #14 al 1000 MCM todo
+     sale como «THHN/THWN-2 Copper Building Wire». Hasta hoy los MCM usaban las
+     áreas del THW porque su catálogo los llama así («# 250 MCM THW CU.»), y el
+     THW es MÁS GORDO: 250 MCM THW 0,4877 contra THHN 0,3970, un 23 % más. Con
+     eso el tubo salía un tamaño de más en la mitad de los feeders —medido:
+     250 MCM 3F+G 2-1/2" con THW y 2" con THHN; 500 MCM 3" y 2-1/2"— y eso es
+     tubo y fittings comprados de más. El NOMBRE del catálogo sigue diciendo THW
+     y no se toca desde aquí: cambiarlo dejaría sin casar los estimados viejos.
+     Áreas del THW, por si alguna vez hace falta: 250 0,4877 · 300 0,5581 ·
+     350 0,6291 · 400 0,6969 · 500 0,8316 · 600 0,9729. */
   var CONDUCTOR = {
     '#14': 0.0097, '#12': 0.0133, '#10': 0.0211, '#8': 0.0366, '#6': 0.0507,
     '#4': 0.0824, '#3': 0.0973, '#2': 0.1158, '#1': 0.1562,
     '1/0': 0.1855, '2/0': 0.2223, '3/0': 0.2679, '4/0': 0.3237,
-    '250': 0.4877, '300': 0.5581, '350': 0.6291, '400': 0.6969, '500': 0.8316, '600': 0.9729
+    '250': 0.3970, '300': 0.4608, '350': 0.5242, '400': 0.5863, '500': 0.7073, '600': 0.8676
   };
   // en orden de calibre (Object.keys pondría los MCM delante por ser números)
   var CALIBRES = ['#14', '#12', '#10', '#8', '#6', '#4', '#3', '#2', '#1', '1/0', '2/0', '3/0', '4/0', '250', '300', '350', '400', '500', '600'];
