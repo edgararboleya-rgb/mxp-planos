@@ -30,7 +30,7 @@
     </div>
 
     <div class="tgroup" id="grpArchivo">
-      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto (también puedes pegar con Ctrl+V o arrastrarla al lienzo)" data-ico="open"><label>Abrir</label></button>
+      <button id="btnOpen" title="Abrir cualquier documento: proyecto MXP, plano PDF o foto. Puedes escoger VARIOS planos de golpe —o un PDF de varias páginas— y sale el índice del set para marcar las hojas que entran. También sirve pegar con Ctrl+V o arrastrar al lienzo." data-ico="open"><label>Abrir</label></button>
       <button id="btnSave" title="Guardar el proyecto como archivo" data-ico="save"><label>Guardar</label></button>
       <button id="btnProyectos" title="Todos tus proyectos: los de este aparato y los de la nube. Abrir, duplicar, borrar e importar varios .mxp.json de golpe." data-ico="projects"><label>Proyectos</label></button>
       <button id="btnPng" title="Exportar imagen PNG" data-ico="png"><label>PNG</label></button>
@@ -76,7 +76,7 @@
     <div class="dock horiz" id="dockTop"></div>
     <input type="file" id="fileBg" accept="image/*,application/pdf,.pdf" multiple hidden>
     <input type="file" id="fileBg2" accept="image/*,application/pdf,.pdf" hidden>
-    <input type="file" id="fileOpen" accept=".json,application/json,application/pdf,.pdf,image/*" hidden>
+    <input type="file" id="fileOpen" accept=".json,application/json,application/pdf,.pdf,image/*" multiple hidden>
     <input type="file" id="fileProyectos" accept=".json,application/json" multiple hidden>
     <input type="file" id="fileDxf" accept=".dxf,text/plain" hidden>
   </header>

@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.U';
+  var APP_VERSION = 'v34.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -17657,7 +17657,10 @@
     }
     fallback();
   }
-  // (el botón Fondo es un <label for="fileBg">: el navegador abre el selector directo)
+  /* (22/09) OJO: #fileBg es el único <input> con `multiple`, pero NINGÚN botón
+     lo abre — el <label for="fileBg"> que decía este comentario ya no está en el
+     HTML. Se llega a él arrastrando al lienzo, y por el botón Abrir (#fileOpen),
+     que ahora también es `multiple` y manda al mismo sitio. */
   function handleBgFile(f) {
     if (!f) return;
     if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '')) { importPdfBackground(f); return; }
@@ -20138,13 +20141,27 @@
   }
   $('#btnOpen').addEventListener('click', function () { $('#fileOpen').click(); });
   $('#fileOpen').addEventListener('change', function () {
-    var f = this.files[0]; this.value = '';
-    if (!f) return;
-    // "Abrir" acepta todo: si es un PDF o una foto, se importa como plano de fondo
-    if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '') || /^image\//.test(f.type || '')) {
-      handleBgFile(f);
+    /* (22/09) VARIOS DE GOLPE TAMBIÉN POR EL BOTÓN. El set de planos (paso 10)
+       estaba hecho y probado, pero solo se llegaba a él ARRASTRANDO ficheros al
+       lienzo: el único <input> con `multiple` es #fileBg, y el botón que lo
+       abría —un <label for="fileBg">— ya no existe en el HTML; quedó el
+       comentario y no el botón. Por «Abrir», que es lo que se usa, solo entraba
+       files[0]. Ahora «Abrir» coge todos los que marques y los manda al mismo
+       índice del set. */
+    var fs = [].slice.call(this.files || []); this.value = '';
+    if (!fs.length) return;
+    var esPlano = function (x) {
+      return x.type === 'application/pdf' || /\.pdf$/i.test(x.name || '') || /^image\//.test(x.type || '');
+    };
+    var planos = fs.filter(esPlano), proyectos = fs.filter(function (x) { return !esPlano(x); });
+    if (planos.length) {
+      if (proyectos.length) setHint('De los ' + fs.length + ' que marcaste, ' + planos.length + ' son planos: los abro. Los proyectos .mxp.json van por Proyectos → Importar.');
+      handleBgFiles(planos);
       return;
     }
+    if (proyectos.length > 1) setHint('Los proyectos se abren de uno en uno — abrí el primero. Para traer varios: Proyectos → Importar.');
+    var f = proyectos[0];
+    if (!f) return;
     var rd = new FileReader();
     rd.onload = function () {
       try {
