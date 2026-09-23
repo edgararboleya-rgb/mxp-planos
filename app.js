@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v34.Z';
+  var APP_VERSION = 'v35.A';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2542,7 +2542,24 @@
     var c = a.circ || {};
     return (perimDe(a) + ((+c.drop) || 0) * 12) * Math.max(1, (+c.mult) || 1);
   }
-  // que cantidades salen de un homerun para materiales / CSV / estimador
+  /* (23/09, Edgar) EL WHIP DE LIQUIDTIGHT EN CADA DESCONECTIVO. «cuando yo
+     haga una corrida de tuberías que incluya un desconectivo, automáticamente
+     por cada desconectivo calculemos un máximo de 6 pies de liquidtight… y
+     por cada corrida suma dos [conectores] de cada uno». Del desconectivo al
+     equipo (el chiller, la RTU) va un tramo flexible: 6 ft de LFMC (250.118),
+     los MISMOS conductores 6 ft más, y 2 conectores rectos + 2 de 90°.
+     El LFMC sale del tamaño que pide el NEC para esos conductores y nunca
+     menor que el tubo de la corrida. Con × Unidades, cada unidad (cada piso,
+     o cada juego en paralelo) lleva su propio whip. */
+  var LT_PULG = 72;   // 6 ft
+  function whipsLT(c) { return Math.max(0, Math.min(20, parseInt((c || {}).lt, 10) || 0)) * Math.max(1, (+(c || {}).mult) || 1); }
+  function tamWhipLT(c, h, tamCorrida) {
+    var T = window.NEC.TAMANOS || [], min = window.NEC.tamanoMinimoMixto('LFMC', gruposCirc(c, h));
+    if (!min) return null;   // no cabe ni en 4" de LFMC: no se inventa
+    return T.indexOf(tamCorrida) > T.indexOf(min) && window.NEC.tamanosQueCabenMixto('LFMC', gruposCirc(c, h)).indexOf(tamCorrida) >= 0 ? tamCorrida : min;
+  }
+  // que cantidades salen de un homerun para materiales / CSV / estimador.
+  // `ft` va en PULGADAS (como todo el plano); `n` son piezas (los conectores)
   function partidasHomerun(a) {
     var c = a.circ || {}, L = largoHomerun(a), out = [];
     if (esTuboCirc(c) && c.ckts && hayNEC()) {
@@ -2550,12 +2567,19 @@
       // de todos los circuitos que van dentro, y la tierra APARTE con su calibre
       var h = hilosTubo(c), tam = tamTubo(c);
       if (h && tam) {
+        var nW = whipsLT(c), tL = nW ? tamWhipLT(c, h, tam) : null;
+        var Lh = L + (tL ? LT_PULG * nW : 0);   // los conductores también van por el whip
         out.push({ item: window.NEC.itemTubo(c.tubo || 'EMT', tam), ft: L });
-        out.push({ item: window.NEC.itemHilo(c.calibre || '#12', matCirc(c)), ft: L * (h.hot + h.neu) });
+        out.push({ item: window.NEC.itemHilo(c.calibre || '#12', matCirc(c)), ft: Lh * (h.hot + h.neu) });
         var g = tierraCirc(c);
         if (g.n) {
           var itG = window.NEC.itemHilo(g.calibre);
-          if (itG === out[1].item) out[1].ft += L * g.n; else out.push({ item: itG, ft: L * g.n });
+          if (itG === out[1].item) out[1].ft += Lh * g.n; else out.push({ item: itG, ft: Lh * g.n });
+        }
+        if (tL) {
+          out.push({ item: window.NEC.itemTubo('LFMC', tL), ft: LT_PULG * nW, lt: 1 });
+          out.push({ item: window.NEC.itemConectorLT(tL, false), n: 2 * nW, lt: 1 });
+          out.push({ item: window.NEC.itemConectorLT(tL, true), n: 2 * nW, lt: 1 });
         }
         return out;
       }
@@ -2704,7 +2728,7 @@
     if (p === 1) return ns.join(', ');
     return ns.map(function (n) { return numsDeBreaker(c, n).join('-'); }).join(', ');
   }
-  var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['ENT', 'ENT (Smurf tube)'], ['FMC', 'Flex metal conduit'], ['IMC', 'IMC']];
+  var TUBO_OPC = [['EMT', 'EMT'], ['PVC40', 'PVC Sch 40'], ['PVC80', 'PVC Sch 80'], ['GRS', 'GRS (rígido)'], ['ENT', 'ENT (Smurf tube)'], ['FMC', 'Flex metal conduit'], ['IMC', 'IMC'], ['LFMC', 'Liquidtight (LFMC)']];
   /* (22/09, Edgar) «los calibres de los cables solo llegan hasta 4/0». La lista
      estaba escrita a mano y se paró ahí, pero el NEC de la app YA sabía los MCM:
      tiene el área del 250 al 600 en cobre THW y en aluminio XHHW compacto, la
@@ -8747,10 +8771,14 @@
           '<input id="prCircSpare" type="checkbox"' + (c.spare ? ' checked' : '') + ' title="Va en un spare del panel: el breaker no se compra"></div>';
         html += '<div class="row"><label>Drop (ft)</label><input id="prCircDrop" type="number" min="0" step="1" value="' + (c.drop == null ? 15 : c.drop) + '" title="Lo que baja el cable del techo a las cajas: con techos de 10\' se calculan 10–15 ft por circuito"></div>';
         html += '<div class="row"><label>× Unidades</label><input id="prCircMult" type="number" min="1" step="1" value="' + (c.mult || 1) + '" title="El mismo recorrido repetido: 3 pisos iguales = 3. Como el # of Units del Excel"></div>';
+        if (esTuboCirc(c) && hayNEC()) {
+          html += '<div class="row"><label title="Del desconectivo al equipo va un whip de liquidtight: 6 ft de LFMC, los mismos conductores y 2 conectores rectos + 2 de 90° por cada uno">Desconectivos al final</label><input id="prCircLt" type="number" min="0" max="20" step="1" value="' + (parseInt(c.lt, 10) || 0) + '" title="Cuántos desconectivos alimenta esta corrida (por unidad). Cada uno suma su whip de liquidtight de 6 ft"></div>';
+        }
         if (esTubo(c.cable) && !esTuboCirc(c)) {
           html += '<div class="row"><label>Hilos (sin tierra)</label><input id="prCircHilos" type="number" min="1" max="6" step="1" value="' + hilosDe(c) + '" title="Conductores de fase/neutro dentro del tubo; la tierra se suma sola"></div>';
         }
-        html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + Math.ceil(q.ft / 12) + ' ft'; }).join(' · ') + '. El drop se suma al trazo.' +
+        html += '<div class="muted small">Material: ' + partidasHomerun(e).map(function (q) { return esc(q.item) + ' ' + (q.n ? q.n + ' pz' : Math.ceil(q.ft / 12) + ' ft'); }).join(' · ') + '. El drop se suma al trazo.' +
+          (whipsLT(c) ? ' El liquidtight es el whip de ' + whipsLT(c) + ' desconectivo(s): 6 ft cada uno, con sus conductores y conectores.' : '') +
           (c.spare
             ? ' Los ckt <b>' + esc(rotuloNums(c)) + '</b> van en <b>spares que ya están en el panel</b>: se cuentan como circuitos pero NO se compra breaker.'
             : ' Los ckt <b>' + esc(rotuloNums(c)) + '</b> piden <b>' + nCk + ' breaker' + (nCk === 1 ? '' : 's') + '</b> de ' + (c.amps || '?') + ' A. ') +
@@ -9265,6 +9293,7 @@
     on('prCircSpare', 'change', function (n) { circSet('spare', !!n.checked); });
     on('prCircDrop', 'change', function (n) { circSet('drop', n.value, true); });
     on('prCircMult', 'change', function (n) { circSet('mult', Math.max(1, parseInt(n.value, 10) || 1), true); });
+    on('prCircLt', 'change', function (n) { circSet('lt', Math.max(0, Math.min(20, parseInt(n.value, 10) || 0)), true); showProps(); });
     on('prCircHilos', 'change', function (n) { circSet('hilos', Math.max(1, parseInt(n.value, 10) || 2), true); });
     on('prRutaTipo', 'change', function (n) {
       var et = findSel(); if (!et || !et.ruta) return;
@@ -13698,12 +13727,15 @@
       });
     }
     // CIRCUITOS / HOMERUNS: cable por tipo (trazo + drop) y breakers
-    var cabPorTipo = {}, nTramos = 0, nProp = 0;
+    var cabPorTipo = {}, pzPorTipo = {}, nTramos = 0, nProp = 0;
     state.areas.forEach(function (ar) {
       if (!ar.open || !ar.circ) return;
       if (ar.propuesta) { nProp++; return; }   // (E30) una ruta propuesta no se cotiza hasta aceptarla
       nTramos++;
-      partidasHomerun(ar).forEach(function (q) { cabPorTipo[q.item] = (cabPorTipo[q.item] || 0) + q.ft; });
+      partidasHomerun(ar).forEach(function (q) {
+        if (q.n) pzPorTipo[q.item] = (pzPorTipo[q.item] || 0) + q.n;
+        else cabPorTipo[q.item] = (cabPorTipo[q.item] || 0) + q.ft;
+      });
     });
     if (nProp) rows += '<tr><td colspan="2" class="muted small">⚡ ' + nProp + ' ruta(s) propuestas por el cerebro sin aceptar: no se cotizan (acéptalas en Rutas)</td></tr>';
     // el breaker es del CIRCUITO, no del tramo: se cuenta una vez por número
@@ -13711,7 +13743,10 @@
     if (nTramos) {
       rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Conduit runs (' + nCirc + ' ckt' + (nCirc === 1 ? '' : 's') + ' en ' + nTramos + ' tramo' + (nTramos === 1 ? '' : 's') + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">' + ICO.svg('panelsch') + ' → Panel Schedule</button></td></tr>';
       Object.keys(cabPorTipo).forEach(function (k) {
-        rows += '<tr><td>' + esc(k) + ' <span class="muted small">(trazo + drop)</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
+        rows += '<tr><td>' + esc(k) + ' <span class="muted small">' + (/LIQUIDTIGHT/.test(k) ? '(whips de desconectivo, 6 ft c/u)' : '(trazo + drop)') + '</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
+      });
+      Object.keys(pzPorTipo).forEach(function (k) {
+        rows += '<tr><td>' + esc(k) + ' <span class="muted small">(whips de desconectivo)</span></td><td class="n">' + pzPorTipo[k] + '</td></tr>';
       });
       Object.keys(brk).sort().forEach(function (k) {
         rows += '<tr><td>' + esc(k) + '</td><td class="n">' + brk[k] + '</td></tr>';
@@ -14100,7 +14135,8 @@
       if (!ar.open || !ar.circ || ar.propuesta) return;   // (E30) las propuestas no se cotizan
       var etq = (ar.circ.panel || '') + ' #' + rotuloNums(ar.circ) + ' ' + (TIPO_CORRIDA_NOM[tipoCorrida(ar.circ)] || '') + (ar.circ.desc ? ' ' + ar.circ.desc : '') + ' (' + (ar.circ.amps || '') + 'A/' + (ar.circ.poles || 1) + 'P, drop ' + (ar.circ.drop || 0) + ' ft' + ((ar.circ.mult || 1) > 1 ? ', ×' + ar.circ.mult : '') + ')';
       partidasHomerun(ar).forEach(function (q) {
-        rows.push(['Circuits', q.item, etq, 1, (q.ft / 12).toFixed(2), fmtFtIn(q.ft), '']);
+        if (q.n) rows.push(['Circuits', q.item, etq, q.n, '', '', '']);
+        else rows.push(['Circuits', q.item, etq, 1, (q.ft / 12).toFixed(2), fmtFtIn(q.ft), '']);
       });
     });
     // un breaker por circuito, no por tramo (y uno por cada ckt del tubo)
@@ -14377,7 +14413,7 @@
     syncSheet();
     var out = [];
     function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
-    var byKey = {}, oc = {}, wg = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {}, circAreas = [];   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
+    var byKey = {}, oc = {}, wg = {}, pz = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {}, circAreas = [];   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -14412,7 +14448,10 @@
       });
       (d.areas || []).forEach(function (ar) {
         if (!ar.open || !ar.circ || ar.propuesta) return;   // una ruta PROPUESTA no se cotiza hasta que se acepta
-        partidasHomerun(ar).forEach(function (q) { wg[q.item] = (wg[q.item] || 0) + q.ft; suma(q.item, q.ft); });
+        partidasHomerun(ar).forEach(function (q) {
+          if (q.n) { pz[q.item] = (pz[q.item] || 0) + q.n; return; }   // los conectores del whip: por pieza
+          wg[q.item] = (wg[q.item] || 0) + q.ft; suma(q.item, q.ft);
+        });
         circAreas.push(ar);   // los breakers se cuentan al final, por circuito y no por tramo
       });
       (d.walls || []).forEach(function (w) { var lnW = wallGeom(w).len; if (lnW >= 1) wl[w.type] = (wl[w.type] || 0) + lnW; });
@@ -14443,6 +14482,7 @@
     Object.keys(byKey).forEach(function (k) { if (k.indexOf('__brk__') === 0) add(k.slice(7), byKey[k], 'EA', '05-PANEL'); else if (SYMBOLS[k]) add(nombreEst(k), byKey[k], 'EA', codigoDeSimbolo(k)); });
     Object.keys(oc).forEach(function (k) { add(OPEN_NAMES[k], oc[k], 'EA', CODIGO_DEFECTO); });
     Object.keys(wg).forEach(function (k) { add(k, Math.ceil(wg[k] / 12), 'FT', '08-ROUGH'); });
+    Object.keys(pz).forEach(function (k) { add(k, pz[k], 'EA', '08-ROUGH'); });   // (23/09) conectores de liquidtight
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT', CODIGO_DEFECTO); });
     Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF', CODIGO_DEFECTO); });
     Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', '11-LIGHT'); });

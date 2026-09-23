@@ -69,9 +69,14 @@
     GRS:   { '1/2"': 0.314, '3/4"': 0.549, '1"': 0.887, '1-1/4"': 1.526, '1-1/2"': 2.071, '2"': 3.408, '2-1/2"': 4.866, '3"': 7.499, '3-1/2"': 10.010, '4"': 12.882, '5"': 20.212, '6"': 29.158 },
     IMC:   { '1/2"': 0.342, '3/4"': 0.586, '1"': 0.959, '1-1/4"': 1.647, '1-1/2"': 2.225, '2"': 3.630, '2-1/2"': 5.135, '3"': 7.922, '3-1/2"': 10.584, '4"': 13.631 },
     ENT:   { '1/2"': 0.285, '3/4"': 0.508, '1"': 0.832, '1-1/4"': 1.453, '1-1/2"': 1.986 },
-    FMC:   { '3/8"': 0.116, '1/2"': 0.317, '3/4"': 0.533, '1"': 0.817, '1-1/4"': 1.277, '1-1/2"': 1.858, '2"': 3.269, '2-1/2"': 4.909, '3"': 7.069 }
+    FMC:   { '3/8"': 0.116, '1/2"': 0.317, '3/4"': 0.533, '1"': 0.817, '1-1/4"': 1.277, '1-1/2"': 1.858, '2"': 3.269, '2-1/2"': 4.909, '3"': 7.069 },
+    /* (23/09) Liquidtight metálico, Artículo 350 de la Tabla 4. Edgar lo compra
+       de ⅜ a 3½; el 4" está en la tabla por si una corrida grande lo pide (no
+       está en su catálogo: sale avisado). Verificado: 16,1 mm de diámetro
+       interior → 0,314 in² en ½". */
+    LFMC:  { '3/8"': 0.192, '1/2"': 0.314, '3/4"': 0.541, '1"': 0.873, '1-1/4"': 1.528, '1-1/2"': 1.981, '2"': 3.246, '2-1/2"': 4.881, '3"': 7.475, '3-1/2"': 9.731, '4"': 12.692 }
   };
-  var TUBO_NOM = { EMT: 'EMT', PVC40: 'PVC Sch 40', PVC80: 'PVC Sch 80', GRS: 'GRS (rígido)', IMC: 'IMC', ENT: 'ENT (Smurf tube)', FMC: 'Flex metal conduit' };
+  var TUBO_NOM = { EMT: 'EMT', PVC40: 'PVC Sch 40', PVC80: 'PVC Sch 80', GRS: 'GRS (rígido)', IMC: 'IMC', ENT: 'ENT (Smurf tube)', FMC: 'Flex metal conduit', LFMC: 'Liquidtight (LFMC)' };
   var TAMANOS = ['3/8"', '1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"', '3-1/2"', '4"', '5"', '6"'];
 
   /* Tabla 1: qué parte del tubo se puede llenar según cuántos conductores. */
@@ -223,8 +228,11 @@
     GRS:   function (tam) { return tam.replace('-', ' ') + ' GRS CONDUIT'; },
     IMC:   function (tam) { return tam + ' IMC CONDUIT'; },                       // Edgar no lo tiene en el catálogo: llega por nombre
     ENT:   function (tam) { return tam.replace('-', ' ') + ' ENT CONDUIT'; },     // '1 1/4" ENT CONDUIT', con espacio
-    FMC:   function (tam) { return tam.replace('-', ' ') + ' FLEX. METAL CONDUIT'; }
+    FMC:   function (tam) { return tam.replace('-', ' ') + ' FLEX. METAL CONDUIT'; },
+    LFMC:  function (tam) { return tam.replace('-', ' ') + ' LIQUIDTIGHT CONDUIT'; }   // '1 1/4" LIQUIDTIGHT CONDUIT'
   };
+  /* Los conectores de liquidtight con el nombre de su catálogo: recto y de 90°. */
+  function itemConectorLT(tam, angulo) { return tam.replace('-', ' ') + (angulo ? ' LT. ANGLE CONNECTOR' : ' LT. STRAIGHT CONNECT.'); }
   function itemTubo(tipo, tam) { var f = ITEM_TUBO[tipo]; return f ? f(tam) : (tam + ' ' + tipo + ' CONDUIT'); }
   /* El hilo con el NOMBRE EXACTO de su catálogo (15/09), para que case por
      nombre sin depender de un alias:
@@ -270,6 +278,7 @@
     ajuste: ajuste, hilos: hilos, maxCkts: maxCkts,
     tierraPorAmps: tierraPorAmps, tierraPorFase: tierraPorFase, ampacidad: ampacidad, TIERRA_250_122: TIERRA_250_122,
     llenadoMixto: llenadoMixto, tamanoMinimoMixto: tamanoMinimoMixto, tamanosQueCabenMixto: tamanosQueCabenMixto,
+    itemConectorLT: itemConectorLT, TAMANOS: TAMANOS,
     itemTubo: itemTubo, itemHilo: itemHilo, factorUnidad: factorUnidad, factorAlias: factorAlias
   };
   raiz.NEC = NEC;
