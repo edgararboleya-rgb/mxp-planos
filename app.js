@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.A';
+  var APP_VERSION = 'v35.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2471,8 +2471,8 @@
       /* El nombre EXACTO del catálogo: 'BREAKER 1P 20A'. Hasta el 16/09 salía
          'Breaker 20A 1P' —los polos y los amperios al revés— y por eso los 49
          breakers de la E-2.2 llegaron al estimador SIN MAPEAR, en silencio.
-         Un 3P de rama todavía no existe en el catálogo: saldrá sin mapear, que
-         es la verdad, hasta que Edgar lo dé de alta. */
+         (23/09) Los 3P de rama ya existen (docs/sql/e35 del panel): a $0,
+         porque vienen en la cuota del gear, y solo con su tiempo de montaje. */
       var g = porCkt[k]; if (g.spare) return;            // va en un spare del panel: no se compra
       var kb = 'BREAKER ' + (g.poles || 1) + 'P ' + (g.amps || '?') + 'A';
       out[kb] = (out[kb] || 0) + g.mult;
@@ -24835,4 +24835,52 @@
       navigator.serviceWorker.register('sw.js').catch(function () {});
     }
   } catch (e) {}
+  /* (23/09) EL AVISO DE VERSIÓN NUEVA. Edgar: «todavía no tengo el 34W»,
+     «es que sigo en 34W». El service worker ya sirve lo nuevo en cuanto la app
+     se CARGA, pero en el iPad la app se queda abierta días y nunca se recarga.
+     Ahora mira un fichero chiquito, version.json (lo escribe tools/publica.sh
+     al publicar), al arrancar, cada vez que la app vuelve al frente y cada
+     30 minutos. Si dice otra versión, sale un aviso con un botón: guarda lo
+     que haya y recarga. No recarga sola: Edgar puede estar a mitad de algo. */
+  var versionAvisada = null;
+  function miraVersion() {
+    if (!/^https?:$/.test(location.protocol) || !window.fetch) return Promise.resolve(null);
+    return fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        var v = j && typeof j.v === 'string' ? j.v : null;
+        if (v && v !== APP_VERSION && v !== versionAvisada) { versionAvisada = v; pintaAvisoVersion(v); }
+        return v;
+      }).catch(function () { return null; });
+  }
+  function pintaAvisoVersion(v) {
+    var d = document.getElementById('avisoVersion');
+    if (!d) {
+      d = document.createElement('div'); d.id = 'avisoVersion';
+      d.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;background:#1f6f3f;color:#fff;' +
+        'padding:10px 14px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.25);font:14px/1.3 system-ui,sans-serif;display:flex;gap:10px;align-items:center;max-width:calc(100% - 32px)';
+      document.body.appendChild(d);
+    }
+    d.innerHTML = '<span>🆕 Hay una versión nueva de MXP Planos: <b>' + esc(v) + '</b> (tienes ' + esc(APP_VERSION) + ')</span>' +
+      '<button id="avisoVersionOk" style="background:#fff;color:#1f6f3f;border:0;border-radius:8px;padding:6px 12px;font-weight:600;cursor:pointer">Actualizar</button>' +
+      '<button id="avisoVersionNo" title="Luego" style="background:transparent;color:#fff;border:0;font-size:18px;cursor:pointer">×</button>';
+    document.getElementById('avisoVersionNo').onclick = function () { d.remove(); };
+    document.getElementById('avisoVersionOk').onclick = function () {
+      d.querySelector('span').textContent = 'Guardando y actualizando…';
+      var fin = function () { location.reload(); };
+      Promise.resolve().then(function () { try { return doAutosave(); } catch (e) {} })
+        .then(function () { return navigator.serviceWorker && navigator.serviceWorker.getRegistration ? navigator.serviceWorker.getRegistration() : null; })
+        .then(function (reg) { return reg && reg.update ? reg.update() : null; })
+        .then(fin, fin);
+    };
+  }
+  // solo en la app PUBLICADA: en la copia local no hay version.json (y el 404
+  // ensuciaba la consola de todas las pruebas). La prueba lo llama a mano.
+  var esPublicada = !/^(localhost|127\.|\[::1\]|0\.0\.0\.0)/.test(location.hostname || '');
+  if (esPublicada) {
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) miraVersion(); });
+    setInterval(miraVersion, 30 * 60 * 1000);
+    setTimeout(miraVersion, 4000);
+  }
+  window.__versionDbg = { mira: miraVersion, pinta: pintaAvisoVersion, actual: function () { return APP_VERSION; } };
 })();
