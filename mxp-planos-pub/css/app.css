@@ -1367,3 +1367,18 @@ td.pmAcc button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.
 .setFila .sfArch { color: var(--mp-muted); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setFila.sfGrande .sfPapel { color: var(--mp-ink); font-weight: 600; }
 .setCab { background: rgba(7,26,46,.06); font-weight: 700; padding: 5px 9px; font-size: 12px; }
+
+/* (25/09, Edgar) LAS CASILLAS DEL NÚMERO DE CIRCUITO. Se encogían hasta dejar
+   sitio para un solo dígito: «solo se ve el 1 a medias». Ancho fijo para dos
+   dígitos, número centrado, sin las flechitas del campo numérico, y si no
+   caben en la fila (un tubo de 6 circuitos) bajan a la línea siguiente. */
+.ckNumsRow { align-items: flex-start; }
+.ckNumsRow > label { padding-top: 7px; }
+.ckNums { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pbody input.ckNum, #toolMenu input.ckNum, input.ckNum {
+  flex: 0 0 auto; width: 3.1em; min-width: 3.1em; padding: 6px 2px; text-align: center;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+  -moz-appearance: textfield; appearance: textfield;
+}
+input.ckNum::-webkit-outer-spin-button, input.ckNum::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ckNums button { flex: 0 0 auto; }

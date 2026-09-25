@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.B';
+  var APP_VERSION = 'v35.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -8751,11 +8751,16 @@
            (15/09): «que ya automáticamente en propiedades tenga que poner los
            números de los ckts». De estos números salen los breakers. */
         var lstN = numsCirc(c);
-        html += '<div class="row"><label>' + (nCk > 1 ? 'Circuitos #' : 'Circuito #') + '</label>' +
+        /* (25/09, Edgar) «los números de los ckt no se ven bien en los cuadrados,
+           solo se ve el 1 a medias». Con flex:1 cada casilla se encogía hasta
+           quedarse con sitio para UN dígito (padding + borde + las flechitas
+           del number). Ahora van de ancho fijo para dos dígitos, centradas, sin
+           flechitas, y si no caben en una línea bajan a la siguiente. */
+        html += '<div class="row ckNumsRow"><label>' + (nCk > 1 ? 'Circuitos #' : 'Circuito #') + '</label><span class="ckNums">' +
           lstN.map(function (q, i) {
-            return '<input class="prCircN" data-i="' + i + '" type="number" min="1" max="84" style="flex:1;min-width:0" value="' + esc(String(q || '')) + '" title="Número del circuito ' + (i + 1) + ' de los ' + nCk + ' que van por este tubo">';
+            return '<input class="prCircN ckNum" data-i="' + i + '" type="number" inputmode="numeric" min="1" max="84" value="' + esc(String(q || '')) + '" title="Número del circuito ' + (i + 1) + ' de los ' + nCk + ' que van por este tubo">';
           }).join('') +
-          '<button id="prCircSig" class="small" title="Pasar al siguiente circuito libre del plano" style="flex:0 0 auto">› sig.</button></div>';
+          '<button id="prCircSig" class="small" title="Pasar al siguiente circuito libre del plano">› sig.</button></span></div>';
         html += '<div class="row"><label>Cuarto / carga</label><input id="prCircDesc" value="' + esc(c.desc || '') + '" placeholder="Master bedroom, Range, A/C…"></div>';
         html += filasCircuitoNEC(c);
         html += '<div class="row"><label>Breaker</label><select id="prCircAmps">' + BREAKERS.map(function (am) {
@@ -24331,11 +24336,11 @@
       var filaTipo = '<div class="row"><label>Tipo</label><select id="tmCircTipo" title="Ckt derivado es la corrida de rama; Feeder es la que alimenta un panel o un equipo">' +
         TIPO_CORRIDA.map(function (o) { return '<option value="' + o[0] + '"' + (tipoC === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div>' +
         '<div class="row"><label>Panel</label><input id="tmCircPanel" value="' + esc(dC.panel || '') + '" placeholder="MSP, A, B…"></div>' +
-        '<div class="row"><label>' + (nCkC > 1 ? 'Circuitos #' : 'Circuito #') + '</label>' +
+        '<div class="row ckNumsRow"><label>' + (nCkC > 1 ? 'Circuitos #' : 'Circuito #') + '</label><span class="ckNums">' +
         lstC.map(function (q, i) {
-          return '<input class="tmCircN" data-i="' + i + '" type="number" min="1" max="84" style="flex:1;min-width:0" value="' + esc(String(q || '')) + '">';
+          return '<input class="tmCircN ckNum" data-i="' + i + '" type="number" inputmode="numeric" min="1" max="84" value="' + esc(String(q || '')) + '">';
         }).join('') +
-        '<button id="tmCircSig" class="small" title="Pasar al siguiente circuito libre del plano" style="flex:0 0 auto">› sig.</button></div>' +
+        '<button id="tmCircSig" class="small" title="Pasar al siguiente circuito libre del plano">› sig.</button></span></div>' +
         '<div class="row"><label>Color</label><div class="swRow" id="tmCircColor">' +
         COLOR_PRESETS.map(function (cc) { return '<span class="sw' + ((dC.color || '#14161a') === cc[0] ? ' cur' : '') + '" data-c="' + cc[0] + '" title="' + cc[1] + '" style="background:' + cc[0] + '"></span>'; }).join('') +
         '</div></div>';
