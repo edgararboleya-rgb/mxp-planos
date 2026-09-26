@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.C';
+  var APP_VERSION = 'v35.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10152,7 +10152,11 @@
           var col = RUTA_COLOR[mat] || '#d62828';
           out.push({
             k: k, set: st.nom, subj: it.subj, mat: mat, grupo: grupo,
-            nom: mat ? (it.subj + ' ' + mat) : it.subj,
+            /* (26/09) una tool de largo que ya sabe su renglón del catálogo (la
+               DEMOLICIÓN: «DEMO - Conduit Run (per LF)») va con ese nombre al
+               estimador y no se confunde con un tubo nuevo en la lista */
+            item: it.item || null,
+            nom: st.nom === 'Demolition' ? 'DEMO · ' + it.subj : (mat ? (it.subj + ' ' + mat) : it.subj),
             estilo: RUTA_FAM[mat] || 'rutaRig',
             color: grupo === 'feeder' ? rutaOscuro(col) : col,
             codigo: esCodigo(it.codigo) ? it.codigo : CODIGO_DEFECTO
@@ -10202,7 +10206,8 @@
      aluminio compacto XHHW solo del 1/0 para arriba, que es lo que Edgar compra. */
   function rutaMat(r) { return r && r.mat === 'AL' ? 'AL' : 'CU'; }
   function calibresRuta(r) { return rutaMat(r) === 'AL' ? window.NEC.CALIBRES_AL : window.NEC.CALIBRES; }
-  function rutaNecTipo(a) { var t = rutaTipo(a && a.ruta && a.ruta.tipo); return t ? (RUTA_NEC_TIPO[t.mat] || null) : null; }
+  // una ruta de DEMOLICIÓN no lleva tamaño ni hilos: se quita lo que hay, no se compra tubo (26/09)
+  function rutaNecTipo(a) { var t = rutaTipo(a && a.ruta && a.ruta.tipo); return (t && !t.item) ? (RUTA_NEC_TIPO[t.mat] || null) : null; }
   /* Los hilos de la ruta: fases + neutro + tierra, por juego. */
   function hilosRuta(r) {
     var f = Math.max(0, Math.min(6, Math.round(+r.fases) || 0));
@@ -14495,7 +14500,7 @@
     // 08-ROUGH, el low voltage a 13-LV — lo que dice la biblioteca
     Object.keys(rt).forEach(function (k) {
       var tR = rutaTipo(k); if (!tR) return;
-      add(tR.nom, Math.ceil(rt[k] / 12), 'FT', tR.codigo);
+      add(tR.item || tR.nom, Math.ceil(rt[k] / 12), 'FT', tR.codigo);
     });
     // las rutas con hilos: el tubo exacto y el conductor, con el código de su grupo (feeder → 06-FEED)
     Object.keys(rp).forEach(function (k) { var i = k.indexOf('\u0001'); add(k.slice(i + 1), Math.ceil(rp[k] / 12), 'FT', k.slice(0, i)); });
