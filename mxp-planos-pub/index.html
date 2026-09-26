@@ -421,6 +421,25 @@
     </div>
   </div>
 
+  <!-- ======= AGREGAR AL TAKEOFF A MANO (v35.H): buscar en la biblioteca, el catálogo y las recetas ======= -->
+  <div id="manoBox" class="oculto">
+    <div id="manoCab">
+      <span id="manoTit">AGREGAR AL TAKEOFF A MANO</span>
+      <button id="manoCerrar" title="Cerrar" data-ico="close"></button>
+    </div>
+    <div id="manoFiltro"><input type="search" id="manoTxt" placeholder="Busca: emt 1/2, quad, 4x4, smoke, disconnect…" autocomplete="off"></div>
+    <div id="manoLista"></div>
+    <div id="manoPie">
+      <div id="manoElegido" class="small">Elige una fila de la lista</div>
+      <div id="manoFila2">
+        <input id="manoCant" inputmode="decimal" placeholder="Cantidad — 16x10 = 160" autocomplete="off" disabled>
+        <span id="manoUni" class="muted small"></span>
+        <button id="manoOk" disabled>Agregar</button>
+      </div>
+    </div>
+    <div id="manoYa"></div>
+  </div>
+
   <!-- ======= LISTA DE MARCAS (Markups List) — panel flotante, no modal: se queda abierto mientras recorres el plano ======= -->
   <div id="marcasBox" class="oculto">
     <div id="marcasCab">

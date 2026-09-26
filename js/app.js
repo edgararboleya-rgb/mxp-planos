@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.G';
+  var APP_VERSION = 'v35.H';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10076,6 +10076,185 @@
     }
   }
   enganchaTlib();
+
+  /* ================= AGREGAR AL TAKEOFF A MANO (v35.H, 26/09) =================
+     Edgar: «donde dice poner a mano, que quisiera agregar: lo busco, pongo emt
+     y me salen las opciones que se llamen similares, ahí selecciono la que
+     quiero, le pongo la cantidad y le doy aceptar; que se nutra de la
+     biblioteca del takeoff». Y su caso: 16 devices que se reubican, con 10 ft
+     de EMT de 1/2" cada uno.
+     Busca a la vez en la biblioteca de takeoff (los tools de Bluebeam, los
+     quads con su receta, cajas y luminarias), en el catálogo del estimador
+     (el tubo por medida, el cable…) y en las recetas. Lo elegido entra como
+     una categoría del Count con su cantidad A MANO: lo mismo que ya viajaba
+     al estimador, se guarda con el proyecto, se deshace con Ctrl+Z y sale en
+     el CSV. La cantidad se SUMA a lo que hubiera, y «16x10» son 160. */
+  var manoCands = [], manoSel = null, manoCatalogo = null, manoRecetas = null;
+  function manoUnidad(u) { var x = String(u || '').toUpperCase(); if (/^(MLF|LF|FT)$/.test(x)) return 'FT'; if (!x || x === 'E' || x === 'EA') return 'EA'; return x; }
+  function manoUnidadTxt(u) { return u === 'FT' ? 'pies' : u === 'EA' ? 'piezas' : u; }
+  function manoLlano(t) { var u = String(t || '').toUpperCase(); try { u = u.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {} return u.replace(/\s+/g, ' ').trim(); }
+  // «16x10», «16 × 10», «16*10» → 160; «12.5» → 13 (la cantidad a mano va en enteros)
+  function manoCantidad(txt) {
+    var t = String(txt || '').replace(/,/g, '.').replace(/\s+/g, '');
+    if (!t) return 0;
+    var partes = t.split(/[x×*]/i), n = 1;
+    for (var i = 0; i < partes.length; i++) { var v = parseFloat(partes[i]); if (!(v > 0)) return 0; n *= v; }
+    return Math.ceil(n - 1e-9);
+  }
+  function manoCargaListas() {
+    var dbg = window.__listasDbg || null;
+    var pCat = manoCatalogo ? Promise.resolve(manoCatalogo)
+      : (dbg && Array.isArray(dbg.catalogoU)) ? Promise.resolve(dbg.catalogoU.slice())
+      : (function () { var pr; try { pr = (SB && typeof fetch !== 'undefined' && sbAuth()) ? sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo,seccion&order=orden') : Promise.resolve([]); } catch (e) { pr = Promise.resolve([]); } return pr.then(function (r) { return Array.isArray(r) ? r : []; }, function () { return []; }); })();
+    return Promise.all([pCat, listaDe('recetas')]).then(function (x) {
+      manoCatalogo = (x[0] || []).filter(function (r) { return r && r.item; });
+      manoRecetas = x[1] || [];
+    });
+  }
+  // la lista de todo lo que se puede agregar, sin repetir un item del catálogo que ya trae la biblioteca
+  function manoTodos() {
+    var out = [], ya = {};
+    tlibSets().forEach(function (st) {
+      st.items.forEach(function (it) {
+        if (it.descartado) return;
+        if (it.tipo === 'largo' && !it.item) return;   // una ruta sin item se TRAZA, no se escribe
+        var det = st.nom + (it.receta ? ' · receta: ' + it.receta : it.item && manoLlano(it.item) !== manoLlano(it.subj) ? ' · ' + it.item.replace(/\s+/g, ' ') : '');
+        out.push({ src: 'lib', nom: it.subj, det: det, unidad: it.tipo === 'largo' ? 'FT' : manoUnidad(it.unidad), set: st, it: it });
+        ya[manoLlano(it.subj)] = 1; if (it.item) ya[manoLlano(it.item)] = 1;
+      });
+    });
+    (manoCatalogo || []).forEach(function (r) {
+      var k = manoLlano(r.item); if (ya[k]) return; ya[k] = 1;
+      out.push({ src: 'cat', nom: String(r.item).replace(/\s+/g, ' ').trim(), item: r.item, codigo: r.codigo || '', det: 'catálogo' + (r.seccion ? ' · ' + r.seccion : '') + (r.unidad ? ' · ' + r.unidad : ''), unidad: manoUnidad(r.unidad) });
+    });
+    (manoRecetas || []).forEach(function (n) { out.push({ src: 'rec', nom: n, det: 'receta · punto completo (sin su tubo ni su cable)', unidad: 'EA' }); });
+    return out;
+  }
+  function manoBusca(q) {
+    var pal = manoLlano(q).split(' ').filter(Boolean);
+    if (!pal.length) return [];
+    var res = manoTodos().filter(function (c) { var t = manoLlano(c.nom + ' ' + c.det); return pal.every(function (w) { return t.indexOf(w) >= 0; }); });
+    var n0 = manoLlano(q);
+    res.sort(function (a, b) {
+      var pa = manoLlano(a.nom).indexOf(pal[0]) === 0 ? 0 : 1, pb = manoLlano(b.nom).indexOf(pal[0]) === 0 ? 0 : 1;
+      var ea = manoLlano(a.nom) === n0 ? 0 : 1, eb = manoLlano(b.nom) === n0 ? 0 : 1;
+      return (ea - eb) || (pa - pb) || (a.nom.length - b.nom.length) || a.nom.localeCompare(b.nom);
+    });
+    return res.slice(0, 60);
+  }
+  // la categoría del proyecto que corresponde a lo elegido (la que ya estaba, o una nueva)
+  function manoCatDe(c) {
+    var cats = catsCount(), hallada = null;
+    if (c.src === 'lib' && c.it.tipo !== 'largo') {
+      hallada = tlibEnProyecto()[c.it.subj.toUpperCase()] || null;
+      if (!hallada) { hallada = tlibAnade([{ set: c.set, it: c.it }])[0] || null; if (hallada) hallada.aMano = true; }
+      return hallada;
+    }
+    var item = c.src === 'lib' ? c.it.item : c.src === 'cat' ? c.item : '';
+    cats.forEach(function (k) {
+      if (hallada || k.tablero) return;
+      if (c.src === 'rec') { if (k.receta === c.nom && !k.alias) hallada = k; return; }
+      if (manoLlano(k.alias || k.nom) === manoLlano(item) && !k.receta) hallada = k;
+    });
+    if (hallada) return hallada;
+    var nueva = c.src === 'rec' ? nuevaCatCount(c.nom, { receta: c.nom, codigo: '10-DEV' })
+      : c.src === 'lib' ? nuevaCatCount(c.it.subj, { alias: item, item: item, unidad: 'FT', codigo: c.it.codigo, set: c.set.nom, color: c.it.color })
+      : nuevaCatCount(c.nom, { alias: item, item: item, unidad: c.unidad, codigo: c.codigo });
+    nueva.aMano = true;
+    return nueva;
+  }
+  function manoAgrega(txt) {
+    var c = manoSel; if (!c) { setHint('Elige primero qué agregar de la lista'); return null; }
+    var n = manoCantidad(txt);
+    if (!(n > 0)) { setHint('Pon una cantidad (por ejemplo 16, o 16x10 para 16 de a 10)'); return null; }
+    pushUndo();
+    var cat = manoCatDe(c);
+    if (!cat) { popUndoVacio(); setHint('No se pudo crear la categoría'); return null; }
+    cat.manual = (cat.manual > 0 ? cat.manual : 0) + n;
+    refresh(); refreshCounts(); scheduleAutosave();
+    setHint('✔ ' + cat.nom + ': +' + n + ' ' + manoUnidadTxt(c.unidad) + ' a mano' + (cat.manual !== n ? ' (ya van ' + cat.manual + ')' : '') + ' — va al takeoff');
+    var ci = $('#manoCant'); if (ci) ci.value = '';
+    pintaManoYa(); pintaManoCalc();
+    return cat;
+  }
+  function manoQuita(id) {
+    var c = catCount(id); if (!c) return;
+    pushUndo();
+    var marcas = (conteoDelProyecto()[id] || 0) - (c.manual > 0 ? c.manual : 0);
+    delete c.manual;
+    if (c.aMano && marcas <= 0) state.countCats = catsCount().filter(function (q) { return q.id !== id; });
+    refresh(); refreshCounts(); scheduleAutosave();
+    setHint('Quitado lo puesto a mano de «' + c.nom + '»');
+    pintaManoYa();
+  }
+  function pintaManoLista() {
+    var L = $('#manoLista'); if (!L) return;
+    var q = ($('#manoTxt') || {}).value || '';
+    manoCands = manoBusca(q);
+    var h = '';
+    if (!String(q).trim()) h = '<div class="bMuted">Escribe lo que buscas: <b>emt 1/2</b>, <b>quad</b>, <b>4x4</b>, <b>smoke</b>, <b>disconnect</b>… Salen los tools de la biblioteca, los ítems del catálogo y las recetas que se llamen parecido.' +
+      (manoCatalogo && !manoCatalogo.length ? '<br><br>Sin sesión del estimador solo sale la biblioteca: entra con tu cuenta para buscar también en el catálogo y las recetas.' : '') + '</div>';
+    else if (!manoCands.length) h = '<div class="bMuted">Nada se llama parecido a «' + esc(q) + '». Prueba con menos palabras.</div>';
+    manoCands.forEach(function (c, i) {
+      var chip = c.src === 'lib' ? 'biblioteca' : c.src === 'cat' ? 'catálogo' : 'receta';
+      h += '<div class="mnFila' + (manoSel === c ? ' on' : '') + '" data-i="' + i + '"><span class="mnChip mn' + c.src + '">' + chip + '</span>' +
+        '<span class="mnTxt"><span class="mnNom">' + esc(c.nom) + '</span><span class="mnDet">' + esc(c.det) + ' · en ' + manoUnidadTxt(c.unidad) + '</span></span></div>';
+    });
+    L.innerHTML = h;
+  }
+  function pintaManoCalc() {
+    var ci = $('#manoCant'), u = $('#manoUni'), ok = $('#manoOk'), el = $('#manoElegido');
+    if (!ci) return;
+    ci.disabled = !manoSel; if (ok) ok.disabled = !manoSel;
+    if (el) el.innerHTML = manoSel ? 'Agregar: <b>' + esc(manoSel.nom) + '</b>' : 'Elige una fila de la lista';
+    var n = manoCantidad(ci.value);
+    if (u) u.textContent = manoSel ? (n > 0 && /[x×*]/i.test(ci.value) ? '= ' + n + ' ' : '') + manoUnidadTxt(manoSel.unidad) : '';
+  }
+  function pintaManoYa() {
+    var Y = $('#manoYa'); if (!Y) return;
+    var cats = catsCount().filter(function (c) { return c.manual > 0 && !c.tablero; });
+    if (!cats.length) { Y.innerHTML = ''; return; }
+    Y.innerHTML = '<div class="mnYaTit">Puesto a mano en este proyecto</div>' + cats.map(function (c) {
+      var u = manoUnidad(c.unidad); if (c.receta) u = 'EA';
+      return '<div class="mnYa"><span class="mnNom">' + esc(c.nom) + '</span><span class="mnYaN">' + c.manual + ' ' + manoUnidadTxt(u) + '</span>' +
+        '<button type="button" class="mnQuita" data-id="' + esc(c.id) + '" title="Quitar lo puesto a mano">✕</button></div>';
+    }).join('');
+  }
+  function abreMano(txt) {
+    var b = $('#manoBox'); if (!b) return Promise.resolve();
+    b.classList.remove('oculto');
+    var i = $('#manoTxt'); if (i && txt != null) i.value = txt;
+    manoSel = null;
+    pintaManoLista(); pintaManoCalc(); pintaManoYa();
+    if (i && !document.body.classList.contains('touch')) { try { i.focus(); } catch (e) {} }
+    return manoCargaListas().then(function () { pintaManoLista(); });
+  }
+  function cierraMano() { var b = $('#manoBox'); if (b) b.classList.add('oculto'); }
+  function manoElige(i) {
+    manoSel = manoCands[i] || null;
+    pintaManoLista(); pintaManoCalc();
+    var ci = $('#manoCant'); if (ci && manoSel) { try { ci.focus(); } catch (e) {} }
+  }
+  (function enganchaMano() {
+    var b = $('#manoBox'); if (!b) return;
+    arrastraPanel($('#manoCab'), b);
+    var bc = $('#manoCerrar'); if (bc) bc.addEventListener('click', cierraMano);
+    var i = $('#manoTxt');
+    if (i) {
+      i.addEventListener('input', function () { manoSel = null; pintaManoLista(); pintaManoCalc(); });
+      i.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && manoCands.length) { ev.preventDefault(); manoElige(0); } if (ev.key === 'Escape') cierraMano(); ev.stopPropagation(); });
+    }
+    var L = $('#manoLista'); if (L) L.addEventListener('click', function (ev) { var f = ev.target.closest && ev.target.closest('.mnFila'); if (f) manoElige(+f.dataset.i); });
+    var ci = $('#manoCant');
+    if (ci) {
+      ci.addEventListener('input', pintaManoCalc);
+      ci.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); manoAgrega(ci.value); } if (ev.key === 'Escape') cierraMano(); ev.stopPropagation(); });
+    }
+    var ok = $('#manoOk'); if (ok) ok.addEventListener('click', function () { manoAgrega(($('#manoCant') || {}).value); });
+    var Y = $('#manoYa'); if (Y) Y.addEventListener('click', function (ev) { var q = ev.target.closest && ev.target.closest('.mnQuita'); if (q) manoQuita(q.dataset.id); });
+  })();
+  window.__manoDbg = { abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
+    elige: manoElige, agrega: manoAgrega, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
   window.__tlibDbg = { abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
   /* ==================================================================
@@ -24513,7 +24692,7 @@
       html += '<div class="tmPie">Vale para paredes, cables y líneas o polilíneas abiertas. Una superficie cerrada no se recorta, pero sí sirve de borde.</div>';
     } else if (kind === 'count') {
       html += '<div class="tmHead">¿Qué estás contando?</div>';
-      var catsM = catsCount();
+      var catsM = catsCount(), cAlM = catCount(catActiva) || catsM[0];
       if (!catsM.length) html += '<div class="tmItem" data-k="__nueva"><span>Empezar a contar (crea la primera categoría)</span></div>';
       catsM.forEach(function (c) {
         var nH = 0;
@@ -24529,6 +24708,9 @@
          bloques —lo que trae el plano, la categoría activa, y ya— y todo lo
          demás debajo de «Más…», que se abre solo si hace falta. Nada se
          quitó: se guardó. */
+      // (v35.H) agregar al takeoff a mano: buscar en la biblioteca, el catálogo y las recetas, y poner la cantidad
+      html += '<div class="tmItem" data-k="__manual"><span>➕ <b>Agregar al takeoff</b>: buscar y poner <b>cantidad a mano</b>…' +
+        (cAlM && cAlM.manual > 0 ? ' <span class="muted">· ' + esc(cAlM.nom) + ': ' + cAlM.manual + ' a mano + las marcas</span>' : ' <span class="muted">· tubo, cajas, devices, recetas…</span>') + '</span></div>';
       html += '<div class="tmHead">Lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__leyenda"><span><b>Leer la leyenda</b> del plano… <span class="muted">· saca las categorías con su nombre</span></span></div>';
       html += '<div class="tmItem" data-k="__cerebro"><span><b>Cuéntame los devices</b> con el cerebro… <span class="muted">· marca cada símbolo, tú revisas</span></span></div>';
@@ -24541,8 +24723,6 @@
           (cAl && cAl.receta ? ' <span class="muted">· ' + esc(cAl.receta) + '</span>' : ' <span class="muted">· hoy manda solo la pieza</span>') + '</span></div>';
         if (cAl && cAl.receta) html += '<div class="tmItem" data-k="__recetafull"><span>' + (cAl.recetaFull ? '☑' : '☐') +
           ' Que la receta venga <b>con su tubo y su cable</b> <span class="muted">· para stubs vacíos, donde el tubo ES el punto</span></span></div>';
-        html += '<div class="tmItem" data-k="__manual"><span>Poner <b>cantidad a mano</b>…' +
-          (cAl && cAl.manual > 0 ? ' <span class="muted">· ' + cAl.manual + ' a mano + las marcas</span>' : ' <span class="muted">· para un conteo que ya tienes hecho</span>') + '</span></div>';
         html += '<div class="tmItem" data-k="__nueva"><span>Nueva categoría…</span></div>';
         html += '<div class="tmItem" data-k="__borra"><span>Borrar la activa…</span></div>';
       }
@@ -24799,7 +24979,7 @@
           if (k === '__recetafull') { tm.hidden = true; recetaFullDeCat(catActivaSegura().id); showToolMenu('count', anchor); return; }
           if (k === '__color') { tm.hidden = true; catActivaSegura(); showToolMenu('countestilo', anchor); return; }
           if (k === '__codigo') { tm.hidden = true; catActivaSegura(); showToolMenu('countcodigo', anchor); return; }
-          if (k === '__manual') { tm.hidden = true; manualDeCat(catActivaSegura().id); return; }
+          if (k === '__manual') { tm.hidden = true; abreMano(''); return; }
           if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
           if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
           catActiva = k;

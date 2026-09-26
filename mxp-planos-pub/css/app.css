@@ -1382,3 +1382,50 @@ td.pmAcc button.danger { color: var(--mp-danger); border-color: rgba(179,56,59,.
 }
 input.ckNum::-webkit-outer-spin-button, input.ckNum::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .ckNums button { flex: 0 0 auto; }
+
+/* ======= AGREGAR AL TAKEOFF A MANO (v35.H) ======= */
+#manoBox {
+  position: fixed; left: 260px; top: 84px; z-index: 62;
+  width: 460px; max-width: calc(100vw - 16px);
+  height: 520px; max-height: calc(100vh - 96px);
+  display: flex; flex-direction: column;
+  background: var(--mp-card); border: 1px solid var(--mp-line); border-radius: 14px;
+  box-shadow: 0 2px 6px rgba(7,26,46,.05), 0 20px 44px -14px rgba(7,26,46,.35); overflow: hidden; resize: both;
+}
+#manoBox.oculto { display: none; }
+#manoCab { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line); cursor: move; touch-action: none; user-select: none; }
+#manoTit { font-weight: 600; font-size: 12.5px; flex: 1; letter-spacing: .11em; color: var(--mp-ink); }
+#manoCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
+#manoFiltro { padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
+#manoFiltro input, #manoFila2 input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 13px; background: #fff; }
+#manoFiltro input:focus, #manoFila2 input:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
+#manoLista { flex: 1; overflow: auto; min-height: 90px; }
+#manoLista .bMuted { color: var(--mp-ink-2); font-size: 12px; padding: 12px; line-height: 1.5; }
+#manoLista .mnFila { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--mp-line); font-size: 12.5px; }
+#manoLista .mnFila:hover { background: var(--mp-sky-2); }
+#manoLista .mnFila.on { background: var(--mp-sky-2); box-shadow: inset 3px 0 0 var(--mp-blue); }
+.mnChip { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--mp-line); color: var(--mp-ink-2); background: var(--mp-card); }
+.mnChip.mnlib { color: #0b5cad; border-color: #9cc3ea; }
+.mnChip.mncat { color: #6b4e16; border-color: #d8c08a; }
+.mnChip.mnrec { color: #1f7a3a; border-color: #9fd3ae; }
+#manoLista .mnTxt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+#manoLista .mnNom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#manoLista .mnDet { font-size: 10.5px; color: var(--mp-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#manoPie { padding: 7px 9px; border-top: 1px solid var(--mp-line); background: var(--mp-sky-2); display: flex; flex-direction: column; gap: 6px; }
+#manoElegido { color: var(--mp-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#manoFila2 { display: flex; gap: 8px; align-items: center; }
+#manoFila2 input { flex: 1; min-width: 0; }
+#manoFila2 #manoUni { flex: none; min-width: 3.5em; }
+#manoFila2 button { border: 1px solid var(--mp-blue); background: var(--mp-blue); color: #fff; border-radius: 8px; padding: 7px 14px; font-size: 12.5px; cursor: pointer; flex: none; }
+#manoFila2 button:disabled, #manoFila2 input:disabled { opacity: .45; cursor: default; }
+#manoYa { max-height: 32%; overflow: auto; border-top: 1px solid var(--mp-line); }
+#manoYa .mnYaTit { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--mp-ink-2); padding: 6px 10px 2px; }
+#manoYa .mnYa { display: flex; align-items: center; gap: 8px; padding: 3px 10px; font-size: 12px; }
+#manoYa .mnNom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#manoYa .mnYaN { flex: none; font-variant-numeric: tabular-nums; color: var(--mp-ink); }
+#manoYa .mnQuita { flex: none; border: 1px solid var(--mp-line); background: var(--mp-card); border-radius: 6px; width: 22px; height: 22px; cursor: pointer; padding: 0; color: var(--mp-ink-2); }
+#manoYa .mnQuita:hover { border-color: #c0392b; color: #c0392b; }
+body.touch #manoBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 70vh; }
+body.touch #manoCab button { width: 34px; height: 34px; }
+body.touch #manoLista .mnFila { padding: 9px 10px; font-size: 13.5px; }
+body.touch #manoFiltro input, body.touch #manoFila2 input { font-size: 16px; }
