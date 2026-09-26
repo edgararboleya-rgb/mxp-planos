@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.E';
+  var APP_VERSION = 'v35.F';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9459,6 +9459,7 @@
       if (extra.unidad) c.unidad = String(extra.unidad).slice(0, 8);
       if (extra.codigo && esCodigo(extra.codigo)) c.codigo = extra.codigo;
       if (extra.color && /^#[0-9a-f]{6}$/i.test(extra.color)) c.color = extra.color;
+      if (extra.receta) c.receta = String(extra.receta).slice(0, 80);   // el tool de la biblioteca que ES un punto completo (el quad)
     }
     a.push(c);
     return c;
@@ -9920,10 +9921,10 @@
   }
   function tlibFiltroTxt() { var i = $('#tlibTxt'); return i ? String(i.value || '').trim().toUpperCase() : ''; }
   function tlibPasaFiltro(it, q, soloCat) {
-    if (soloCat && !it.item) return false;
+    if (soloCat && !it.item && !it.receta) return false;
     if (!q) return true;
     var pal = q.split(/\s+/);
-    var txt = (it.subj + ' ' + (it.item || '') + ' ' + (it.material || '')).toUpperCase();
+    var txt = (it.subj + ' ' + (it.item || '') + ' ' + (it.receta || '') + ' ' + (it.material || '')).toUpperCase();
     return pal.every(function (w) { return txt.indexOf(w) >= 0; });
   }
   function pintaTlib() {
@@ -9957,6 +9958,7 @@
         if (it.descartado) det = 'descartado — equipo que ya no se usa (Edgar, 14/09)';
         else if (it.tipo === 'largo') det = esRutaTlib(st.nom, it) ? 'ruta de conduit — toca la fila y trázala sobre el plano' : 'largo · sin material — no se cotiza por tipo';
         else if (ya) det = 'ya en el proyecto';
+        else if (it.receta) det = 'receta: ' + esc(it.receta) + ' · punto completo (sin su tubo ni su cable, que los mides tú)';
         else if (it.item) det = (it.item.replace(/\s+/g, ' ').toUpperCase() === it.subj.replace(/\s+/g, ' ').toUpperCase() ? 'en el catálogo' : 'catálogo: ' + esc(it.item.replace(/\s+/g, ' '))) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.via === 'propuesto' ? ' · propuesto' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         else det = 'sin item en el catálogo' + (it.sugerido ? ' · ¿' + esc(it.sugerido) + '?' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
         var tRt = it.tipo === 'largo' ? rutaTipoDeTlib(st.nom, it) : null;
@@ -9995,7 +9997,7 @@
       if (!pr || !pr.it || pr.it.tipo === 'largo' || pr.it.descartado) return;
       var k = pr.it.subj.toUpperCase();
       if (enP[k]) return;
-      var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color, codigo: pr.it.codigo });
+      var c = nuevaCatCount(pr.it.subj, { alias: pr.it.subj, set: pr.set.nom, item: pr.it.item, unidad: pr.it.unidad, color: pr.it.color, codigo: pr.it.codigo, receta: pr.it.receta });
       enP[k] = c; nuevas.push(c);
     });
     return nuevas;
