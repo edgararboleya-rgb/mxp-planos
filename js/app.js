@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.D';
+  var APP_VERSION = 'v35.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -15538,13 +15538,15 @@
     };
     img.src = url;
   }
-  function setBg2(url, pxW, pxH, paperW, paperH) {
+  function setBg2(url, pxW, pxH, paperW, paperH, pdf, hoja) {
     var base = state.bg;
+    ovPdf = pdf && pdf.doc ? pdf : null;   // (26/09) para alinear por los ejes
     var w = base ? base.w : 600;
     // si el base ya tiene escala y el overlay sabe su tamaño de papel, entran a la MISMA escala
     if (paperW && base && base.scaleFactor) w = paperW * base.scaleFactor;
     state.bg2 = { url: url, x: base ? base.x : 0, y: base ? base.y : 0, w: w, h: w * pxH / pxW, opacity: 0.7 };
     if (paperW) { state.bg2.paperW = paperW; state.bg2.paperH = paperH; }
+    if (hoja !== undefined && hoja !== null) state.bg2.hoja = hoja;   // salió de otra hoja del set
     // teñir: base AZUL, overlay ROJO
     if (base && !base.origUrl) {
       base.origUrl = base.url;
@@ -15552,7 +15554,7 @@
     }
     tintTo(url, 198, 40, 30, function (u) { if (state.bg2) { state.bg2.url = u; renderBg(); } });
     renderBg(); updateOvUI(); scheduleAutosave();
-    setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca Alinear para cuadrarlo por 2 puntos de control.');
+    setHint('🔴 Overlay cargado (ROJO) sobre el plano base (AZUL). Toca «Por los ejes» para cuadrarlo solo, o Alinear (2 puntos).');
   }
   // 🧲 SOLDAR ARMADO: tras arrastrar cada cuarto (pieza) a su sitio, este
   // botón une todo: fusiona las paredes dobladas donde dos piezas empatan,
@@ -17343,7 +17345,19 @@
 
   $('#btnOv').addEventListener('click', function () {
     if (!state.bg) { uiAlert('Primero sube el plano BASE con "Subir Fondo". Después cargas el plano a comparar.'); return; }
-    $('#fileBg2').click();
+    // (26/09) lo normal es comparar con OTRA HOJA DEL SET (demolición contra nuevo, fuerza contra luces)
+    var otras = [];
+    (state.sheets || []).forEach(function (sh, i) { if (i !== state.curSheet && fondoDeHoja(i)) otras.push(i); });
+    if (!otras.length) { $('#fileBg2').click(); return; }
+    uiPrompt('¿Con qué hoja comparas? Escribe su número de la lista, o déjalo vacío para subir un archivo:\n\n' +
+      otras.map(function (i, k) { var sh = state.sheets[i]; return (k + 1) + ') ' + ((sh.no || '') + ' ' + (sh.name || '')).trim(); }).join('\n'), '', function (v) {
+      if (v === null) return;
+      var k = parseInt(v, 10);
+      if (!(k >= 1 && k <= otras.length)) { $('#fileBg2').click(); return; }
+      var i = otras[k - 1], bg = fondoDeHoja(i);
+      setBg2(bg.url, bg.w, bg.h, bg.paperW, bg.paperH, null, i);
+      pdfDeFondo(i, function () {});   // se va abriendo su PDF para cuando toque alinear
+    });
   });
   $('#fileBg2').addEventListener('change', function () {
     var f = this.files[0]; this.value = '';
@@ -17369,6 +17383,7 @@
   });
   // alineación por 2 puntos de control (los ejes del edificio)
   var alignPts = null;
+  (function () { var b = $('#btnOvEjes'); if (b) b.addEventListener('click', alineaPorEjes); })();
   $('#btnOvAlign').addEventListener('click', function () {
     if (!state.bg2) return;
     alignPts = [];
@@ -17398,6 +17413,229 @@
     renderBg(); setTool('select'); scheduleAutosave();
     setHint('✔ Overlay alineado — donde el ROJO no cuadra con el AZUL, algo cambió entre pisos.');
   }
+
+  /* ═══════════ 🎯 ALINEAR POR LOS EJES (Edgar, 26/09) ═══════════
+     «podríamos poner un plano sobre otro tomando de referencia las líneas de
+     control que se repitan en un plano y en otro». Los ejes del edificio (A, B,
+     C… / 1, 2, 3…) son los mismos en la hoja de demolición y en la de trabajo
+     nuevo, en la de fuerza y en la de luces, en la mecánica y en la eléctrica.
+
+     Cómo se reconoce un eje, sin adivinar: una línea LARGA (la del eje, casi
+     siempre punteada: sus trozos se juntan) con un RÓTULO corto (A, B, 1, 2,
+     A.1…) en una de sus PUNTAS — la burbuja. Una pared también es larga, pero
+     no lleva una letra sola en la punta; el nombre de un cuarto es texto, pero
+     no está en la punta de una línea que cruza el plano. Se exigen las dos cosas.
+
+     Con los ejes de las dos hojas, los que tienen el MISMO rótulo son el mismo
+     sitio. Se ajusta la escala y la posición con TODOS a la vez (mínimos
+     cuadrados), se dice cuánto se aparta el peor, y si un eje no cuadra con los
+     demás se deja fuera y se nombra: se movió, o se renombró, entre hojas.
+     Solo escala y posición: dos hojas del mismo set no vienen giradas. */
+  function datosDePaginaPdf(doc, pageNum) {
+    return doc.getPage(pageNum).then(function (page) {
+      var vp = page.getViewport({ scale: 1 });
+      return Promise.all([page.getOperatorList(), page.getTextContent()]).then(function (a) {
+        var OPS = pdfjsLib.OPS, U = pdfjsLib.Util, fn = a[0].fnArray || [], ar = a[0].argsArray || [];
+        var ctm = [1, 0, 0, 1, 0, 0], pila = [], segs = [], curvas = [];
+        var T = function () { return U.transform(vp.transform, ctm); };
+        var ap = function (m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; };
+        for (var i = 0; i < fn.length; i++) {
+          var o = fn[i], g = ar[i];
+          if (o === OPS.save) pila.push(ctm.slice());
+          else if (o === OPS.restore) { if (pila.length) ctm = pila.pop(); }
+          else if (o === OPS.transform) ctm = U.transform(ctm, g);
+          else if (o === OPS.paintFormXObjectBegin) { pila.push(ctm.slice()); if (g && g[0]) ctm = U.transform(ctm, g[0]); }
+          else if (o === OPS.paintFormXObjectEnd) { if (pila.length) ctm = pila.pop(); }
+          else if (o === OPS.constructPath && g) {
+            var ops = g[0] || [], xs = g[1] || [], k = 0, m = T(), cur = null, ini = null;
+            var cb = null, nCur = 0;   // la caja de lo CURVO del trazo: las burbujas de los ejes son círculos
+            var caja = function (q) { if (!cb) cb = [q[0], q[1], q[0], q[1]]; else { cb[0] = Math.min(cb[0], q[0]); cb[1] = Math.min(cb[1], q[1]); cb[2] = Math.max(cb[2], q[0]); cb[3] = Math.max(cb[3], q[1]); } };
+            for (var j = 0; j < ops.length; j++) {
+              var op = ops[j];
+              if (op === OPS.moveTo) { cur = ap(m, xs[k], xs[k + 1]); ini = cur; k += 2; }
+              else if (op === OPS.lineTo) { var nx = ap(m, xs[k], xs[k + 1]); k += 2; if (cur) segs.push([cur[0], cur[1], nx[0], nx[1]]); cur = nx; }
+              else if (op === OPS.curveTo) { if (cur) caja(cur); k += 6; cur = ap(m, xs[k - 2], xs[k - 1]); caja(cur); caja(ap(m, xs[k - 6], xs[k - 5])); nCur++; }
+              else if (op === OPS.curveTo2 || op === OPS.curveTo3) { if (cur) caja(cur); k += 4; cur = ap(m, xs[k - 2], xs[k - 1]); caja(cur); nCur++; }
+              else if (op === OPS.rectangle) { k += 4; cur = null; }   // los rectángulos no son ejes
+              else if (op === OPS.closePath) { if (cur && ini) segs.push([cur[0], cur[1], ini[0], ini[1]]); cur = ini; }
+            }
+            if (cb && nCur >= 3) curvas.push(cb);
+          }
+        }
+        var textos = [];
+        (a[1].items || []).forEach(function (it) {
+          var str = String(it.str || '').trim(); if (!str) return;
+          var t = U.transform(vp.transform, it.transform || [1, 0, 0, 1, 0, 0]);
+          var alto = Math.hypot(t[2], t[3]) || 8, ancho = (it.width || 0) * (Math.hypot(t[0], t[1]) / (Math.hypot((it.transform || [1, 0])[0], (it.transform || [1, 0])[1]) || 1));
+          textos.push({ s: str, cx: t[4] + ancho / 2, cy: t[5] - alto / 2, h: alto });
+        });
+        return { W: vp.width, H: vp.height, segs: segs, textos: textos, curvas: curvas };
+      });
+    });
+  }
+  // PURA: de los trazos y los textos de una página, sus ejes con rótulo
+  var RX_ROTULO_EJE = /^([A-Z]{1,2}|\d{1,3})(\.\d{1,2})?'?$/;
+  function ejesDePagina(d) {
+    var W = d.W, H = d.H, v = [], h = [];
+    d.segs.forEach(function (q) {
+      var dx = Math.abs(q[2] - q[0]), dy = Math.abs(q[3] - q[1]);
+      if (dx < 0.8 && dy > 1.5) v.push({ c: (q[0] + q[2]) / 2, a: Math.min(q[1], q[3]), b: Math.max(q[1], q[3]) });
+      else if (dy < 0.8 && dx > 1.5) h.push({ c: (q[1] + q[3]) / 2, a: Math.min(q[0], q[2]), b: Math.max(q[0], q[2]) });
+    });
+    // los trozos de una misma línea (punteada) se juntan por su coordenada
+    function junta(lst, largoMin) {
+      lst.sort(function (p, q) { return p.c - q.c; });
+      var out = [], g = null;
+      lst.forEach(function (x) {
+        if (g && x.c - g.cUlt <= 0.8) { g.a = Math.min(g.a, x.a); g.b = Math.max(g.b, x.b); g.cs += x.c; g.n++; g.cUlt = x.c; }
+        else { g = { a: x.a, b: x.b, cs: x.c, n: 1, cUlt: x.c }; out.push(g); }
+      });
+      return out.map(function (x) { return { c: x.cs / x.n, a: x.a, b: x.b }; }).filter(function (x) { return x.b - x.a >= largoMin; });
+    }
+    var tx = d.textos.filter(function (t) { return RX_ROTULO_EJE.test(t.s.toUpperCase()); });
+    // el rótulo, en la PUNTA de la línea: más allá del extremo (la burbuja) o
+    // justo en él (la línea entra en la burbuja), y alineado con la línea
+    function rotulo(l, vert) {
+      var mejor = null;
+      tx.forEach(function (t) {
+        var perp = vert ? Math.abs(t.cx - l.c) : Math.abs(t.cy - l.c), a = vert ? t.cy : t.cx;
+        if (perp > Math.max(6, t.h * 0.9)) return;
+        var fuera = a < l.a ? l.a - a : a > l.b ? a - l.b : -Math.min(a - l.a, l.b - a);
+        if (fuera > 75 || fuera < -18) return;
+        var nota = perp + Math.abs(fuera - 14) * 0.2;
+        if (!mejor || nota < mejor.nota) mejor = { s: t.s.toUpperCase(), nota: nota };
+      });
+      return mejor && mejor.s;
+    }
+    function ejes(lineas, vert) {
+      var por = {};
+      lineas.forEach(function (l) {
+        var r = rotulo(l, vert); if (!r) return;
+        // un rótulo, un eje: si dos líneas lo reclaman, la más larga
+        if (!por[r] || (l.b - l.a) > (por[r].b - por[r].a)) por[r] = l;
+      });
+      return Object.keys(por).map(function (k) { return { rot: k, c: por[k].c, largo: por[k].b - por[k].a }; })
+        .sort(function (p, q) { return p.c - q.c; });
+    }
+    var EV = ejes(junta(v, H * 0.3), true), EH = ejes(junta(h, W * 0.3), false);
+    /* SEGUNDA VÍA: en muchas hojas eléctricas el eje NO cruza el plano — solo
+       está la BURBUJA en el borde con un trocito de línea. Un círculo con un
+       rótulo de eje dentro y un trazo recto que sale de él hacia dentro. */
+    (d.curvas || []).forEach(function (c) {
+      var w = c[2] - c[0], hh = c[3] - c[1], r = (w + hh) / 4, cx = (c[0] + c[2]) / 2, cy = (c[1] + c[3]) / 2;
+      if (!(w >= 8 && w <= 90 && hh >= 8 && hh <= 90 && w / hh > 0.8 && w / hh < 1.25)) return;
+      var t = tx.filter(function (q) { return Math.hypot(q.cx - cx, q.cy - cy) <= r * 0.6; })[0];
+      if (!t) return;
+      var rot = t.s.toUpperCase(), vert = 0, hor = 0;
+      d.segs.forEach(function (q) {
+        var dx = Math.abs(q[2] - q[0]), dy = Math.abs(q[3] - q[1]);
+        if (dx < 0.8 && dy >= 8 && Math.abs((q[0] + q[2]) / 2 - cx) < 1.5) {
+          var ext = Math.min(Math.abs(q[1] - cy), Math.abs(q[3] - cy));
+          if (ext <= r * 1.4) vert = Math.max(vert, dy);
+        } else if (dy < 0.8 && dx >= 8 && Math.abs((q[1] + q[3]) / 2 - cy) < 1.5) {
+          var ext2 = Math.min(Math.abs(q[0] - cx), Math.abs(q[2] - cx));
+          if (ext2 <= r * 1.4) hor = Math.max(hor, dx);
+        }
+      });
+      if (vert > hor && !EV.some(function (e) { return e.rot === rot; })) EV.push({ rot: rot, c: cx, largo: vert, burbuja: true });
+      else if (hor > vert && !EH.some(function (e) { return e.rot === rot; })) EH.push({ rot: rot, c: cy, largo: hor, burbuja: true });
+    });
+    var porC = function (p, q) { return p.c - q.c; };
+    return { W: W, H: H, v: EV.sort(porC), h: EH.sort(porC) };
+  }
+  /* PURA: ajusta la hoja B (overlay) a la A (base) por los ejes de mismo rótulo.
+     xA = s·xB + tx ,  yA = s·yB + ty — una sola escala para los dos sentidos. */
+  function ajusteEjes(A, B, tolPt) {
+    tolPt = tolPt || 2;
+    var parV = [], parH = [];
+    A.v.forEach(function (a) { var b = B.v.filter(function (x) { return x.rot === a.rot; })[0]; if (b) parV.push({ rot: a.rot, a: a.c, b: b.c }); });
+    A.h.forEach(function (a) { var b = B.h.filter(function (x) { return x.rot === a.rot; })[0]; if (b) parH.push({ rot: a.rot, a: a.c, b: b.c }); });
+    var quitados = [];
+    function fit(pv, ph) {
+      var mva = 0, mvb = 0, mha = 0, mhb = 0;
+      pv.forEach(function (p) { mva += p.a; mvb += p.b; }); ph.forEach(function (p) { mha += p.a; mhb += p.b; });
+      mva /= pv.length; mvb /= pv.length; mha /= ph.length; mhb /= ph.length;
+      var num = 0, den = 0;
+      pv.forEach(function (p) { num += (p.b - mvb) * (p.a - mva); den += (p.b - mvb) * (p.b - mvb); });
+      ph.forEach(function (p) { num += (p.b - mhb) * (p.a - mha); den += (p.b - mhb) * (p.b - mhb); });
+      if (!(den > 0)) return null;
+      var sc = num / den, r = { s: sc, tx: mva - sc * mvb, ty: mha - sc * mhb };
+      r.res = pv.map(function (p) { return { rot: p.rot, d: Math.abs(sc * p.b + r.tx - p.a), eje: 'v' }; })
+        .concat(ph.map(function (p) { return { rot: p.rot, d: Math.abs(sc * p.b + r.ty - p.a), eje: 'h' }; }));
+      r.max = Math.max.apply(null, r.res.map(function (x) { return x.d; }));
+      return r;
+    }
+    function bastan(pv, ph) { return pv.length >= 1 && ph.length >= 1 && (pv.length >= 2 || ph.length >= 2); }
+    if (!bastan(parV, parH)) return { ok: false, parV: parV, parH: parH, falta: true };
+    var f = fit(parV, parH);
+    // un eje que no cuadra con los demás se deja fuera y se nombra
+    while (f && f.max > tolPt && parV.length + parH.length > 3) {
+      var peor = f.res.slice().sort(function (p, q) { return q.d - p.d; })[0];
+      var sin = peor.eje === 'v' ? parV.filter(function (p) { return p.rot !== peor.rot; }) : parH.filter(function (p) { return p.rot !== peor.rot; });
+      var pv2 = peor.eje === 'v' ? sin : parV, ph2 = peor.eje === 'h' ? sin : parH;
+      if (!bastan(pv2, ph2)) break;
+      quitados.push(peor.rot); parV = pv2; parH = ph2; f = fit(parV, parH);
+    }
+    if (!f || !(f.s > 0)) return { ok: false, parV: parV, parH: parH };
+    return { ok: f.max <= tolPt, s: f.s, tx: f.tx, ty: f.ty, max: f.max, parV: parV, parH: parH,
+             cruces: parV.length * parH.length, quitados: quitados };
+  }
+  // el PDF de la hoja base y el del overlay, vivos (si no, se abren)
+  var ovPdf = null;   // { doc, page } del overlay traído de un archivo en esta sesión
+  function pdfDeFondo(i, cb) {
+    var rec = pdfLive[i]; if (rec) { cb(rec); return; }
+    var bg = fondoDeHoja(i); if (!bg || !bg.pdfId) { cb(null); return; }
+    loadPdfLive(bg, function () { cb(pdfLive[i] || null); });
+  }
+  function pdfDelOverlay(cb) {
+    if (ovPdf && ovPdf.doc) { cb(ovPdf); return; }
+    var h = state.bg2 && state.bg2.hoja;
+    if (h === undefined || h === null) { cb(null); return; }
+    pdfDeFondo(h, cb);
+  }
+  function alineaPorEjes() {
+    if (!state.bg2 || !state.bg) return;
+    if (typeof pdfjsLib === 'undefined') { uiAlert('No se encontró el módulo de PDF.'); return; }
+    setHint('🎯 Buscando los ejes en las dos hojas…');
+    pdfDeFondo(state.curSheet, function (rA) {
+      pdfDelOverlay(function (rB) {
+        if (!rA || !rB) {
+          uiAlert('Para alinear por los ejes, las dos hojas tienen que venir de un PDF (no de una foto o captura).\n\n' +
+            (!rA ? '· El plano BASE no viene de un PDF abierto.\n' : '') + (!rB ? '· El plano ROJO no viene de un PDF abierto.\n' : '') +
+            '\nSigue sirviendo «Alinear (2 puntos)»: dos clics en el mismo cruce de ejes de cada plano.');
+          setHint(''); return;
+        }
+        Promise.all([datosDePaginaPdf(rA.doc, rA.page), datosDePaginaPdf(rB.doc, rB.page)]).then(function (d) {
+          var A = ejesDePagina(d[0]), B = ejesDePagina(d[1]);
+          var r = ajusteEjes(A, B);
+          // en el orden en que se leen: A, B, C… y 1, 2, 3… (no en el de la hoja)
+          var nomEjes = function (l) { return l.map(function (x) { return x.rot; }).sort(function (p, q) { return p.localeCompare(q, 'en', { numeric: true }); }).join(', ') || '—'; };
+          if (!r.ok) {
+            var sinTexto = !d[0].textos.length || !d[1].textos.length;
+            uiAlert((r.falta ? 'No encuentro suficientes ejes EN COMÚN entre las dos hojas.' : 'Los ejes en común no cuadran entre sí: no me fío de esta alineación.') + '\n\n' +
+              'En el AZUL encontré: ' + nomEjes(A.v) + ' / ' + nomEjes(A.h) + '\nEn el ROJO encontré: ' + nomEjes(B.v) + ' / ' + nomEjes(B.h) + '\n\n' +
+              (sinTexto ? 'Una de las hojas no trae texto (letras en curvas o escaneada): sin los rótulos de las burbujas no se sabe qué eje es cuál. ' : '') +
+              'Hacen falta al menos un eje vertical y uno horizontal con el mismo rótulo en las dos, y dos en algún sentido.\n\nUsa «Alinear (2 puntos)» sobre un cruce de ejes.');
+            setHint(''); return;
+          }
+          // de la hoja (puntos PDF) al mundo: el fondo cubre la página entera
+          var A0 = state.bg, B0 = state.bg2, kA = A0.w / d[0].W;
+          pushUndo();
+          B0.w = r.s * kA * d[1].W; B0.h = r.s * kA * d[1].H;
+          B0.x = A0.x + r.tx * kA; B0.y = A0.y + r.ty * (A0.h / d[0].H);
+          renderBg(); scheduleAutosave();
+          var cal = !!A0.scaleFactor || !!state.scaleSet, errMundo = r.max * kA;
+          var err = cal ? (errMundo < 1 ? '< 1"' : fmtFtIn(errMundo)) + ' en obra' : (r.max / 72).toFixed(3) + '" de papel';
+          var msg = '✔ Alineado por los ejes: ' + nomEjes(r.parV) + ' y ' + nomEjes(r.parH) + ' — ' + r.cruces + ' cruces, el peor se aparta ' + err + '.' +
+            (r.quitados.length ? ' ⚠ El eje ' + r.quitados.join(', ') + ' NO cuadra con los demás: se dejó fuera (¿se movió o se renombró entre hojas?).' : '');
+          setHint(msg);
+          if (r.quitados.length) uiAlert(msg);
+        }).catch(function (e) { uiAlert('No se pudieron leer los PDF: ' + (e && e.message ? e.message : e)); setHint(''); });
+      });
+    });
+  }
+  window.__ejesDbg = { datos: datosDePaginaPdf, ejes: ejesDePagina, ajuste: ajusteEjes, alinea: alineaPorEjes,
+                       ovPdf: function (v) { if (v !== undefined) ovPdf = v; return ovPdf; } };
 
   /* ---------------- proyecto ---------------- */
   $('#pjPrec').addEventListener('change', function () {
@@ -18353,7 +18591,7 @@
           var big = cv.width * cv.height > 9e6;
           var url = vista ? cv.toDataURL('image/jpeg', VISTA_JPEG) : (lite || big) ? cv.toDataURL('image/jpeg', lite ? 0.82 : 0.9) : cv.toDataURL('image/png');
           cv.width = 1; cv.height = 1;   // libera la memoria del canvas de una
-          if (cb) cb(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
+          if (cb) cb(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72, { doc: doc, page: pageNum });
           else {
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: doc, page: pageNum };
