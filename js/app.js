@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.M';
+  var APP_VERSION = 'v35.N';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10045,7 +10045,20 @@
     }
     var totH = 0, totS = 0, tableros = cats.filter(function (c) { return c.tablero; });
     if (tableros.length) h += '<tr><td colspan="2" class="muted small">⚡ ' + tableros.length + ' panel(es) localizado(s): ' + esc(tableros.map(function (c) { return c.panel || c.nom; }).join(', ')) + ' — no se cotizan, son la referencia de las rutas</td></tr>';
-    cats.filter(function (c) { return !c.tablero; }).forEach(function (c) {
+    /* (v35.M, Edgar 26/09: «no sigo viendo lo del demo separado») La
+       demolición va en su propio grupo, con su subtotal: no se mezcla con lo
+       que se instala. */
+    var esDemo = function (c) { return codigoDeCat(c) === '01-DEMO' || c.set === 'Demolition' || /^DEMO\b/i.test(c.item || c.alias || c.nom || ''); };
+    var piezas = cats.filter(function (c) { return !c.tablero; });
+    var grupos = [{ nom: '🔌 Lo nuevo (instalación)', cs: piezas.filter(function (c) { return !esDemo(c); }) }, { nom: '🔨 Demolición', cs: piezas.filter(esDemo) }].filter(function (g) { return g.cs.length; });
+    grupos.forEach(function (g) {
+      if (grupos.length > 1 || g.nom.indexOf('Demolición') >= 0) {
+        var gh = 0, gs = 0; g.cs.forEach(function (c) { gh += hoja[c.id] || 0; gs += set[c.id] || 0; });
+        h += '<tr class="subcat"><td>' + g.nom + '</td><td class="n">' + gh + (varias ? ' <span class="muted">/ ' + gs + '</span>' : '') + '</td></tr>';
+      }
+      g.cs.forEach(filaCat);
+    });
+    function filaCat(c) {
       var nh = hoja[c.id] || 0, ns = set[c.id] || 0;
       totH += nh; totS += ns;
       h += '<tr class="cntFila" data-cat="' + esc(c.id) + '">' +
@@ -10054,22 +10067,15 @@
         ' <span class="cntCod' + (c.codigo ? '' : ' def') + '" title="' + (c.codigo ? 'Código de partida' : 'Sin código propio: sale como ' + CODIGO_DEFECTO + '. Cámbialo en Count ▾ → Más… → Código de partida') + '">' + esc(codigoDeCat(c)) + '</span>' +
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
         '<td class="n">' + nh + (c.manual > 0 ? ' <span class="muted small" title="Cantidad puesta a mano (Count ▾): se suma a las marcas y va al estimador">+ ' + c.manual + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
-    });
+    }
     var totMano = cats.reduce(function (a, c) { return a + (c.manual > 0 && !c.tablero ? c.manual : 0); }, 0);
     var iaH = iaBloqueHtml();
     h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (totMano ? ' <span class="muted small">+ ' + totMano + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
     if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
-    h += iaH;
-    h += '<tr><td colspan="2" style="padding-top:6px">' +
-      '<button id="cntNueva" style="width:100%;margin-bottom:4px" title="Crear otra categoría de conteo">Nueva categoría de conteo</button>' +
-      '<button id="cntTlib" style="width:100%;margin-bottom:4px" title="Tus 17 tool sets de Bluebeam (Boxes, Receptacles, Lights, Fire Alarm…): eliges qué contar y cada categoría llega al estimador con el nombre que ya entiende">Biblioteca de takeoff</button>' +
-      '<button id="cntCsv" style="width:100%" title="Exportar el conteo a CSV: una columna por hoja y el total del set">Conteo a CSV</button></td></tr>';
+    h += iaH;   // (v35.M) Nueva categoría, Biblioteca y CSV viven arriba, en la barra de Materiales
     return h;
   }
   function enganchaConteoPanel() {
-    var bN = $('#cntNueva'); if (bN) bN.addEventListener('click', pideNuevaCat);
-    var bT = $('#cntTlib'); if (bT) bT.addEventListener('click', abreTlib);
-    var bC = $('#cntCsv'); if (bC) bC.addEventListener('click', conteoCsv);
     var bIA = $('#iaGuarda'); if (bIA) bIA.addEventListener('click', function () { iaGuardaLeccion(($('#iaNota') || {}).value || ''); });
     $$('#countsBody tr.cntFila').forEach(function (tr) {
       tr.addEventListener('click', function () {
@@ -10154,10 +10160,14 @@
             '<span class="tlTxt"><span class="tlSubj">' + esc(tRt.nom) + '</span><span class="tlDet">' + det + ' · ' + esc(tRt.codigo) + '</span></span></div>';
           return;
         }
-        h += '<label class="tlFila' + (ya ? ' ya' : '') + ((it.tipo === 'largo' || it.descartado) ? ' largo' : '') + '" data-k="' + esc(k) + '">' +
-          '<input type="checkbox"' + (marc ? ' checked' : '') + ((ya || it.tipo === 'largo' || it.descartado) ? ' disabled' : '') + '>' +
+        /* (v35.N, Edgar 26/09: «no hay necesidad de darle agregar… que se agregue
+           automáticamente cuando yo seleccione el device que quiero empezar a
+           contar») La fila es un BOTÓN: se toca y ya se está contando. */
+        var cuenta_ = !(it.tipo === 'largo' || it.descartado);
+        h += '<div class="tlFila' + (ya ? ' ya' : '') + (cuenta_ ? ' tlElige' : ' largo') + (ya && catActiva && ya.id === catActiva ? ' activa' : '') + '" data-k="' + esc(k) + '"' + (cuenta_ ? ' title="Tócalo y empieza a contarlo"' : '') + '>' +
           '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
-          '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + '</span></span></label>';
+          '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + '</span></span>' +
+          (cuenta_ ? '<span class="tlIr">' + (ya ? 'Contar ▸' : '+ Contar ▸') + '</span>' : '') + '</div>';
       });
     });
     if (!h) h = '<div class="bMuted">Nada casa con "' + esc(q) + '"' + (soloCat ? ' entre los que tienen item en el catálogo' : '') + '.</div>';
@@ -10185,6 +10195,21 @@
       enP[k] = c; nuevas.push(c);
     });
     return nuevas;
+  }
+  /* Tocar un device de la biblioteca: si no está en el proyecto se añade; en
+     los dos casos queda ACTIVO, se enciende Count y la biblioteca se quita de
+     encima del plano. Un solo Ctrl+Z lo deshace si fue nuevo. */
+  function tlibElige(k) {
+    var pr = tlibItemDe(k); if (!pr || !pr.it || pr.it.tipo === 'largo' || pr.it.descartado) return null;
+    var c = tlibEnProyecto()[pr.it.subj.toUpperCase()] || null, nuevo = false;
+    if (!c) { pushUndo(); c = tlibAnade([pr])[0] || null; nuevo = !!c; }
+    if (!c) return null;
+    catActiva = c.id;
+    setTool('count');
+    cierraTlib();
+    refresh(); refreshCounts(); pintaTlib();
+    setHint((nuevo ? '✔ Añadida · ' : '') + 'Contando «' + c.nom + '» — toca cada uno en el plano');
+    return c;
   }
   function tlibAnadirMarcados() {
     var pares = Object.keys(tlibMarcados).filter(function (k) { return tlibMarcados[k]; }).map(tlibItemDe).filter(Boolean);
@@ -10250,6 +10275,8 @@
             (state.bg && !state.bg.cal ? ' · OJO: este plano no está calibrado' : ''));
           return;
         }
+        var fe = ev.target.closest && ev.target.closest('.tlElige');
+        if (fe) { ev.preventDefault(); tlibElige(fe.dataset.k); return; }
         var cab = ev.target.closest && ev.target.closest('.tlSet');
         if (cab) { tlibAbiertos[cab.dataset.set] = !tlibAbiertos[cab.dataset.set]; pintaTlib(); return; }
       });
@@ -10502,7 +10529,7 @@
   })();
   window.__manoDbg = { abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
     elige: manoElige, agrega: manoAgrega, lineal: function () { return JSON.parse(JSON.stringify((state.project && state.project.linMano) || [])); }, migra: migraLinMano, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
-  window.__tlibDbg = { migraDemo: migraDemoNombres, abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
+  window.__tlibDbg = { elige: tlibElige, migraDemo: migraDemoNombres, abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
   /* ==================================================================
      RUTAS DE CONDUIT (punto E5) — el takeoff LINEAL por tipo de material
@@ -10830,14 +10857,14 @@
       if (!state.bg || !state.bg.cal) h += '<tr><td colspan="2" class="muted small">Ojo: este plano no está calibrado, así que los pies son los del dibujo, no los de la obra. Calíbralo con la herramienta Calibrate.</td></tr>';
     }
     h += '<tr><td colspan="2" style="padding-top:6px">' +
-      '<button id="rtNueva" style="width:100%;margin-bottom:4px" title="Elegir el tipo de tubo o cable y empezar a trazar">Trazar una ruta</button>' +
-      '<button id="rtCsv" style="width:100%" title="Exportar las rutas a CSV: una fila por tipo y zona, una columna por hoja y el total del set — igual que las hojas Feeder\'s / Branch Circuits Description del Excel">Rutas a CSV</button></td></tr>';
+      '<button id="rtNueva" style="width:100%" title="Elegir el tipo de tubo o cable y empezar a trazar">Trazar una ruta</button>' +
+      '</td></tr>';
     return h;
   }
   function enganchaRutasPanel() {
     var bN = $('#rtNueva');
     if (bN) bN.addEventListener('click', function () { showToolMenu('ruta', bN); });
-    var bC = $('#rtCsv'); if (bC) bC.addEventListener('click', rutasCsv);
+
     $$('#countsBody tr.rtFila').forEach(function (tr) {
       tr.addEventListener('click', function () {
         rutaActiva = tr.dataset.k;
@@ -15831,6 +15858,15 @@
     var b = $('#btnChk'); if (b) b.addEventListener('click', abreChk);
     var x = $('#chkCerrar'); if (x) x.addEventListener('click', cierraChk);
     arrastraPanel($('#chkCab'), $('#chkBox'));
+  })();
+  /* (v35.M) La barra de Materiales: CONTAR → REVISAR → SACAR. Los botones
+     fijos se enganchan una sola vez (los del cuerpo se repintan). */
+  (function () {
+    var e = function (id, fn) { var b = $('#' + id); if (b) b.addEventListener('click', fn); };
+    e('btnMatTlib', abreTlib);
+    e('btnMatNueva', pideNuevaCat);
+    e('btnCntCsv', conteoCsv);
+    e('btnRtCsv', rutasCsv);
   })();
   window.__chkDbg = { abre: abreChk, md: chkMd, pregunta: chkPregunta, pide: chkPide, estado: function () { return chk; } };
 

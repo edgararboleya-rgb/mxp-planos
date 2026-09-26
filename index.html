@@ -301,7 +301,28 @@
       </section>
 
       <section class="panel" id="matPanel">
-        <h3>Materiales <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista</button> <button id="btnEst" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Estimador</button> <button id="btnChk" title="Checklist del set con IA: el cerebro lee los PDF del proyecto enteros y arma el checklist para estimar (leyenda, demolición, circuitos, rutas, walk-thru, preguntas y alcance). Solo para ver: no cambia el takeoff" data-ico="ok">Checklist</button> <button id="btnScope" title="Estimado desde el scope of work: el cerebro propone recetas e ítems con cantidades, el código calcula, tú apruebas fila a fila (E10)" data-ico="chat">Scope</button> <button id="btnDoc" title="Leer un conteo de un documento: pega la tabla tal cual y la app saca cada renglón con su cantidad y te propone la receta" data-ico="lista">Conteo</button> <button id="btnCuadre" title="Cuadre: lo que trazaste y contaste contra lo que dice el panel schedule o el documento — circuitos por panel, breakers y conteo, con la diferencia en rojo" data-ico="ok">Cuadre</button> <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV</button></h3>
+        <h3>Materiales</h3>
+        <!-- (v35.M, Edgar 26/09: «esos botones están bien regados… organízame eso y dale un sentido»)
+             Tres grupos, en el orden en que se trabaja: CONTAR → REVISAR → SACAR -->
+        <div id="matBarra">
+          <div class="mbGrupo"><span class="mbTit">1 · Contar</span>
+            <button id="btnMatTlib" title="Tus tool sets de Bluebeam (Boxes, Receptacles, Lights, Demolition…): eliges qué contar y cada categoría llega al estimador con su nombre" data-ico="lista">Biblioteca</button>
+            <button id="btnMatNueva" title="Crear una categoría de conteo con tu propio nombre" data-ico="mas">Categoría nueva</button>
+            <button id="btnDoc" title="Leer un conteo de un documento: pega la tabla tal cual y la app saca cada renglón con su cantidad y te propone la receta" data-ico="lista">De un documento</button>
+          </div>
+          <div class="mbGrupo"><span class="mbTit">2 · Revisar</span>
+            <button id="btnChk" title="Checklist del set con IA: el cerebro lee los PDF del proyecto enteros y arma el checklist para estimar (leyenda, demolición, circuitos, rutas, walk-thru, preguntas y alcance). Solo para ver: no cambia el takeoff" data-ico="ok">Checklist IA</button>
+            <button id="btnCuadre" title="Cuadre: lo que trazaste y contaste contra lo que dice el panel schedule o el documento — circuitos por panel, breakers y conteo, con la diferencia en rojo" data-ico="ok">Cuadre</button>
+            <button id="btnScope" title="Estimado desde el scope of work: el cerebro propone recetas e ítems con cantidades, el código calcula, tú apruebas fila a fila (E10)" data-ico="chat">Desde el scope</button>
+          </div>
+          <div class="mbGrupo"><span class="mbTit">3 · Sacar</span>
+            <button id="btnEst" class="pri" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Al estimador</button>
+            <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista de marcas</button>
+            <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV materiales</button>
+            <button id="btnCntCsv" title="Exportar el conteo a CSV: una columna por hoja y el total del set" data-ico="download">CSV conteo</button>
+            <button id="btnRtCsv" title="Exportar las rutas a CSV: una fila por tipo y zona, una columna por hoja y el total del set" data-ico="download">CSV rutas</button>
+          </div>
+        </div>
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>
       </section>
     </aside>
@@ -424,9 +445,9 @@
     </div>
     <div id="tlibLista"></div>
     <div id="tlibPie">
-      <span class="muted small" style="flex:1">Marca lo que vas a contar en este proyecto. Cada categoría llega al estimador con el nombre de Bluebeam que ya entiende.</span>
-      <span id="tlibSel" class="muted small"></span>
-      <button id="tlibAnadir" disabled>Añadir al proyecto</button>
+      <span class="muted small" style="flex:1"><b>Toca un device y empieza a contarlo</b>: se añade al proyecto solo y queda activo. Cada categoría llega al estimador con su nombre.</span>
+      <span id="tlibSel" class="muted small" hidden></span>
+      <button id="tlibAnadir" disabled hidden>Añadir al proyecto</button>
     </div>
   </div>
 
