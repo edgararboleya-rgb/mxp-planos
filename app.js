@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.L';
+  var APP_VERSION = 'v35.M';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10212,7 +10212,11 @@
       cierraTlib();
       setHint('Contando ' + nuevas[0].nom + ' — toca cada uno en el plano');
     } else {
-      setHint('✔ ' + nuevas.length + ' categorías añadidas — están en el panel Conteo y en Count ▾');
+      /* (v35.M) antes la activa se quedaba en la que había: Edgar añadió
+         «DEMO - Emergency Light» y otra, y sus marcas siguieron cayendo en
+         «Receptacles». Ahora la primera nueva queda activa y se dice. */
+      catActiva = nuevas[0].id;
+      setHint('✔ ' + nuevas.length + ' categorías añadidas · ahora cuentas «' + nuevas[0].nom + '» — cambia de categoría tocándola en Materiales o en Count ▾');
     }
     refresh(); refreshCounts(); pintaTlib();
   }
@@ -10350,6 +10354,22 @@
   function linMano() { if (!state.project) state.project = {}; if (!Array.isArray(state.project.linMano)) state.project.linMano = []; return state.project.linMano; }
   function manoClave(t) { return String(t || '').replace(/\s+/g, ' ').trim().toUpperCase(); }
   // lo que se puso a mano en pies ANTES de v35.I (una categoría del Count) pasa a sumarse al tubo medido
+  /* (v35.M) Los tools del set Demolition de Bluebeam se llamaban «Receptacles»,
+     «Lights», «Panels», «Garbage Package»: en Materiales la demolición de
+     receptáculos salía como «Receptacles» y parecía lo nuevo. Pasan a llamarse
+     como su renglón del catálogo (DEMO - Receptacles…). Al estimador van igual. */
+  var DEMO_VIEJOS = { 'RECEPTACLES': 1, 'LIGHTS': 1, 'PANELS': 1, 'GARBAGE PACKAGE': 1 };
+  function migraDemoNombres() {
+    var n = 0;
+    catsCount().forEach(function (c) {
+      if (c.set !== 'Demolition' || !c.item || !/^DEMO\b/i.test(c.item)) return;
+      var al = String(c.alias || '').trim().toUpperCase();
+      if (!DEMO_VIEJOS[al]) return;
+      if (String(c.nom || '').trim().toUpperCase() === al) c.nom = c.item;
+      c.alias = c.item; n++;
+    });
+    return n;
+  }
   function migraLinMano() {
     var cnt = null, mov = 0;
     catsCount().slice().forEach(function (c) {
@@ -10482,7 +10502,7 @@
   })();
   window.__manoDbg = { abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
     elige: manoElige, agrega: manoAgrega, lineal: function () { return JSON.parse(JSON.stringify((state.project && state.project.linMano) || [])); }, migra: migraLinMano, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
-  window.__tlibDbg = { abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
+  window.__tlibDbg = { migraDemo: migraDemoNombres, abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
   /* ==================================================================
      RUTAS DE CONDUIT (punto E5) — el takeoff LINEAL por tipo de material
@@ -13740,6 +13760,9 @@
      — así nunca se le cambia algo a la mitad del grupo sin querer. */
   function opsColor() { return COLOR_PRESETS.map(function (c) { return [c[0], c[1]]; }); }
   var CAMPOS_MASIVOS = [
+    // (v35.M, Edgar 26/09: marcó demo de luces con «Receptacles» activa) pasar varias marcas a otra categoría de una vez
+    { k: 'cat', nom: 'Cuenta como', tipo: 'ops', kinds: ['count'],
+      ops: function () { return catsCount().filter(function (c) { return !c.tablero; }).map(function (c) { return [c.id, c.nom]; }); } },
     { k: 'op', nom: 'Opacidad', tipo: 'rango', min: 10, max: 100, step: 5, def: 100,
       kinds: ['wall', 'opening', 'symbol', 'text', 'leader', 'dim', 'wire', 'area', 'ink', 'count'] },
     { k: 'type', nom: 'Tipo de pared', tipo: 'ops', kinds: ['wall'],
@@ -21398,6 +21421,7 @@
     if (o.view && typeof o.view === 'object') { Object.assign(view, o.view); view.z = numSeguro(view.z, 1) || 1; view.tx = numSeguro(view.tx, 0); view.ty = numSeguro(view.ty, 0); }
     syncProjectInputs();
     try { migraLinMano(); } catch (e) {}
+    try { migraDemoNombres(); } catch (e) {}
     renderSheetTabs(); updateBgLinesBtn();
     applyView(); refresh();
     try { purgaPdfBin(); } catch (e) {}   // lo que el proyecto nuevo no usa, fuera
