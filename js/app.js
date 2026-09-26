@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.I';
+  var APP_VERSION = 'v35.J';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10833,9 +10833,14 @@
         listo(cv, !!bg.vista && !rec);
       };
       im.onerror = function () { cb(null, 'No pude leer la imagen del plano de fondo.'); };
-      im.src = bg.url;
+      // (v35.J) «Solo líneas» y el overlay tiñen o umbralizan la imagen SOLO
+      // para verla: la leyenda y el conteo leen el original
+      im.src = bg.origUrl || bg.url;
     }
-    if (!rec || bg.origUrl) { delRaster(); return; }
+    /* (v35.J, auditoría 26/09) con el PDF vivo se lee SIEMPRE el PDF, aunque
+       «Solo líneas» o el overlay estén puestos: antes se leía el raster
+       umbralizado de la vista general, borroso y sin avisar. */
+    if (!rec) { delRaster(); return; }
     // PDF vivo: se renderiza SOLO la región, a la escala que la deja en 1568 px
     rec.doc.getPage(rec.page).then(function (page) {
       var vp1 = page.getViewport({ scale: 1 });
@@ -11009,17 +11014,22 @@
     });
   }
   /* Pedirle al cerebro la misma tabla (segunda opinión, opcional). */
-  function leyConCerebro() {
+  function leyConCerebro(motivo) {
     if (!ley || !ley.cv || !ley.b64) return;
     var c = cerebroCfg();
     if (!c.url) { uiAlert('El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
     leyEnVuelo = true;
     var hoja = state.curSheet;
-    pintaLey('Leyendo la leyenda con el cerebro… (30-60 s). Puedes seguir trabajando.');
+    pintaLey((typeof motivo === 'string' && motivo ? 'La lectura en el aparato no salió bien (' + motivo + '). Se la paso al cerebro… ' : 'Leyendo la leyenda con el cerebro… ') + '(30-60 s). Puedes seguir trabajando.');
     pideCerebro({ imagen: { b64: ley.b64, tipo: 'image/jpeg' }, leyenda: true }).then(function (d) {
       leyEnVuelo = false;
       if (hoja !== state.curSheet || !ley) return;
+      /* (v35.J) lo del cerebro sale igual de completo que lo local: con su
+         molde para buscar en el plano y con su receta propuesta. Antes se
+         quedaba sin las dos (auditoría del 26/09). */
+      ley.deCerebro = true; ley.local = false;
       leyendaRecibe(d);
+      if (ley && ley.filas && ley.filas.length) leyProponeRecetas();
     }).catch(function (e) {
       leyEnVuelo = false;
       if (!ley) return;
@@ -11124,10 +11134,12 @@
     });
     return out.filter(function (l) { return l.t; });
   }
-  function leyLimpia(t) {
+  function leyLimpia(t, exacto) {
     var s2 = String(t || '').replace(/\s+/g, ' ').replace(/[|_]+/g, ' ').trim();
-    // la letra suelta al final es el borde de la tabla o la primera columna de la tabla vecina
-    s2 = s2.replace(/(\.|\)|[A-Z]{3,})\s+[A-Z¢©®®°]$/g, '$1').trim();
+    // la letra suelta al final es el borde de la tabla o la primera columna de
+    // la tabla vecina… cuando lo leyó el OCR. Con texto EXACTO del PDF es letra
+    // de verdad («LIGHT FIXTURE TYPE A», «PANEL B»): no se toca (v35.J)
+    if (!exacto) s2 = s2.replace(/(\.|\)|[A-Z]{3,})\s+[A-Z¢©®®°]$/g, '$1').trim();
     // y los garabatos del principio o del final: palabras sin una sola letra ni número («[©]», «/», «©)»)
     var pal = s2.split(' ');
     while (pal.length > 1 && !/[A-Za-z0-9]/.test(pal[0])) pal.shift();
@@ -11188,10 +11200,17 @@
     if (t.replace(/[^A-Z0-9]/g, '').length < 2 && c < 90) return '';   // una letra sola casi siempre es el dibujo
     return t.slice(0, 8);
   }
+  /* (v35.J) Un fallo de la lectura local NUNCA es un callejón sin salida: si
+     hay cerebro, la misma tabla se le pasa sola (Edgar, 26/09: «en la hoja
+     E-000 me falló la leyenda»; muchas E-000 no tienen rayas entre filas). */
+  function leyAlCerebro(motivo, err) {
+    if (ley && ley.b64 && !ley.deCerebro && cerebroCfg().url) { leyConCerebro(motivo); return; }
+    pintaLey(null, err || motivo);
+  }
   function leyLocal(rec) {
     var hoja = state.curSheet, t = leyTabla();
     if (!t || t.filas.length < 2) {
-      pintaLey(null, 'No veo la cuadrícula de la tabla: hacen falta las rayas horizontales entre filas para leerla en local.\nEncierra la tabla con su borde. Si la leyenda no tiene rayas, prueba el cerebro.');
+      leyAlCerebro('no veo las rayas entre filas', 'No veo la cuadrícula de la tabla: hacen falta las rayas horizontales entre filas para leerla en local.\nEncierra la tabla con su borde, o configura el cerebro para las leyendas sin rayas.');
       return;
     }
     var W = ley.w, H = ley.h, colX = t.colX || Math.round(W * 0.18);
@@ -11203,6 +11222,24 @@
     var vivo = function () { return hoja === state.curSheet && !!ley && ley.cv === rec.cv; };
     var celdaDibujo = function (f) { return { x0: cx0, y0: Math.round(f[0]) + 2, x1: colX - 2, y1: Math.round(f[1]) - 2 }; };
     var junta = function (ls) { return leyLimpia(ls.slice().sort(function (a, b2) { return a.y0 - b2.y0 || a.x0 - b2.x0; }).map(function (l) { return l.t; }).join(' ')); };
+    /* (v35.J) el texto EXACTO del PDF se junta por RENGLÓN (misma línea base,
+       con tolerancia de media letra) y de izquierda a derecha. Muchos CAD
+       sacan el texto letra por letra: «D U P L E X» se junta sin espacios
+       cuando el hueco es menor que 0,15 × la altura de la letra. */
+    var juntaPdf = function (ls) {
+      if (!ls.length) return '';
+      var alts = ls.map(function (l) { return Math.max(1, l.y1 - l.y0); }).sort(function (a, b2) { return a - b2; }), hL = alts[Math.floor(alts.length / 2)];
+      var orden = ls.slice().sort(function (a, b2) { return a.y1 - b2.y1; }), renglones = [];
+      orden.forEach(function (l) { var r = renglones[renglones.length - 1]; if (r && Math.abs(l.y1 - r.base) <= hL * 0.5) r.ls.push(l); else renglones.push({ base: l.y1, ls: [l] }); });
+      return leyLimpia(renglones.map(function (r) {
+        var xs = r.ls.sort(function (a, b2) { return a.x0 - b2.x0; }), txt = '';
+        xs.forEach(function (l, i) {
+          if (i) { var prev = xs[i - 1], hueco = l.x0 - prev.x1; txt += (hueco < hL * 0.15 && (prev.t.length === 1 || l.t.length === 1)) ? '' : ' '; }
+          txt += l.t;
+        });
+        return txt;
+      }).join(' '), true);
+    };
     var confDe = function (ls) { return ls.length ? Math.round(ls.reduce(function (a, l) { return a + l.c; }, 0) / ls.length) : 0; };
     pintaLey('Leyendo el texto de la tabla…');
 
@@ -11210,7 +11247,7 @@
        {leyenda:{simbolos}} que devolvía el cerebro: la revisión, la pareja con
        la biblioteca y la creación son las de siempre. Las bandas sin dibujo son
        cabeceras de sección y dan la familia a las filas que siguen. */
-    function arma(bandas, fuente, conf) {
+    function arma(bandas, fuente, conf, mixtas) {
       if (!vivo()) return;
       var cab = '', simb = [], porJ = {};
       bandas.forEach(function (b2) { porJ[b2.j] = b2; });
@@ -11219,12 +11256,17 @@
         if (!esSim[j]) { if (b2.desc && b2.desc.length <= 40) cab = b2.desc; return; }
         var c = celdaDibujo(f);
         simb.push({ descripcion: b2.desc, tag: b2.tag || '', familia: leyFamiliaDe(cab, b2.desc), montaje: 'unknown',
-          nota: fuente === 'pdf' ? 'texto del PDF' : ('OCR ' + b2.conf + '%'),
+          nota: (fuente === 'pdf' || (fuente === 'mixto' && b2.conf === 100)) ? 'texto del PDF' : ('OCR ' + b2.conf + '%'),
           caja: { x0: c.x0 / W * 100, y0: f[0] / H * 100, x1: c.x1 / W * 100, y1: f[1] / H * 100 },
           moldeRect: aMundo(b2.dibujo), moldeHoja: hoja });
       });
       ley.bandas = bandas;
-      leyendaRecibe({ leyenda: { simbolos: simb, lineas: [], notas: (fuente === 'pdf' ? 'Texto tomado del PDF. ' : 'Texto leído con OCR en tu aparato (' + conf + '% de confianza). ') + simb.length + ' fila(s) con dibujo, ' + (N - simb.length) + ' cabecera(s).' } });
+      // (v35.J) lectura pobre → al cerebro: ningún símbolo, o más de un tercio sin texto
+      var vacias = simb.filter(function (s2) { return !String(s2.descripcion || '').trim(); }).length;
+      if (!simb.length || (simb.length >= 3 && vacias / simb.length > 0.34)) {
+        if (ley && ley.b64 && cerebroCfg().url) { leyAlCerebro(!simb.length ? 'no salió ningún símbolo' : vacias + ' de ' + simb.length + ' filas sin texto'); return; }
+      }
+      leyendaRecibe({ leyenda: { simbolos: simb, lineas: [], notas: (fuente === 'mixto' ? 'Texto del PDF, y ' + mixtas + ' fila(s) sin texto en el PDF leídas con OCR. ' : fuente === 'pdf' ? 'Texto tomado del PDF. ' : 'Texto leído con OCR en tu aparato (' + conf + '% de confianza). ') + simb.length + ' fila(s) con dibujo, ' + (N - simb.length) + ' cabecera(s).' } });
       if (ley) { ley.local = true; leyProponeRecetas(); }
     }
     /* El dibujo y el tag dentro de la celda del símbolo. Si el texto viene del
@@ -11284,7 +11326,7 @@
       };
       paso(0).then(function () { if (vivo()) arma(bandas, 'ocr', nC ? Math.round(sumaC / nC) : 0); }).catch(function (e) {
         if (!vivo()) return;
-        pintaLey(null, 'No pude leer el texto de la tabla (' + (e && e.message ? e.message : e) + ').\nSi tienes el cerebro configurado, prueba «Leer con el cerebro».');
+        leyAlCerebro('no pude leer el texto', 'No pude leer el texto de la tabla (' + (e && e.message ? e.message : e) + ').\nSi tienes el cerebro configurado, prueba «Leer con el cerebro».');
       });
     }
     /* 1) el texto del PDF, si la hoja lo trae (exacto y gratis) */
@@ -11301,15 +11343,25 @@
         var paso = function (j) {
           if (j >= N || !vivo()) return Promise.resolve();
           var f = t.filas[j], ls = dentro.filter(function (l) { return enBanda(l, f); });
-          if (!esSim[j]) { bandas.push({ j: j, desc: junta(ls), conf: 100, tag: '', dibujo: null }); return paso(j + 1); }
+          if (!esSim[j]) { bandas.push({ j: j, desc: juntaPdf(ls), conf: 100, tag: '', dibujo: null }); return paso(j + 1); }
           var der = ls.filter(function (l) { return (l.x0 + l.x1) / 2 > colX; }), izq = ls.filter(function (l) { return (l.x0 + l.x1) / 2 <= colX; });
           var tagTxt = izq.map(function (l) { return l.t; }).join(' ').replace(/[^A-Za-z0-9\/\-.'" ]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 8);
           return dibujoYTag(f, { texto: tagTxt, items: izq.map(function (l) { return { x0: l.x0, x1: l.x1 }; }) }).then(function (dt) {
-            bandas.push({ j: j, desc: junta(der), conf: 100, tag: dt.tag, dibujo: dt.dibujo });
-            return paso(j + 1);
+            var dPdf = juntaPdf(der);
+            /* (v35.J) texto MIXTO: el título en TrueType y las descripciones en
+               curvas (o al revés). Una fila con dibujo sin texto del PDF se lee
+               con OCR en vez de quedarse vacía y desmarcarse en silencio. */
+            if (dPdf.length >= 4) { bandas.push({ j: j, desc: dPdf, conf: 100, tag: dt.tag, dibujo: dt.dibujo }); return paso(j + 1); }
+            var kT = Math.min(3, Math.max(1, 2200 / Math.max(1, W - 2 - (colX + 3))));
+            return ocrLee(ocrRecorte(ley.cv, colX + 3, Math.round(f[0]) + 3, W - 2, Math.round(f[1]) - 3, kT), '6').then(function (r) {
+              mixtas++;
+              bandas.push({ j: j, desc: junta(r.lineas) || dPdf, conf: confDe(r.lineas), tag: dt.tag, dibujo: dt.dibujo });
+              return paso(j + 1);
+            }, function () { bandas.push({ j: j, desc: dPdf, conf: 0, tag: dt.tag, dibujo: dt.dibujo }); return paso(j + 1); });
           });
         };
-        paso(0).then(function () { arma(bandas, 'pdf', 100); });
+        var mixtas = 0;
+        paso(0).then(function () { arma(bandas, mixtas ? 'mixto' : 'pdf', 100, mixtas); });
       });
     } else porOcr();
   }
@@ -11411,11 +11463,14 @@
         fam: LEY_FAM_NOM[s && s.familia] ? s.familia : 'other',
         mont: String((s && s.montaje) || 'unknown'), nota: String((s && s.nota) || '').slice(0, 120),
         caja: s && s.caja, glifo: leyGlifo(s && s.caja, asig ? asig[i] : null),
+        molde2: (s && s.moldeRect && isFinite(s.moldeRect.x0)) ? null : leyMoldeDe(s && s.caja, asig ? asig[i] : null),
         parejas: desc ? leyendaCasa(desc, s && s.tag, s && s.familia) : [],
         nom: leyNombreCorto(desc), fuera: !desc,
         // (17/09) la caja del dibujo EN EL PLANO: el molde para buscarlo después
         moldeRect: (s && s.moldeRect && isFinite(s.moldeRect.x0)) ? s.moldeRect : null, moldeHoja: s && s.moldeHoja != null ? s.moldeHoja : null
       };
+      if (!f.moldeRect && f.molde2) { f.moldeRect = f.molde2; f.moldeHoja = ley.hoja; }
+      delete f.molde2;
       // la pareja propuesta: la mejor si pasa el umbral; si no, sin pareja
       // preselecciona solo si pasa el umbral Y la descripción no es casi toda palabras que el item no tiene
       f.sel = (f.parejas[0] && f.parejas[0].sc >= LEY_UMBRAL && f.parejas[0].prec >= 0.2) ? f.parejas[0].k : '';
@@ -11454,23 +11509,68 @@
     var W = ley.w, H = ley.h, ctx = ley.cv.getContext('2d', { willReadFrequently: true });
     var d;
     try { d = ctx.getImageData(0, 0, W, H).data; } catch (e) { return (ley.tabla = { filas: [], colX: null }); }
-    var oscuro = function (i) { return (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < 150; };
-    // rayas horizontales: filas de píxeles con más del 45 % oscuro (una raya
-    // de tabla cruza casi todo el ancho; una línea de texto, no)
+    var lum = function (i) { return (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000; };
+    var oscuro = function (i) { return lum(i) < 150; };
+    /* rayas horizontales. Antes: más del 45 % de la fila de píxeles con
+       lum < 150. Eso perdía las rayas GRISES o finas (pluma de 0,3 px que el
+       antialias deja en gris ~190) y la tabla parecía «sin rayas». (v35.J,
+       auditoría del 26/09) Ahora también cuenta el TRAMO CONTINUO más largo de
+       tinta no blanca (lum < 205, huecos de ≤ 2 px): una raya es larga y
+       seguida; una línea de texto tiene huecos entre palabras. */
+    // una raya fina partida entre dos filas de píxeles queda en gris claro en
+    // las dos: se mira el más oscuro de la pareja (y, y+1)
+    var TINTA = 232, HUECO = 2;
+    var lum2 = function (x2, y2) { var a = lum((y2 * W + x2) * 4); return y2 + 1 < H ? Math.min(a, lum(((y2 + 1) * W + x2) * 4)) : a; };
+    var tramo = function (y) {
+      var mejor = 0, run = 0, hueco = 0, x2;
+      for (x2 = 0; x2 < W; x2++) {
+        if (lum2(x2, y) < TINTA) { run += hueco + 1; hueco = 0; if (run > mejor) mejor = run; }
+        else if (run && hueco < HUECO) hueco++;
+        else { run = 0; hueco = 0; }
+      }
+      return mejor / W;
+    };
     var hs = [], y, x, n, i;
-    for (y = 0; y < H; y++) { n = 0; for (x = 0; x < W; x++) if (oscuro((y * W + x) * 4)) n++; hs.push(n / W); }
+    for (y = 0; y < H; y++) { n = 0; for (x = 0; x < W; x++) if (oscuro((y * W + x) * 4)) n++; hs.push(n / W > 0.45 ? 1 : (tramo(y) > 0.4 ? 2 : 0)); }
+    // lo que solo sale por el tramo (2) tiene que ser FINO: una banda gruesa
+    // es el sombreado gris de una cabecera de sección (la ED-0.1 de Nicklaus
+    // tiene las cabeceras en gris 202), no una raya
+    var FINA = Math.max(4, Math.round(H * 0.004));
+    for (y = 0; y < H; ) {
+      if (hs[y] !== 2) { y++; continue; }
+      var y2 = y; while (y2 < H && hs[y2] === 2) y2++;
+      var v = (y2 - y > FINA) ? 0 : 1;
+      for (var yy = y; yy < y2; yy++) hs[yy] = v;
+      y = y2;
+    }
     var rayasH = [], enRaya = false, y0 = 0;
     for (y = 0; y <= H; y++) {
-      var es = y < H && hs[y] > 0.45;
+      var es = y < H && hs[y] === 1;
       if (es && !enRaya) { enRaya = true; y0 = y; }
       else if (!es && enRaya) { enRaya = false; rayasH.push((y0 + y - 1) / 2); }
     }
-    // rayas verticales: columnas con más del 60 % oscuro. La primera que no
-    // sea el borde izquierdo separa el símbolo del texto.
+    /* rayas verticales: columnas con más del 60 % oscuro, o con un tramo
+       seguido de tinta de más del 35 % del alto (las cabeceras de sección que
+       cruzan la tabla la cortan). La búsqueda arranca justo después del borde
+       izquierdo REAL de la tabla, no en un 4 % fijo: si el marco dejaba aire,
+       el borde se tomaba por la columna del símbolo. */
+    var colTinta = function (x2) { var c = 0, mejor = 0, run = 0, hueco = 0, y2; for (y2 = 0; y2 < H; y2++) { var l2 = lum((y2 * W + x2) * 4); if (x2 + 1 < W) l2 = Math.min(l2, lum((y2 * W + x2 + 1) * 4)); if (l2 < TINTA) { c++; run += hueco + 1; hueco = 0; if (run > mejor) mejor = run; } else if (run && hueco < HUECO) hueco++; else { run = 0; hueco = 0; } } return { c: c / H, tramo: mejor / H }; };
+    var xIzq = 0;
+    while (xIzq < W * 0.3 && colTinta(xIzq).c < 0.02) xIzq++;
+    var desde = Math.max(Math.round(W * 0.02), xIzq + Math.max(3, Math.round(W * 0.01)));
+    // si en xIzq empieza el borde (raya vertical), se salta su grosor
+    while (desde < W * 0.6 && colTinta(desde).tramo > 0.35 && desde - xIzq < W * 0.03) desde++;
     var colX = null;
-    for (x = Math.round(W * 0.04); x < W * 0.6; x++) {
+    for (x = desde; x < W * 0.6; x++) {
       n = 0; for (y = 0; y < H; y++) if (oscuro((y * W + x) * 4)) n++;
       if (n / H > 0.6) { colX = x; break; }
+      if (colTinta(x).tramo > 0.35) {
+        // encontrada por su tramo gris: es el borde con antialias; el corazón
+        // oscuro de la raya (si lo tiene) está 1-3 px más allá
+        colX = x + 1;
+        for (var x3 = x + 1; x3 <= x + 3 && x3 < W; x3++) { n = 0; for (y = 0; y < H; y++) if (oscuro((y * W + x3) * 4)) n++; if (n / H > 0.6) { colX = x3; break; } }
+        break;
+      }
     }
     var filas = [];
     for (i = 0; i + 1 < rayasH.length; i++) {
@@ -11483,6 +11583,10 @@
       var alt = filas.map(function (f) { return f[1] - f[0]; }).sort(function (a, b) { return a - b; }), med = alt[Math.floor(alt.length / 2)];
       var ult = rayasH[rayasH.length - 1];
       if (H - 1 - ult >= med * 0.5) filas.push([ult, H - 1]);
+      // (v35.J) y por arriba: si el marco no incluyó la raya de arriba, la
+      // primera fila también cuenta (si mide como una fila, no como un título)
+      var pri = rayasH[0];
+      if (pri >= med * 0.5 && pri <= med * 1.6) filas.unshift([0, pri]);
     }
     ley.tabla = { filas: filas, colX: colX, rayasH: rayasH.length };
     return ley.tabla;
@@ -11492,7 +11596,7 @@
      símbolo: su texto va centrado y no llega a la columna de la izquierda. */
   function leyFilasSimbolo() {
     var t = leyTabla();
-    if (!t || t.filas.length < 3) return null;
+    if (!t || t.filas.length < 2) return null;   // (v35.J) 2, como leyLocal: una tabla chica de 2 filas daba 0 símbolos
     if (t.filasSim) return t.filasSim;
     var W = ley.w, ctx = ley.cv.getContext('2d', { willReadFrequently: true });
     var xc = Math.max(8, Math.round(t.colX ? t.colX : W * 0.18));
@@ -11508,10 +11612,19 @@
       // cruza toda la tabla (WIRING DEVICES, FIRE ALARM SYSTEM…): su letra sí
       // llega a la columna del dibujo, pero no es un símbolo
       if (t.colX) {
-        var dv; try { dv = ctx.getImageData(t.colX - 1, y0, 3, h).data; } catch (e) { dv = null; }
+        /* (v35.J) la raya puede ser gris y fina, y la cabecera puede tener
+           fondo de color: hay raya si la columna es más OSCURA que lo que
+           tiene a 6 px a cada lado (un fondo es parejo; una raya, no) */
+        var dv, xa = Math.max(0, t.colX - 7), anchoV = Math.min(W - xa, 15);
+        try { dv = ctx.getImageData(xa, y0, anchoV, h).data; } catch (e) { dv = null; }
         if (dv) {
-          var con = 0;
-          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < 3; xx++) { var q = (yy * 3 + xx) * 4; if ((dv[q] * 299 + dv[q + 1] * 587 + dv[q + 2] * 114) / 1000 < 150) { con++; break; } }
+          var con = 0, lv = function (yy, xx) { var q = (yy * anchoV + xx) * 4; return (dv[q] * 299 + dv[q + 1] * 587 + dv[q + 2] * 114) / 1000; };
+          var cx = t.colX - xa;
+          for (var yy = 0; yy < h; yy++) {
+            var mn = 255; for (var xx = cx - 1; xx <= cx + 1; xx++) if (xx >= 0 && xx < anchoV) mn = Math.min(mn, lv(yy, xx));
+            var ref = Math.max(cx - 6 >= 0 ? lv(yy, cx - 6) : 255, cx + 6 < anchoV ? lv(yy, cx + 6) : 255);
+            if (mn < 232 && mn < ref - 20) con++;
+          }
           if (con / h < 0.5) return;
         }
       }
@@ -11567,6 +11680,42 @@
   }
   /* El recorte del símbolo. `fila` viene de leyAsignaFilas (por orden);
      sin tabla, la caja del modelo con margen. 56 px de alto, JPEG chico. */
+  // (v35.J) la región del dibujo: la celda del símbolo de su fila, o la caja del modelo con margen
+  function leyRegionDibujo(caja, fila, margen) {
+    var W = ley.w, H = ley.h, t = leyTabla(), x0, y0, x1, y1;
+    if (fila) {
+      y0 = fila.y0 + 1; y1 = fila.y1 - 1;
+      x0 = 0; x1 = (t && t.colX) ? t.colX - 1 : Math.min(W, W * 0.18);
+      if (x1 - x0 < 8) { x0 = 0; x1 = Math.min(W, W * 0.18); }
+    } else {
+      if (!caja) return null;
+      var cx0 = Math.max(0, Math.min(100, +caja.x0 || 0)) / 100 * W, cx1 = Math.max(0, Math.min(100, +caja.x1 || 0)) / 100 * W;
+      var cy0 = Math.max(0, Math.min(100, +caja.y0 || 0)) / 100 * H, cy1 = Math.max(0, Math.min(100, +caja.y1 || 0)) / 100 * H;
+      var m = Math.max(3, (cx1 - cx0) * margen, (cy1 - cy0) * margen);
+      x0 = Math.max(0, cx0 - m); y0 = Math.max(0, cy0 - m); x1 = Math.min(W, cx1 + m); y1 = Math.min(H, cy1 + m);
+    }
+    return (x1 - x0 < 4 || y1 - y0 < 4) ? null : { x0: x0, y0: y0, x1: x1, y1: y1 };
+  }
+  /* El molde para «buscar en el plano» cuando la fila vino del cerebro: la
+     tinta real dentro de su celda (sin las rayas de la tabla), en coordenadas
+     del plano. Sin tinta, sin molde. */
+  function leyMoldeDe(caja, fila) {
+    if (!ley || !ley.cv || !ley.rect) return null;
+    var r = leyRegionDibujo(caja, fila, 0.3); if (!r) return null;
+    var tin = leyTintaCelda(ley.cv, r.x0, r.y0, r.x1, r.y1);
+    if (!tin || !tin.caja) return null;
+    var c = tin.caja;
+    if (!fila && caja) {
+      // sin tabla, el margen puede alcanzar el texto de al lado: solo los grupos
+      // de tinta que tocan la caja que dio el modelo
+      var bx0 = (+caja.x0 || 0) / 100 * ley.w, bx1 = (+caja.x1 || 0) / 100 * ley.w;
+      var gs = leyGrupos(tin, Math.max(5, Math.round(tin.w * 0.04))).filter(function (g) { return g.x1 > bx0 && g.x0 < bx1; });
+      if (gs.length) c = leyCajaEn(tin, gs[0].x0, gs[gs.length - 1].x1) || c;
+    }
+    var k = (ley.rect.x1 - ley.rect.x0) / ley.w, ky = (ley.rect.y1 - ley.rect.y0) / ley.h;
+    if (c.x1 - c.x0 < 3 || c.y1 - c.y0 < 3) return null;
+    return { x0: ley.rect.x0 + c.x0 * k, y0: ley.rect.y0 + c.y0 * ky, x1: ley.rect.x0 + c.x1 * k, y1: ley.rect.y0 + c.y1 * ky };
+  }
   function leyGlifo(caja, fila) {
     if (!ley || !ley.cv) return '';
     var W = ley.w, H = ley.h, t = leyTabla();
@@ -11595,7 +11744,10 @@
   }
   function pintaLey(estado, err) {
     var c = $('#leyCuerpo'); if (!c) return;
-    if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>'; enganchaLeyOtra(); return; }
+    var puedeCerebro = !!(ley && ley.b64 && cerebroCfg().url);
+    var botCerebro = function (txt) { return puedeCerebro ? '<button id="leyCerebro" style="width:100%;margin-top:4px" title="Que el cerebro lea la misma tabla: tarda 30-60 s">' + txt + '</button>' : ''; };
+    var engCerebro = function () { var bB = $('#leyCerebro'); if (bB) bB.addEventListener('click', function () { leyConCerebro(); }); };
+    if (err) { c.innerHTML = '<div class="bMuted" style="color:#a33">' + esc(err).replace(/\n/g, '<br>') + '</div><button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>' + botCerebro(ley && ley.deCerebro ? 'Leer con el cerebro otra vez' : 'Leer con el cerebro'); enganchaLeyOtra(); engCerebro(); return; }
     if (estado) { c.innerHTML = '<div class="bMuted">' + esc(estado) + '</div>'; return; }
     if (!ley || !ley.filas) {
       c.innerHTML = '<div class="bMuted">Encierra con dos toques la <b>TABLA DE SÍMBOLOS</b> del ingeniero.</div>' +
@@ -11607,8 +11759,8 @@
       (ley.filas.some(function (f) { return f.ya; }) ? ' <span class="muted">· ' + ley.filas.filter(function (f) { return f.ya; }).length + ' ya en el proyecto</span>' : '') + '</div>';
     if (!ley.filas.length) {
       h += '<div class="bMuted">No se leyó ningún símbolo.' + (ley.notas ? ' El cerebro dice: ' + esc(ley.notas) : '') + '</div>';
-      h += '<button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>';
-      c.innerHTML = h; enganchaLeyOtra(); return;
+      h += '<button id="leyOtra" style="width:100%;margin-top:8px">Encerrar otra vez</button>' + (ley.deCerebro ? '' : botCerebro('Leer con el cerebro'));
+      c.innerHTML = h; enganchaLeyOtra(); engCerebro(); return;
     }
     h += ayudaHtml('ley2', 'El nombre se puede corregir. La pareja es lo que te propone la biblioteca; la <b>receta</b> es el punto completo que irá al estimador (caja, anillo, tapa, conectores…). Verde = casa bien; rojo = míralo. Nada se crea sin que lo veas.');
     if (ley.local && ley.recetas && !ley.recetas.length) h += '<div class="muted small" style="color:#a33">Sin sesión del estimador no puedo proponer recetas: las categorías nacen sin punto completo (se les pone después en Count ▾).</div>';
@@ -11639,7 +11791,7 @@
     var conMolde = vivas.filter(function (f) { return f.moldeRect; }).length;
     h += '<button id="leyCrear" style="width:100%;margin-top:6px"' + (vivas.length ? '' : ' disabled') + '>Crear ' + (vivas.length === 1 ? 'la categoría' : 'las ' + vivas.length + ' categorías') + '</button>';
     h += '<button id="leyOtra" style="width:100%;margin-top:4px">Encerrar otra tabla</button>';
-    if (ley.local && cerebroCfg().url) h += '<button id="leyCerebro" style="width:100%;margin-top:4px" title="Que el cerebro lea la misma tabla (segunda opinión): tarda 30-60 s">Leer con el cerebro (segunda opinión)</button>';
+    if (!ley.deCerebro) h += botCerebro('Leer con el cerebro (segunda opinión)');
     h += '<div class="muted small" style="margin-top:6px">' + (conMolde ? 'Al crear, la app <b>busca cada dibujo en todas las hojas</b> y lo cuenta; las marcas quedan revisables y Ctrl+Z las quita todas.' : 'Esto pone los nombres. Contar: Count a mano, o Buscar iguales con el dibujito de cada fila.') + '</div>';
     c.innerHTML = h;
     var lista = $('#lyLista');
@@ -11653,7 +11805,7 @@
       });
     }
     var bC = $('#leyCrear'); if (bC) bC.addEventListener('click', leyendaCrea);
-    var bB = $('#leyCerebro'); if (bB) bB.addEventListener('click', leyConCerebro);
+    engCerebro();
     enganchaLeyOtra();
   }
   function enganchaLeyOtra() { var b = $('#leyOtra'); if (b) b.addEventListener('click', function () { if (ley && ley.cv) { ley.cv.width = 1; } ley = null; pintaLey(); setTool('leyenda'); }); }
@@ -11996,6 +12148,7 @@
   function cuentaRecibeLosa(d, R, i) {
     var C = cuenta, K = d.conteo;
     apuntaUso(C, d);
+    (C.losaOk || (C.losaOk = {}))[i] = 1;
     var W = R.x1 - R.x0, H = R.y1 - R.y0, sinNombre = {};
     (Array.isArray(K.marcas) ? K.marcas : []).slice(0, 500).forEach(function (m) {
       if (!m) return;
@@ -12025,8 +12178,25 @@
       return muestras.some(function (r) { var mx = (r.x1 - r.x0) * 0.2 + 2, my = (r.y1 - r.y0) * 0.2 + 2; return m.x >= r.x0 - mx && m.x <= r.x1 + mx && m.y >= r.y0 - my && m.y <= r.y1 + my; });
     }
     var out = [], vistas = [], enLey = 0, dobles = 0, yaEstaban = 0, yaPorCat = {};   // vistas: las que ya estaban, para que sus otras vistas del solape no se cuenten otra vez
+    /* (v35.J, auditoría 26/09) EL NÚCLEO DE CADA LOSA. En el solape dos losas
+       ven la misma pieza; si dudaban de la categoría o de la posición, el radio
+       no las juntaba y la pieza salía dos veces. Ahora cada punto tiene UNA
+       losa dueña: la de centro más cercano entre las que lo contienen y sí se
+       leyeron. Lo que una losa marca en el núcleo de otra no cuenta (esa otra
+       ya lo vio). Si la dueña falló, vale lo de la vecina. */
+    var LS = (cuenta && cuenta.losas) || [], okL = (cuenta && cuenta.losaOk) || {};
+    function duena(m) {
+      var mejor = m.losa, dMej = Infinity;
+      LS.forEach(function (L, k) {
+        if (!okL[k] || m.x < L.x0 || m.x > L.x1 || m.y < L.y0 || m.y > L.y1) return;
+        var dd = Math.hypot(m.x - (L.x0 + L.x1) / 2, m.y - (L.y0 + L.y1) / 2);
+        if (dd < dMej - 1e-9) { dMej = dd; mejor = k; }
+      });
+      return mejor;
+    }
     marcas.slice().sort(function (a, b) { return b.conf - a.conf; }).forEach(function (m) {
       if (enMuestra(m)) { enLey++; return; }
+      if (m.losa != null && LS.length > 1 && duena(m) !== m.losa) { dobles++; return; }
       var mismaPieza = function (q) { return q.cat === m.cat && q.losa !== m.losa && Math.hypot(q.x - m.x, q.y - m.y) <= R; };
       if (out.some(mismaPieza) || vistas.some(mismaPieza)) { dobles++; return; }
       if (state.counts.some(function (q) { return q.cat === m.cat && Math.hypot(q.x - m.x, q.y - m.y) <= R; })) { yaEstaban++; yaPorCat[m.cat] = (yaPorCat[m.cat] || 0) + 1; vistas.push(m); return; }
@@ -12290,6 +12460,8 @@
     solape: function (rect) { return cuentaSolape(cuentaLosas(rect || cuentaRectHoja())); },
     simbolos: cuentaSimbolos,
     radio: cuentaRadio,
+    // (v35.J) la depuración con unas losas y unas marcas dadas (el núcleo de cada losa)
+    depura: function (losas, ok, marcas) { var prev = cuenta; cuenta = { losas: losas, losaOk: ok }; try { var r = cuentaDepura(marcas); return { n: r.marcas.length, dobles: r.dobles, marcas: r.marcas.map(function (m) { return m.cat + '@' + m.losa; }) }; } finally { cuenta = prev; } },
     estado: function () { return cuenta ? { enVuelo: cuenta.enVuelo, hechas: cuenta.hechas, losas: cuenta.losas.length, marcas: cuenta.marcas.length, nuevas: cuenta.nuevas ? cuenta.nuevas.length : null, dudas: cuenta.dudas.slice(), fallos: cuenta.fallos.slice(), dep: cuenta.dep || null, resumen: cuenta.resumen, uso: cuenta.uso, modelo: cuenta.modelo, porModelo: cuenta.porModelo || null, cancel: cuenta.cancel } : null; },
     costo: function (uso, modelo, porModelo) { return cuentaCosto(uso, modelo, porModelo); },
     modelos: function () { return modelosDe(cuenta); },
@@ -15310,6 +15482,134 @@
     pide: scopePide, crea: scopeCrea
   };
 
+  /* ================= CHECKLIST DEL SET CON IA (26/09, v35.J) =================
+     Edgar: «yo quiero que me dé resultados como este… mira el resumen que tú
+     me diste para ir chequeando y estimando». El cerebro de la app (el mejor
+     modelo, a fondo) abre los PDF de ESTE proyecto (abrir_planos) y arma el
+     checklist del takeoff como el de Peninsula: leyenda y notas, demolición
+     por cuarto, lo nuevo por panel y circuito, rutas, walk-thru, preguntas y
+     alcance. Es SOLO para ver: no toca el takeoff ni el estimado.
+     Un trabajo así pasa del límite de 150 s de la plataforma: el cerebro
+     guarda por dónde va y contesta { sigue }; aquí se vuelve a llamar sola.
+     El último checklist queda guardado en el proyecto (checklistIA). */
+  var chk = { corriendo: false, avance: '', error: '' };
+  function chkGuardado() { var c = state.project && state.project.checklistIA; return c && c.texto ? c : null; }
+  function abreChk() { var b = $('#chkBox'); if (!b) return; b.classList.remove('oculto'); pintaChk(); }
+  function cierraChk() { var b = $('#chkBox'); if (b) b.classList.add('oculto'); }
+  // markdown → HTML, escapando TODO primero (el texto viene del modelo)
+  function chkMd(md) {
+    var lin = String(md || '').replace(/\r/g, '').split('\n'), out = [], i = 0;
+    function enl(t) {
+      return esc(t).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\[( |x|X)\]/g, function (m, x) { return x === ' ' ? '☐' : '☑'; });
+    }
+    function celdas(l) { return l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) { return c.trim(); }); }
+    while (i < lin.length) {
+      var l = lin[i];
+      if (/^\s*\|.*\|\s*$/.test(l)) {
+        var filas = [];
+        while (i < lin.length && /^\s*\|.*\|\s*$/.test(lin[i])) { filas.push(lin[i]); i++; }
+        var h = '<table>';
+        filas.forEach(function (f, k) {
+          if (/^[\s|:\-]+$/.test(f)) return;   // la raya |---|---| de markdown
+          var tag = k === 0 ? 'th' : 'td';
+          h += '<tr>' + celdas(f).map(function (c) { return '<' + tag + '>' + enl(c) + '</' + tag + '>'; }).join('') + '</tr>';
+        });
+        out.push(h + '</table>'); continue;
+      }
+      var m;
+      if ((m = /^(#{1,4})\s+(.*)$/.exec(l))) { out.push('<h' + (m[1].length + 2) + '>' + enl(m[2]) + '</h' + (m[1].length + 2) + '>'); i++; continue; }
+      if (/^\s*([-*_])\1{2,}\s*$/.test(l)) { out.push('<hr>'); i++; continue; }
+      if (/^\s*([-*•]|\d+[.)])\s+/.test(l)) {
+        var items = [];
+        while (i < lin.length && /^\s*([-*•]|\d+[.)])\s+/.test(lin[i])) {
+          var sang = /^(\s*)/.exec(lin[i])[1].length;
+          items.push('<li' + (sang >= 2 ? ' class="sub"' : '') + '>' + enl(lin[i].replace(/^\s*([-*•]|\d+[.)])\s+/, '')) + '</li>'); i++;
+        }
+        out.push('<ul>' + items.join('') + '</ul>'); continue;
+      }
+      if (!l.trim()) { i++; continue; }
+      out.push('<p>' + enl(l) + '</p>'); i++;
+    }
+    return out.join('');
+  }
+  function pintaChk() {
+    var c = $('#chkCuerpo'); if (!c) return;
+    var g = chkGuardado(), id = state.project && state.project.id;
+    var h = '<div class="bMuted">El cerebro de la app (el mejor modelo, pensando a fondo) abre los PDF de este proyecto y arma el checklist para estimar: leyenda y notas, demolición por cuarto, lo nuevo por panel y circuito, rutas de tubo, walk-thru, preguntas y alcance. <b>Solo es para ver: no cambia el takeoff.</b> Tarda de 3 a 10 minutos y cuesta unos $2–4.</div>';
+    if (!SB || !cerebroSupaOk()) h += '<div class="chkAviso">Hace falta la sesión del panel: entra desde 💲 Estimador.</div>';
+    var pend = (nube && nube.pendientes && id && nube.pendientes[id]) || (pdfNube && Object.keys(pdfNube.pendientes).length);
+    if (pend) h += '<div class="chkAviso">Hay cambios o PDF sin subir a la nube (☁): el cerebro lee lo que está en la nube. Espera a que suba.</div>';
+    h += '<textarea id="chkPide" placeholder="Opcional: qué quieres que mire en especial (ej.: solo el 2º piso, o compara con el takeoff)" style="min-height:54px"></textarea>';
+    h += '<div class="chkBots"><button id="chkVa" class="pri"' + (chk.corriendo ? ' disabled' : '') + '>' + (chk.corriendo ? 'Trabajando…' : (g ? 'Hacerlo otra vez' : 'Hacer el checklist')) + '</button>';
+    if (g && !chk.corriendo) h += '<button id="chkCopia">Copiar</button><button id="chkBaja">Bajar .md</button>';
+    h += '</div>';
+    if (chk.corriendo) h += '<div class="chkAviso">⏳ ' + esc(chk.avance || 'Abriendo los planos…') + '<br><span class="bMuted">Puedes seguir trabajando; no cierres la app.</span></div>';
+    if (chk.error) h += '<div class="chkAviso err">' + esc(chk.error) + '</div>';
+    if (g) h += '<div class="bMuted">Hecho ' + esc(g.fecha || '') + (g.modelo ? ' · ' + esc(g.modelo) : '') + '</div><div id="chkTexto">' + chkMd(g.texto) + '</div>';
+    c.innerHTML = h;
+    var va = $('#chkVa'); if (va) va.addEventListener('click', function () { chkPide(($('#chkPide') || {}).value || ''); });
+    var co = $('#chkCopia'); if (co) co.addEventListener('click', function () {
+      try { navigator.clipboard.writeText(g.texto).then(function () { setHint('Checklist copiado'); }); } catch (e) {}
+    });
+    var ba = $('#chkBaja'); if (ba) ba.addEventListener('click', function () {
+      saveFile((state.project.name || 'proyecto') + '_checklist.md', g.texto);
+    });
+  }
+  function cerebroSupaOk() { var a = sbAuth(); return !!(a && a.access_token); }
+  function chkPregunta(extra) {
+    var pj = state.project || {};
+    return 'Revisa los planos del proyecto de MXP Planos con id «' + pj.id + '» («' + (pj.name || '') + '»' +
+      (pj.client ? ', cliente ' + pj.client : '') + '). Ábrelos con abrir_planos y léelos enteros, y hazme el CHECKLIST DEL TAKEOFF ' +
+      'completo como dicen tus reglas de LOS PLANOS, para ir chequeando y estimando. No cambies nada: ni el estimado ni Planos.' +
+      (String(extra || '').trim() ? '\n\nAdemás, Edgar pide: ' + String(extra).trim() : '');
+  }
+  function chkLlama(cuerpo) {
+    return sbFetch('/functions/v1/cerebro?accion=asistente', { method: 'POST', body: cuerpo });
+  }
+  function chkPide(extra) {
+    if (chk.corriendo) return;
+    var pj = state.project || {};
+    if (!pj.id) { chk.error = 'Este proyecto todavía no tiene id: guárdalo primero.'; pintaChk(); return; }
+    if (!SB) { chk.error = 'Falta la conexión con el panel.'; pintaChk(); return; }
+    if (!cerebroSupaOk()) { askLogin(function () { chkPide(extra); }); return; }
+    chk.corriendo = true; chk.error = ''; chk.avance = 'Abriendo los planos…'; pintaChk();
+    var tandas = 0, idProy = pj.id;
+    function sigue(res) {
+      if (res && res.sigue && tandas < 12) {
+        tandas++;
+        chk.avance = 'Sigo leyendo (tanda ' + (res.tanda || tandas + 1) + ')' + (res.avance ? ': ' + String(res.avance).slice(0, 180) : '');
+        pintaChk();
+        return chkLlama({ trabajo: res.sigue }).then(sigue);
+      }
+      return res;
+    }
+    chkLlama({ mensajes: [{ rol: 'user', texto: chkPregunta(extra) }] }).then(sigue).then(function (res) {
+      chk.corriendo = false;
+      if (!state.project || state.project.id !== idProy) return;   // cambió de proyecto mientras tanto
+      if (!res || res.error || !res.respuesta) {
+        chk.error = res && res.error === 'no_autorizado' ? 'El cerebro dice que esta sesión no es de un dueño: entra con tu cuenta desde 💲 Estimador.'
+          : 'No llegó el checklist' + (res && (res.detalle || res.error) ? ': ' + (res.detalle || res.error) : '.');
+        pintaChk(); return;
+      }
+      if (res.sigue) { chk.error = 'Se tardó demasiado. Vuelve a pedirlo más concreto (por ejemplo, por pisos).'; pintaChk(); return; }
+      var d = new Date();
+      state.project.checklistIA = { texto: String(res.respuesta), modelo: res.modelo || '',
+        fecha: (d.getMonth() + 1) + '/' + d.getDate() + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) };
+      scheduleAutosave(); pintaChk(); setHint('Checklist del set listo');
+    }).catch(function (e) {
+      chk.corriendo = false;
+      if (e && e.message === 'login') { askLogin(function () { chkPide(extra); }); pintaChk(); return; }
+      chk.error = 'No se pudo hablar con el cerebro: ' + ((e && e.message) || e); pintaChk();
+    });
+  }
+  (function () {
+    var b = $('#btnChk'); if (b) b.addEventListener('click', abreChk);
+    var x = $('#chkCerrar'); if (x) x.addEventListener('click', cierraChk);
+    arrastraPanel($('#chkCab'), $('#chkBox'));
+  })();
+  window.__chkDbg = { abre: abreChk, md: chkMd, pregunta: chkPregunta, pide: chkPide, estado: function () { return chk; } };
+
   /* ================= CUADRE — lo que trazaste y contaste contra lo que dice el plano =================
      (Edgar, 17/09: «ya toda la tubería está medida… yo no quiero que lo hagas
      por mí, yo quiero que funcione en la app… contrarresta lo otro con los
@@ -18154,6 +18454,12 @@
         return { id: String(o.id || uid()).slice(0, 40), item: String(o.item).replace(/\s+/g, ' ').trim().slice(0, 80), ft: Math.max(0, Math.round(+o.ft || 0)), codigo: esCodigo(o.codigo) ? o.codigo : '' };
       }).filter(function (o) { return o.ft > 0; });
       if (lmS.length) state.project.linMano = lmS; else delete state.project.linMano;
+    }
+    // (v35.J) el último checklist del set que hizo el cerebro: solo texto, para ver
+    if (state.project && state.project.checklistIA) {
+      var ck = state.project.checklistIA;
+      if (ck && typeof ck === 'object' && ck.texto) state.project.checklistIA = { texto: String(ck.texto).slice(0, 200000), modelo: String(ck.modelo || '').slice(0, 60), fecha: String(ck.fecha || '').slice(0, 20) };
+      else delete state.project.checklistIA;
     }
     if (state.project && state.project.cuadre && typeof state.project.cuadre === 'object') {
       var qc = state.project.cuadre, lim = function (o) { var r = {}; Object.keys(o || {}).slice(0, 200).forEach(function (k) { var v = parseInt(o[k], 10); if (v >= 0) r[String(k).slice(0, 40)] = v; }); return r; };
