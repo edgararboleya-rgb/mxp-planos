@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.K';
+  var APP_VERSION = 'v35.L';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9444,7 +9444,18 @@
      Edgar; al 45 % la marca mide lo que un receptáculo del plano (radio 4"
      con los símbolos al 50 %), que es la referencia que él dio. */
   function escCnt() { var v = Number(state.cntEsc); return (isFinite(v) && v >= 0.3 && v <= 1.5) ? v : 0.45; }
-  function countR() { return 9 * ((state.symEsc || 0.5) / 0.5) * escCnt(); }
+  /* (v35.L, Edgar 26/09 con captura de Peninsula: «está demasiado grande, no
+     está como los que hemos hecho anteriormente») El radio iba FIJO en
+     unidades del dibujo (9 → unas 4" de obra al 45 %): en un plano a 1/8"
+     casaba con un receptáculo, pero a 1/4" o sin calibrar salía dos o tres
+     veces más grande que el símbolo. Con el tamaño del papel conocido (el PDF
+     lo trae) se mide sobre el PAPEL: 0,1" al 100 % → 0,045" al 45 %, lo que
+     mide un receptáculo dibujado a cualquier escala. Sin papel, como antes. */
+  function countR() {
+    var bg = state.bg, base = 9;
+    if (bg && +bg.paperW > 0 && +bg.w > 0) base = 0.1 * bg.w / bg.paperW;
+    return base * ((state.symEsc || 0.5) / 0.5) * escCnt();
+  }
 
   /* extra (opcional) viene de la Biblioteca de takeoff: alias = el Subject de
      Bluebeam que el estimador ya entiende, set = de qué tool set salió, item =
@@ -9854,6 +9865,174 @@
     return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
   }
 
+  /* ================= IA CONTRA REAL (26/09, v35.L) =================
+     Edgar: «que salgan tus números como guía y los míos reales que yo vaya
+     encontrando, y entre los dos llegamos al resultado… que pueda aprender de
+     lo que vamos haciendo». El modelo no se reentrena, pero sí se le puede
+     ENSEÑAR: cada pasada del cerebro deja apuntado qué marcas puso (y qué
+     marcas tuyas volvió a ver). Luego, sin que Edgar llene nada:
+       · la marca del cerebro que borró = contó de MÁS;
+       · la marca suya, dentro de la zona que contó el cerebro = se le ESCAPÓ.
+     «Conteo revisado» guarda la lección (ia_lecciones_conteo). En el próximo
+     conteo esas lecciones viajan como contexto (el worker ya las acepta) y el
+     checklist del set también las lee. Con varios proyectos revisados sale
+     qué tan certera es por familia. */
+  var iaLecc = null, iaLeccT = 0, iaLeccCarga = null;
+  function iaPasadas() { var g = state.project && state.project.guiaIA; return Array.isArray(g) ? g : []; }
+  function iaApuntaPasada(p) {
+    if (!state.project) return;
+    var g = iaPasadas().slice(); g.push(p);
+    state.project.guiaIA = g.slice(-80);
+    scheduleAutosave();
+  }
+  function iaMarcasDeHoja(i) {
+    if (i === state.curSheet) return state.counts;
+    var sh = (state.sheets || [])[i];
+    if (!sh || typeof sh.data !== 'string') return [];
+    try { var o = JSON.parse(sh.data); return (o && Array.isArray(o.counts)) ? o.counts : []; } catch (e) { return []; }
+  }
+  function iaContraReal() {
+    var P = iaPasadas(); if (!P.length) return null;
+    var cache = {}, marcas = function (i) { return cache[i] || (cache[i] = iaMarcasDeHoja(i)); };
+    var porCat = {};
+    P.forEach(function (p) {
+      var pres = {}; marcas(p.hoja).forEach(function (m) { pres[m.id] = 1; });
+      var nuevas = [];
+      Object.keys(p.ids || {}).forEach(function (k) { nuevas = nuevas.concat(p.ids[k]); });
+      if (nuevas.length && !nuevas.some(function (id) { return pres[id]; })) return;   // la pasada se deshizo entera (Ctrl+Z / Quitar lo del cerebro)
+      (p.cats || []).forEach(function (cat) {
+        var e = porCat[cat] || (porCat[cat] = { ids: {}, zonas: [], modelo: '' });
+        e.zonas.push({ hoja: p.hoja, r: p.rect });
+        ((p.ids || {})[cat] || []).concat((p.vio || {})[cat] || []).forEach(function (id) { e.ids[id] = 1; });
+        if (p.modelo) e.modelo = p.modelo;
+      });
+    });
+    var out = [];
+    Object.keys(porCat).forEach(function (cat) {
+      var c = catCount(cat); if (!c || c.tablero) return;
+      var e = porCat[cat], ia = Object.keys(e.ids).length, quedan = 0, agreg = 0, vistas = {}, hojas = {};
+      e.zonas.forEach(function (z) {
+        var r = z.r; hojas[z.hoja] = 1;
+        marcas(z.hoja).forEach(function (m) {
+          if (!m || m.cat !== cat || vistas[m.id]) return;
+          if (r && (m.x < r.x0 || m.x > r.x1 || m.y < r.y0 || m.y > r.y1)) return;
+          vistas[m.id] = 1;
+          if (e.ids[m.id]) quedan++; else agreg++;
+        });
+      });
+      var mano = c.manual > 0 ? c.manual : 0;
+      var nomH = Object.keys(hojas).map(function (i) { var sh = (state.sheets || [])[+i]; return (sh && sh.no) || ('Hoja ' + (+i + 1)); });
+      out.push({ cat: cat, nom: c.nom, ia: ia, real: quedan + agreg + mano, quitadas: ia - quedan, agregadas: agreg + mano, hojas: nomH, modelo: e.modelo, familia: cuentaFamilia(c), item: c.item || c.alias || '', receta: c.receta || '' });
+    });
+    return out.sort(function (a, b) { return a.nom.localeCompare(b.nom); });
+  }
+  /* Las lecciones guardadas (de todos los proyectos), con caché de 10 min. */
+  function iaCargaLecciones(esperaMax) {
+    if (iaLecc && Date.now() - iaLeccT < 600000) return Promise.resolve(iaLecc);
+    if (!SB || !sbAuth()) return Promise.resolve(iaLecc || []);
+    if (!iaLeccCarga) {
+      iaLeccCarga = sbFetch('/rest/v1/ia_lecciones_conteo?select=proyecto_id,proyecto,categoria,item,receta,familia,ia,real,quitadas,agregadas,nota,creado&order=creado.desc&limit=400')
+        .then(function (rows) { iaLecc = Array.isArray(rows) ? rows : []; iaLeccT = Date.now(); iaLeccCarga = null; return iaLecc; },
+              function () { iaLeccCarga = null; return iaLecc || []; });
+    }
+    if (!esperaMax) return iaLeccCarga;
+    return Promise.race([iaLeccCarga, new Promise(function (ok) { setTimeout(function () { ok(iaLecc || []); }, esperaMax); })]);
+  }
+  function iaSuma(ls) {
+    var s = { n: ls.length, ia: 0, real: 0, q: 0, a: 0, notas: [] };
+    ls.forEach(function (l) { s.ia += +l.ia || 0; s.real += +l.real || 0; s.q += +l.quitadas || 0; s.a += +l.agregadas || 0; if (l.nota && s.notas.indexOf(l.nota) < 0) s.notas.push(String(l.nota)); });
+    return s;
+  }
+  function iaFrase(nom, s) {
+    var d = s.real - s.ia, pct = s.real ? Math.round(Math.abs(d) / s.real * 100) : 100;
+    var t = '«' + nom + '»: en ' + s.n + ' conteo(s) revisado(s) por Edgar contaste ' + s.ia + ' y eran ' + s.real +
+      (d > 0 ? ' (te FALTARON ' + d + ', −' + pct + ' %)' : d < 0 ? ' (contaste ' + (-d) + ' DE MÁS, +' + pct + ' %)' : ' (el total cuadró)') +
+      (s.q || s.a ? '; él quitó ' + s.q + ' marca(s) que no eran y añadió ' + s.a + ' que no viste' : '') + '.';
+    if (s.notas.length) t += ' Nota de Edgar: ' + s.notas.slice(0, 2).join(' / ');
+    return t.slice(0, 390);
+  }
+  /* Las lecciones que le tocan a ESTE conteo: por categoría (mismo nombre o
+     mismo renglón del catálogo) y, si no hay, por familia. Hasta 6 frases. */
+  function iaLeccionesContexto(simb) {
+    var L = iaLecc || []; if (!L.length) return [];
+    var out = [], famHecha = {};
+    (simb || []).forEach(function (s) {
+      var c = catCount((cuenta && cuenta.porNom && cuenta.porNom[normTxt2(s.nom)]) || '') || null;
+      var item = c ? normTxt2(c.item || c.alias || '') : '';
+      var mias = L.filter(function (l) { return normTxt2(l.categoria) === normTxt2(s.nom) || (item && normTxt2(l.item || '') === item); });
+      if (mias.length) { var su = iaSuma(mias); if (su.q || su.a || su.real !== su.ia) out.push(iaFrase(s.nom, su)); return; }
+      var fam = s.familia; if (!fam || famHecha[fam]) return; famHecha[fam] = 1;
+      var deFam = L.filter(function (l) { return l.familia === fam; });
+      if (deFam.length) { var sf = iaSuma(deFam); if (sf.q || sf.a || sf.real !== sf.ia) out.push('En general, los de la familia ' + (LEY_FAM_NOM[fam] || fam) + ' — ' + iaFrase(LEY_FAM_NOM[fam] || fam, sf).replace(/^«[^»]*»: /, '')); }
+    });
+    if (out.length) out.unshift('LECCIONES DE CONTEOS ANTERIORES (lo que Edgar corrigió de lo que contaste tú): úsalas para no repetir el error — cuenta lo que VES, no un número para compensar.');
+    return out.slice(0, 7);
+  }
+  /* Qué tan certera: 1 − Σ|ia − real| / Σ real, por familia. */
+  function iaAcierto() {
+    var L = iaLecc || [], por = {};
+    L.forEach(function (l) { var f = l.familia || 'other'; var e = por[f] || (por[f] = { err: 0, real: 0, proys: {} }); e.err += Math.abs((+l.real || 0) - (+l.ia || 0)); e.real += +l.real || 0; e.proys[l.proyecto_id] = 1; });
+    return Object.keys(por).map(function (f) { var e = por[f]; return { fam: f, nom: LEY_FAM_NOM[f] || f, pct: e.real ? Math.max(0, Math.round((1 - e.err / e.real) * 100)) : 0, proys: Object.keys(e.proys).length }; })
+      .sort(function (a, b) { return b.proys - a.proys || b.pct - a.pct; });
+  }
+  function iaResumenChecklist() {
+    var L = iaLecc || []; if (!L.length) return '';
+    var ac = iaAcierto().map(function (a) { return a.nom + ' ' + a.pct + ' % (' + a.proys + ' proyecto(s))'; }).join(' · ');
+    var peores = L.slice().sort(function (a, b) { return Math.abs(b.real - b.ia) - Math.abs(a.real - a.ia); }).slice(0, 8)
+      .filter(function (l) { return l.real !== l.ia; })
+      .map(function (l) { return '- ' + l.categoria + ' (' + (l.proyecto || l.proyecto_id) + '): contaste ' + l.ia + ', eran ' + l.real + (l.nota ? ' — ' + l.nota : ''); });
+    return 'LO QUE HAS APRENDIDO DE CONTEOS ANTERIORES (revisados por Edgar): qué tan certero eres por familia: ' + ac + '.' +
+      (peores.length ? '\nTus errores más grandes:\n' + peores.join('\n') : '') + '\nTenlo en cuenta al dar cantidades: donde fallas más, cuenta con más cuidado y da el margen.';
+  }
+  function iaBloqueHtml() {
+    var F = iaContraReal(); if (!F || !F.length) return '';
+    if (iaLecc === null && !iaLeccCarga && SB && sbAuth()) iaCargaLecciones().then(function (l) { if (l && l.length) refreshCounts(); });
+    var h = '<tr class="cat"><td colspan="2">🤖 IA contra real <span class="muted small">· el cerebro de guía, tú el número bueno</span></td></tr><tr><td colspan="2"><table class="iaCR">' +
+      '<tr><th>Categoría</th><th title="Lo que contó el cerebro">IA</th><th title="Lo que es de verdad, con tus correcciones">Tú</th><th>Dif.</th></tr>';
+    var tI = 0, tR = 0;
+    F.forEach(function (f) {
+      tI += f.ia; tR += f.real; var d = f.real - f.ia;
+      h += '<tr title="' + esc('Quitaste ' + f.quitadas + ' marca(s) del cerebro que no eran · añadiste ' + f.agregadas + ' que no vio · hojas: ' + f.hojas.join(', ')) + '"><td>' + esc(f.nom) + '</td><td class="n">' + f.ia + '</td><td class="n"><b>' + f.real + '</b></td><td class="n ' + (d ? (Math.abs(d) / Math.max(1, f.real) > 0.1 ? 'iaMal' : 'iaCasi') : 'iaBien') + '">' + (d > 0 ? '+' + d : d) + '</td></tr>';
+    });
+    var pt = tR ? Math.max(0, Math.round((1 - F.reduce(function (a, f) { return a + Math.abs(f.real - f.ia); }, 0) / tR) * 100)) : 0;
+    h += '<tr class="iaTot"><td>Total · acertó ' + pt + ' %</td><td class="n">' + tI + '</td><td class="n"><b>' + tR + '</b></td><td class="n">' + ((tR - tI) > 0 ? '+' : '') + (tR - tI) + '</td></tr></table>';
+    var ac = iaAcierto().filter(function (a) { return a.proys; });
+    if (ac.length) h += '<div class="muted small" style="margin-top:4px">Qué tan certera (conteos revisados): ' + ac.slice(0, 6).map(function (a) { return esc(a.nom) + ' <b>' + a.pct + ' %</b>' + (a.proys > 1 ? ' (' + a.proys + ')' : ''); }).join(' · ') + '</div>';
+    var rv = state.project && state.project.iaRevisado;
+    h += '<input id="iaNota" placeholder="Nota para la IA (opcional): por qué falló, qué mirar la próxima vez" style="width:100%;box-sizing:border-box;margin-top:5px">' +
+      '<button id="iaGuarda" style="width:100%;margin-top:4px" title="Guarda lo que contó el cerebro y lo que era de verdad: el próximo conteo y el checklist lo tienen en cuenta">✔ Conteo revisado: guardar la lección</button>' +
+      (rv ? '<div class="muted small">Lección guardada ' + esc(rv.fecha) + ' (' + rv.n + ' categoría(s)). Si corriges más, guárdala otra vez: se reemplaza.</div>' : '<div class="muted small">Cuando termines de corregir las marcas del cerebro, guárdala: así aprende.</div>') +
+      '</td></tr>';
+    return h;
+  }
+  function iaGuardaLeccion(nota) {
+    var F = iaContraReal(), pj = state.project || {};
+    if (!F || !F.length) { setHint('Todavía no hay conteo del cerebro en este proyecto'); return Promise.resolve(false); }
+    if (!SB) { uiAlert('Falta la conexión con el panel.'); return Promise.resolve(false); }
+    if (!sbAuth()) { askLogin(function () { iaGuardaLeccion(nota); }); return Promise.resolve(false); }
+    var uid = nubeUid();
+    var filas = F.map(function (f) {
+      return { dueno: uid, proyecto_id: String(pj.id), proyecto: pj.name || '', categoria: f.nom.slice(0, 120), item: f.item || null, receta: f.receta || null, familia: f.familia || null,
+        ia: f.ia, real: f.real, quitadas: Math.max(0, f.quitadas), agregadas: f.agregadas, hojas: f.hojas.join(', ').slice(0, 200), nota: String(nota || '').trim().slice(0, 400) || null, modelo: f.modelo || null };
+    });
+    return sbFetch('/rest/v1/ia_lecciones_conteo?on_conflict=dueno,proyecto_id,categoria', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: filas })
+      .then(function () {
+        var d = new Date();
+        state.project.iaRevisado = { fecha: (d.getMonth() + 1) + '/' + d.getDate() + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2), n: filas.length };
+        iaLecc = null; iaLeccT = 0; iaCargaLecciones().then(function () { refreshCounts(); });
+        scheduleAutosave(); refreshCounts();
+        setHint('✔ Lección guardada: ' + filas.length + ' categoría(s). El próximo conteo y el checklist la tienen en cuenta');
+        return true;
+      }).catch(function (e) {
+        if (e && e.message === 'login') { askLogin(function () { iaGuardaLeccion(nota); }); return false; }
+        uiAlert('No se pudo guardar la lección: ' + ((e && e.message) || e)); return false;
+      });
+  }
+  window.__iaDbg = {
+    apunta: iaApuntaPasada, contra: iaContraReal, contexto: iaLeccionesContexto, acierto: iaAcierto, resumen: iaResumenChecklist, guarda: iaGuardaLeccion, carga: iaCargaLecciones,
+    fija: function (l) { iaLecc = l; iaLeccT = Date.now(); }
+  };
+
   /* --- el bloque del conteo dentro del panel Materiales --- */
   function conteoBloqueHtml() {
     var cats = catsCount();
@@ -9877,8 +10056,10 @@
         '<td class="n">' + nh + (c.manual > 0 ? ' <span class="muted small" title="Cantidad puesta a mano (Count ▾): se suma a las marcas y va al estimador">+ ' + c.manual + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     });
     var totMano = cats.reduce(function (a, c) { return a + (c.manual > 0 && !c.tablero ? c.manual : 0); }, 0);
+    var iaH = iaBloqueHtml();
     h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (totMano ? ' <span class="muted small">+ ' + totMano + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
     if (set.__rotas) h += '<tr><td colspan="2" style="color:#a33">⚠ ' + set.__rotas + ' hoja(s) con datos dañados no entran en el total del set</td></tr>';
+    h += iaH;
     h += '<tr><td colspan="2" style="padding-top:6px">' +
       '<button id="cntNueva" style="width:100%;margin-bottom:4px" title="Crear otra categoría de conteo">Nueva categoría de conteo</button>' +
       '<button id="cntTlib" style="width:100%;margin-bottom:4px" title="Tus 17 tool sets de Bluebeam (Boxes, Receptacles, Lights, Fire Alarm…): eliges qué contar y cada categoría llega al estimador con el nombre que ya entiende">Biblioteca de takeoff</button>' +
@@ -9889,6 +10070,7 @@
     var bN = $('#cntNueva'); if (bN) bN.addEventListener('click', pideNuevaCat);
     var bT = $('#cntTlib'); if (bT) bT.addEventListener('click', abreTlib);
     var bC = $('#cntCsv'); if (bC) bC.addEventListener('click', conteoCsv);
+    var bIA = $('#iaGuarda'); if (bIA) bIA.addEventListener('click', function () { iaGuardaLeccion(($('#iaNota') || {}).value || ''); });
     $$('#countsBody tr.cntFila').forEach(function (tr) {
       tr.addEventListener('click', function () {
         catActiva = tr.dataset.cat;
@@ -10283,6 +10465,7 @@
     var b = $('#manoBox'); if (!b) return;
     arrastraPanel($('#manoCab'), b);
     var bc = $('#manoCerrar'); if (bc) bc.addEventListener('click', cierraMano);
+    var bl = $('#manoTlib'); if (bl) bl.addEventListener('click', function () { cierraMano(); abreTlib(); });
     var i = $('#manoTxt');
     if (i) {
       i.addEventListener('input', function () { manoSel = null; pintaManoLista(); pintaManoCalc(); });
@@ -12093,7 +12276,9 @@
     cuenta = { rect: rectEnFondo(r), hoja: state.curSheet, proj: idProyecto(), losas: losas, hechas: 0, corriendo: 0, sig: 0, marcas: [], dudas: [], fallos: [], uso: { in: 0, out: 0 },
                modelo: '', t0: Date.now(), enVuelo: true, cancel: false, nuevas: null, resumen: null, simb: simb, porNom: porNom, nSimb: catsCount().length };
     pintaCuenta();
-    cuentaLanza();
+    // (v35.L) las lecciones de conteos revisados viajan como contexto: se esperan un momento
+    var C0 = cuenta;
+    iaCargaLecciones(3500).then(function () { if (cuenta !== C0 || C0.cancel) return; C0.lecc = iaLeccionesContexto(C0.simb); cuentaLanza(); });
   }
   function cuentaLanza() {
     if (!cuenta || cuenta.cancel) return;
@@ -12125,7 +12310,7 @@
       if (!rec) { C.corriendo--; C.hechas++; C.fallos.push('losa ' + (i + 1) + ': ' + err); pintaCuenta(); cuentaLanza(); return; }
       var b64 = rec.b64; rec.cv.width = 1; rec.cv.height = 1;
       if (rec.borroso && !C.avisoBorroso) { C.avisoBorroso = true; C.dudas.push('esta hoja no tiene su PDF en este aparato: las losas salen de la vista general y el conteo puede fallar. Entra en el estimador para que baje de la nube (o importa el PDF) y vuelve a contar'); }
-      var ctx = notasContexto();
+      var ctx = (C.lecc || []).concat(notasContexto()).slice(0, 12);
       pideCerebro({ imagen: { b64: b64, tipo: 'image/jpeg' }, conteo: { simbolos: C.simb, losa: i + 1, de: C.losas.length, contexto: ctx.length ? ctx : undefined } }).then(function (d) {
         if (cuenta !== C || C.cancel) return;
         if (!d || d.error || !d.conteo) { falla((d && d.error) ? String(d.error).slice(0, 120) + (d.detalle ? ' — ' + String(d.detalle).slice(0, 220) : '') : 'el cerebro no contestó en formato de conteo (¿worker viejo? git pull · wrangler deploy)'); return; }
@@ -12177,7 +12362,7 @@
     function enMuestra(m) {
       return muestras.some(function (r) { var mx = (r.x1 - r.x0) * 0.2 + 2, my = (r.y1 - r.y0) * 0.2 + 2; return m.x >= r.x0 - mx && m.x <= r.x1 + mx && m.y >= r.y0 - my && m.y <= r.y1 + my; });
     }
-    var out = [], vistas = [], enLey = 0, dobles = 0, yaEstaban = 0, yaPorCat = {};   // vistas: las que ya estaban, para que sus otras vistas del solape no se cuenten otra vez
+    var out = [], vistas = [], enLey = 0, dobles = 0, yaEstaban = 0, yaPorCat = {}, yaIds = [];   // vistas: las que ya estaban, para que sus otras vistas del solape no se cuenten otra vez
     /* (v35.J, auditoría 26/09) EL NÚCLEO DE CADA LOSA. En el solape dos losas
        ven la misma pieza; si dudaban de la categoría o de la posición, el radio
        no las juntaba y la pieza salía dos veces. Ahora cada punto tiene UNA
@@ -12199,10 +12384,11 @@
       if (m.losa != null && LS.length > 1 && duena(m) !== m.losa) { dobles++; return; }
       var mismaPieza = function (q) { return q.cat === m.cat && q.losa !== m.losa && Math.hypot(q.x - m.x, q.y - m.y) <= R; };
       if (out.some(mismaPieza) || vistas.some(mismaPieza)) { dobles++; return; }
-      if (state.counts.some(function (q) { return q.cat === m.cat && Math.hypot(q.x - m.x, q.y - m.y) <= R; })) { yaEstaban++; yaPorCat[m.cat] = (yaPorCat[m.cat] || 0) + 1; vistas.push(m); return; }
+      var yaQ = state.counts.filter(function (q) { return q.cat === m.cat && Math.hypot(q.x - m.x, q.y - m.y) <= R; })[0];
+      if (yaQ) { yaEstaban++; yaPorCat[m.cat] = (yaPorCat[m.cat] || 0) + 1; vistas.push(m); yaIds.push({ id: yaQ.id, cat: m.cat }); return; }
       out.push(m);
     });
-    return { marcas: out, enLey: enLey, dobles: dobles, yaEstaban: yaEstaban, yaPorCat: yaPorCat };
+    return { marcas: out, enLey: enLey, dobles: dobles, yaEstaban: yaEstaban, yaPorCat: yaPorCat, yaIds: yaIds };
   }
   function cuentaTermina() {
     var C = cuenta; if (!C) return;
@@ -12210,11 +12396,12 @@
     if (otroPlano(C)) { C.fallos.push('cambiaste de ' + (state.curSheet !== C.hoja ? 'hoja' : 'proyecto') + ' mientras contaba: las marcas eran de la hoja ' + (C.hoja + 1) + ' y no se pusieron'); C.nuevas = []; C.resumen = []; pintaCuenta(); return; }
     var dep = cuentaDepura(C.marcas);
     C.dep = dep;
-    var nuevas = [];
+    var nuevas = [], idsPorCat = {};
     if (dep.marcas.length) {
       pushUndo();
       dep.marcas.forEach(function (m) {
         var cM = { id: uid(), x: Math.round(m.x), y: Math.round(m.y), cat: m.cat, ia: m.conf };
+        (idsPorCat[m.cat] = idsPorCat[m.cat] || []).push(cM.id);
         if (m.nota) cM.iaNota = m.nota;
         if (m.ckt) cM.ckt = m.ckt;
         state.counts.push(cM); nuevas.push(cM.id);
@@ -12222,6 +12409,14 @@
       renderConteo(); refreshCounts(); scheduleAutosave();
     }
     C.nuevas = nuevas;
+    /* (v35.L) IA contra real: la pasada queda apuntada (qué pidió contar, dónde,
+       qué marcas puso y cuáles tuyas volvió a ver). Una cancelada no se apunta:
+       no se sabe hasta dónde miró. */
+    if (!C.cancel && C.rect) {
+      var vio = {}; (dep.yaIds || []).forEach(function (v) { (vio[v.cat] = vio[v.cat] || []).push(v.id); });
+      var pedidas = []; (C.simb || []).forEach(function (sm) { var id = C.porNom && C.porNom[normTxt2(sm.nom)]; if (id && pedidas.indexOf(id) < 0) pedidas.push(id); });
+      iaApuntaPasada({ t: Date.now(), hoja: C.hoja, rect: { x0: C.rect.x0, y0: C.rect.y0, x1: C.rect.x1, y1: C.rect.y1 }, cats: pedidas, ids: idsPorCat, vio: vio, modelo: C.modelo || '' });
+    }
     if (typeof pintaRutasSiAbierto === 'function') pintaRutasSiAbierto();   // (21/09) el conteo trae ckts nuevos: el panel Rutas los ve
     var porCat = {}, hoja = conteoDeHoja();
     dep.marcas.forEach(function (m) { var e = porCat[m.cat] = porCat[m.cat] || { n: 0, dud: 0 }; e.n++; if (m.conf < CUENTA_DUDA) e.dud++; });
@@ -12460,6 +12655,7 @@
     solape: function (rect) { return cuentaSolape(cuentaLosas(rect || cuentaRectHoja())); },
     simbolos: cuentaSimbolos,
     radio: cuentaRadio,
+    radioMarca: function () { return countR(); },
     // (v35.J) la depuración con unas losas y unas marcas dadas (el núcleo de cada losa)
     depura: function (losas, ok, marcas) { var prev = cuenta; cuenta = { losas: losas, losaOk: ok }; try { var r = cuentaDepura(marcas); return { n: r.marcas.length, dobles: r.dobles, marcas: r.marcas.map(function (m) { return m.cat + '@' + m.losa; }) }; } finally { cuenta = prev; } },
     estado: function () { return cuenta ? { enVuelo: cuenta.enVuelo, hechas: cuenta.hechas, losas: cuenta.losas.length, marcas: cuenta.marcas.length, nuevas: cuenta.nuevas ? cuenta.nuevas.length : null, dudas: cuenta.dudas.slice(), fallos: cuenta.fallos.slice(), dep: cuenta.dep || null, resumen: cuenta.resumen, uso: cuenta.uso, modelo: cuenta.modelo, porModelo: cuenta.porModelo || null, cancel: cuenta.cancel } : null; },
@@ -15575,6 +15771,10 @@
     if (!cerebroSupaOk()) { askLogin(function () { chkPide(extra); }); return; }
     chk.corriendo = true; chk.error = ''; chk.avance = 'Abriendo los planos…'; pintaChk();
     var tandas = 0, idProy = pj.id;
+    // (v35.L) lo aprendido de los conteos revisados va con la pregunta
+    iaCargaLecciones(3000).then(function () { chkPideYa(extra, tandas, idProy); });
+  }
+  function chkPideYa(extra, tandas, idProy) {
     function sigue(res) {
       if (res && res.sigue && tandas < 12) {
         tandas++;
@@ -15584,7 +15784,8 @@
       }
       return res;
     }
-    chkLlama({ mensajes: [{ rol: 'user', texto: chkPregunta(extra) }] }).then(sigue).then(function (res) {
+    var apr = iaResumenChecklist();
+    chkLlama({ mensajes: [{ rol: 'user', texto: chkPregunta(extra) + (apr ? '\n\n' + apr : '') }] }).then(sigue).then(function (res) {
       chk.corriendo = false;
       if (!state.project || state.project.id !== idProy) return;   // cambió de proyecto mientras tanto
       if (!res || res.error || !res.respuesta) {
@@ -18454,6 +18655,17 @@
         return { id: String(o.id || uid()).slice(0, 40), item: String(o.item).replace(/\s+/g, ' ').trim().slice(0, 80), ft: Math.max(0, Math.round(+o.ft || 0)), codigo: esCodigo(o.codigo) ? o.codigo : '' };
       }).filter(function (o) { return o.ft > 0; });
       if (lmS.length) state.project.linMano = lmS; else delete state.project.linMano;
+    }
+    // (v35.L) IA contra real: las pasadas del cerebro (qué marcas puso y dónde) y la última lección guardada
+    if (state.project) {
+      var gi = Array.isArray(state.project.guiaIA) ? state.project.guiaIA : [], Ns = function (v) { return isFinite(+v) ? +v : 0; }, ids = function (o) { var r = {}; if (o && typeof o === 'object') Object.keys(o).slice(0, 80).forEach(function (k) { if (Array.isArray(o[k])) r[String(k).slice(0, 40)] = o[k].slice(0, 3000).map(function (x) { return String(x).slice(0, 40); }); }); return r; };
+      gi = gi.filter(function (p) { return p && typeof p === 'object' && p.rect && isFinite(parseInt(p.hoja, 10)); }).slice(-80).map(function (p) {
+        return { t: Ns(p.t), hoja: parseInt(p.hoja, 10), rect: { x0: Ns(p.rect.x0), y0: Ns(p.rect.y0), x1: Ns(p.rect.x1), y1: Ns(p.rect.y1) },
+          cats: (Array.isArray(p.cats) ? p.cats : []).slice(0, 80).map(function (x) { return String(x).slice(0, 40); }), ids: ids(p.ids), vio: ids(p.vio), modelo: String(p.modelo || '').slice(0, 60) };
+      });
+      if (gi.length) state.project.guiaIA = gi; else delete state.project.guiaIA;
+      var rv = state.project.iaRevisado;
+      if (rv && typeof rv === 'object' && rv.fecha) state.project.iaRevisado = { fecha: String(rv.fecha).slice(0, 20), n: parseInt(rv.n, 10) || 0 }; else delete state.project.iaRevisado;
     }
     // (v35.J) el último checklist del set que hizo el cerebro: solo texto, para ver
     if (state.project && state.project.checklistIA) {
@@ -25093,6 +25305,9 @@
       // (v35.H) agregar al takeoff a mano: buscar en la biblioteca, el catálogo y las recetas, y poner la cantidad
       html += '<div class="tmItem" data-k="__manual"><span>➕ <b>Agregar al takeoff</b>: buscar y poner <b>cantidad a mano</b>…' +
         (cAlM && cAlM.manual > 0 ? ' <span class="muted">· ' + esc(cAlM.nom) + ': ' + cAlM.manual + ' a mano + las marcas</span>' : ' <span class="muted">· tubo, cajas, devices, recetas…</span>') + '</span></div>';
+      // (v35.L, Edgar 26/09: «¿cómo agrego algo del takeoff como antes, que me salía la biblioteca?»)
+      // la biblioteca vuelve arriba, al lado de «Agregar al takeoff»: estaba escondida en «Más…»
+      html += '<div class="tmItem" data-k="__tlib"><span>📚 <b>Biblioteca de takeoff</b>… <span class="muted">· tus tools de Bluebeam por set: Boxes, Receptacles, Lights, Demolition…</span></span></div>';
       html += '<div class="tmHead">Lo que ya trae el plano</div>';
       html += '<div class="tmItem" data-k="__leyenda"><span><b>Leer la leyenda</b> del plano… <span class="muted">· saca las categorías con su nombre</span></span></div>';
       html += '<div class="tmItem" data-k="__cerebro"><span><b>Cuéntame los devices</b> con el cerebro… <span class="muted">· marca cada símbolo, tú revisas</span></span></div>';
@@ -25125,7 +25340,6 @@
            luminarias en la E-2.2). No se borra: se enciende desde ⋮⋮ Barras →
            Mostrar todo, para medirlo el día que haya un plano real delante. */
         if ((layout && layout.modo === 'todo') || toolUsada('vsearch')) html += '<div class="tmItem" data-k="__visual"><span>Buscar iguales en el plano y contarlos… <span class="muted">· prueba: no acierta a la resolución del plano</span></span></div>';
-        html += '<div class="tmItem" data-k="__tlib"><span>Biblioteca de takeoff (tus tools de Bluebeam)…</span></div>';
         if (catsM.length) {
           html += '<div class="tmItem" data-k="__doc"><span>Leer un conteo de un documento… <span class="muted">· pega la tabla tal cual</span></span></div>';
           html += '<div class="tmItem" data-k="__lista"><span>Crear categorías desde una lista pegada… <span class="muted">· nombre | cantidad | receta | tubo</span></span></div>';

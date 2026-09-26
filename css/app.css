@@ -1413,7 +1413,9 @@ input.ckNum::-webkit-outer-spin-button, input.ckNum::-webkit-inner-spin-button {
 #manoCab { display: flex; align-items: center; gap: 8px; padding: 7px 9px; background: var(--mp-sky-2); border-bottom: 1px solid var(--mp-line); cursor: move; touch-action: none; user-select: none; }
 #manoTit { font-weight: 600; font-size: 12.5px; flex: 1; letter-spacing: .11em; color: var(--mp-ink); }
 #manoCab button { border: 1px solid var(--mp-line); background: var(--mp-card); color: var(--mp-ink); border-radius: 7px; width: 26px; height: 26px; cursor: pointer; padding: 0; display: flex; align-items: center; justify-content: center; }
-#manoFiltro { padding: 6px 8px; border-bottom: 1px solid var(--mp-line); }
+#manoFiltro { padding: 6px 8px; border-bottom: 1px solid var(--mp-line); display: flex; gap: 6px; }
+#manoFiltro input { flex: 1; min-width: 0; }
+#manoTlib { flex: none; padding: 6px 9px; border: 1px solid rgba(27,60,140,.18); border-radius: 9px; background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); color: var(--mp-navy); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 #manoFiltro input, #manoFila2 input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1.5px solid var(--mp-line); border-radius: 9px; font-size: 13px; background: #fff; }
 #manoFiltro input:focus, #manoFila2 input:focus { outline: none; border-color: var(--mp-blue); box-shadow: 0 0 0 3px rgba(42,91,215,.14); }
 #manoLista { flex: 1; overflow: auto; min-height: 90px; }
@@ -1446,3 +1448,11 @@ body.touch #manoBox { left: 8px; top: 76px; width: calc(100vw - 16px); height: 7
 body.touch #manoCab button { width: 34px; height: 34px; }
 body.touch #manoLista .mnFila { padding: 9px 10px; font-size: 13.5px; }
 body.touch #manoFiltro input, body.touch #manoFila2 input { font-size: 16px; }
+
+/* (v35.L) IA contra real, en el panel Materiales */
+table.iaCR { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+table.iaCR th, table.iaCR td { padding: 2px 4px; border-bottom: 1px solid var(--mp-line); text-align: left; }
+table.iaCR th { color: var(--mp-ink-2); font-weight: 600; }
+table.iaCR td.n, table.iaCR th:not(:first-child) { text-align: right; }
+table.iaCR td.iaBien { color: #1a7f37; } table.iaCR td.iaCasi { color: #9a6700; } table.iaCR td.iaMal { color: #b42318; font-weight: 700; }
+table.iaCR tr.iaTot td { font-weight: 700; border-bottom: 0; }
