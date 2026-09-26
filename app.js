@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.H';
+  var APP_VERSION = 'v35.I';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -428,6 +428,7 @@
       huecos: state.huecos,
       inks: state.inks,
       counts: state.counts, countCats: state.countCats,
+      linMano: (state.project && state.project.linMano) || [],
       bgMeta: state.bg ? { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h, opacity: state.bg.opacity } : null,
       bg2Meta: state.bg2 ? { x: state.bg2.x, y: state.bg2.y, w: state.bg2.w, h: state.bg2.h, opacity: state.bg2.opacity } : null
     });
@@ -1399,6 +1400,7 @@
     state.inks = o.inks || [];
     state.counts = o.counts || [];
     state.countCats = o.countCats || [];
+    if (state.project) { if (o.linMano && o.linMano.length) state.project.linMano = o.linMano; else delete state.project.linMano; }
     state.panels = o.panels || [];
     state.guia = o.guia || [];
     state.huecos = o.huecos || [];
@@ -10163,11 +10165,42 @@
     nueva.aMano = true;
     return nueva;
   }
+  function linMano() { if (!state.project) state.project = {}; if (!Array.isArray(state.project.linMano)) state.project.linMano = []; return state.project.linMano; }
+  function manoClave(t) { return String(t || '').replace(/\s+/g, ' ').trim().toUpperCase(); }
+  // lo que se puso a mano en pies ANTES de v35.I (una categoría del Count) pasa a sumarse al tubo medido
+  function migraLinMano() {
+    var cnt = null, mov = 0;
+    catsCount().slice().forEach(function (c) {
+      if (!c.aMano || String(c.unidad || '').toUpperCase() !== 'FT' || !(c.manual > 0) || !c.item || c.receta) return;
+      cnt = cnt || conteoDelProyecto();
+      if ((cnt[c.id] || 0) - c.manual > 0) return;   // tiene marcas en el plano: se queda como estaba
+      var L = linMano(), k = manoClave(c.item), e = L.filter(function (x) { return manoClave(x.item) === k; })[0];
+      if (!e) { e = { id: uid(), item: String(c.item).replace(/\s+/g, ' ').trim(), ft: 0, codigo: c.codigo || '' }; L.push(e); }
+      e.ft += c.manual;
+      state.countCats = catsCount().filter(function (q) { return q.id !== c.id; });
+      mov++;
+    });
+    if (!linMano().length) delete state.project.linMano;
+    return mov;
+  }
   function manoAgrega(txt) {
     var c = manoSel; if (!c) { setHint('Elige primero qué agregar de la lista'); return null; }
     var n = manoCantidad(txt);
     if (!(n > 0)) { setHint('Pon una cantidad (por ejemplo 16, o 16x10 para 16 de a 10)'); return null; }
     pushUndo();
+    if (c.unidad === 'FT') {
+      // (v35.I) el tubo y el cable NO son un conteo de piezas: se suman al medido del mismo nombre
+      var itemL = c.src === 'lib' ? c.it.item : c.item, kL = manoClave(itemL), L = linMano();
+      var e = L.filter(function (x) { return manoClave(x.item) === kL; })[0];
+      if (!e) { e = { id: uid(), item: String(itemL).replace(/\s+/g, ' ').trim(), ft: 0, codigo: (c.src === 'lib' ? c.it.codigo : c.codigo) || '' }; L.push(e); }
+      e.ft += n;
+      refresh(); refreshCounts(); scheduleAutosave();
+      var medido = 0; try { buildTakeoffEntries(false).forEach(function (q) { if (q.unit === 'FT' && manoClave(q.name) === kL) medido = q.qty - (q.aMano || 0); }); } catch (er) {}
+      setHint('✔ ' + e.item + ': +' + n + ' ft a mano' + (e.ft !== n ? ' (ya van ' + e.ft + ')' : '') + (medido > 0 ? ' — se suman a los ' + medido + ' ft medidos en el plano' : ' — va al takeoff por pie'));
+      var ciL = $('#manoCant'); if (ciL) ciL.value = '';
+      pintaManoYa(); pintaManoCalc();
+      return e;
+    }
     var cat = manoCatDe(c);
     if (!cat) { popUndoVacio(); setHint('No se pudo crear la categoría'); return null; }
     cat.manual = (cat.manual > 0 ? cat.manual : 0) + n;
@@ -10178,6 +10211,12 @@
     return cat;
   }
   function manoQuita(id) {
+    var lm = linMano(), il = -1; lm.forEach(function (x, i) { if (x.id === id) il = i; });
+    if (il >= 0) {
+      pushUndo(); var qx = lm.splice(il, 1)[0]; if (!lm.length) delete state.project.linMano;
+      refresh(); refreshCounts(); scheduleAutosave();
+      setHint('Quitados los ' + qx.ft + ' ft a mano de «' + qx.item + '»'); pintaManoYa(); return;
+    }
     var c = catCount(id); if (!c) return;
     pushUndo();
     var marcas = (conteoDelProyecto()[id] || 0) - (c.manual > 0 ? c.manual : 0);
@@ -10213,8 +10252,12 @@
   function pintaManoYa() {
     var Y = $('#manoYa'); if (!Y) return;
     var cats = catsCount().filter(function (c) { return c.manual > 0 && !c.tablero; });
-    if (!cats.length) { Y.innerHTML = ''; return; }
-    Y.innerHTML = '<div class="mnYaTit">Puesto a mano en este proyecto</div>' + cats.map(function (c) {
+    var lins = (state.project && state.project.linMano) || [];
+    if (!cats.length && !lins.length) { Y.innerHTML = ''; return; }
+    Y.innerHTML = '<div class="mnYaTit">Puesto a mano en este proyecto</div>' + lins.map(function (l) {
+      return '<div class="mnYa"><span class="mnNom">' + esc(l.item) + ' <span class="muted small">· se suma al medido</span></span><span class="mnYaN">' + l.ft + ' pies</span>' +
+        '<button type="button" class="mnQuita" data-id="' + esc(l.id) + '" title="Quitar lo puesto a mano">✕</button></div>';
+    }).join('') + cats.map(function (c) {
       var u = manoUnidad(c.unidad); if (c.receta) u = 'EA';
       return '<div class="mnYa"><span class="mnNom">' + esc(c.nom) + '</span><span class="mnYaN">' + c.manual + ' ' + manoUnidadTxt(u) + '</span>' +
         '<button type="button" class="mnQuita" data-id="' + esc(c.id) + '" title="Quitar lo puesto a mano">✕</button></div>';
@@ -10225,6 +10268,7 @@
     b.classList.remove('oculto');
     var i = $('#manoTxt'); if (i && txt != null) i.value = txt;
     manoSel = null;
+    try { if (migraLinMano()) { refresh(); refreshCounts(); scheduleAutosave(); } } catch (e) {}
     pintaManoLista(); pintaManoCalc(); pintaManoYa();
     if (i && !document.body.classList.contains('touch')) { try { i.focus(); } catch (e) {} }
     return manoCargaListas().then(function () { pintaManoLista(); });
@@ -10254,7 +10298,7 @@
     var Y = $('#manoYa'); if (Y) Y.addEventListener('click', function (ev) { var q = ev.target.closest && ev.target.closest('.mnQuita'); if (q) manoQuita(q.dataset.id); });
   })();
   window.__manoDbg = { abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
-    elige: manoElige, agrega: manoAgrega, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
+    elige: manoElige, agrega: manoAgrega, lineal: function () { return JSON.parse(JSON.stringify((state.project && state.project.linMano) || [])); }, migra: migraLinMano, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
   window.__tlibDbg = { abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
   /* ==================================================================
@@ -13931,10 +13975,22 @@
     if (nProp) rows += '<tr><td colspan="2" class="muted small">⚡ ' + nProp + ' ruta(s) propuestas por el cerebro sin aceptar: no se cotizan (acéptalas en Rutas)</td></tr>';
     // el breaker es del CIRCUITO, no del tramo: se cuenta una vez por número
     var brk = breakersDeCircuitos(state.areas), nCirc = cuentaCircuitos(state.areas);
+    // (v35.I) el tubo y el cable puestos a mano se suman al medido del mismo nombre
+    var manoLin = {};
+    linMano().forEach(function (l) {
+      var kk = null; Object.keys(cabPorTipo).forEach(function (x) { if (!kk && manoClave(x) === manoClave(l.item)) kk = x; });
+      if (!kk) { kk = l.item; cabPorTipo[kk] = 0; }
+      cabPorTipo[kk] += l.ft * 12; manoLin[kk] = (manoLin[kk] || 0) + l.ft;
+    });
+    var etqMano = function (k) { return manoLin[k] ? ' <span class="muted small">+ ' + manoLin[k] + ' ft a mano</span>' : ''; };
+    if (!nTramos && Object.keys(manoLin).length) {
+      rows += '<tr class="cat"><td colspan="2">⚡ Tubo y cable</td></tr>';
+      Object.keys(cabPorTipo).forEach(function (k) { rows += '<tr><td>' + esc(k) + etqMano(k) + '</td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>'; });
+    }
     if (nTramos) {
       rows += '<tr class="cat"><td colspan="2">⚡ Circuits / Conduit runs (' + nCirc + ' ckt' + (nCirc === 1 ? '' : 's') + ' en ' + nTramos + ' tramo' + (nTramos === 1 ? '' : 's') + ') <button id="btnCircPanel" class="small" style="float:right" title="Lleva número, cuarto, breaker y polos de cada circuito trazado al Panel Schedule (E-2)">' + ICO.svg('panelsch') + ' → Panel Schedule</button></td></tr>';
       Object.keys(cabPorTipo).forEach(function (k) {
-        rows += '<tr><td>' + esc(k) + ' <span class="muted small">' + (/LIQUIDTIGHT/.test(k) ? '(whips de desconectivo, 6 ft c/u)' : '(trazo + drop)') + '</span></td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
+        rows += '<tr><td>' + esc(k) + ' <span class="muted small">' + (/LIQUIDTIGHT/.test(k) ? '(whips de desconectivo, 6 ft c/u)' : manoLin[k] && cabPorTipo[k] === manoLin[k] * 12 ? '' : '(trazo + drop)') + '</span>' + etqMano(k) + '</td><td class="n">' + Math.ceil(cabPorTipo[k] / 12) + ' ft</td></tr>';
       });
       Object.keys(pzPorTipo).forEach(function (k) {
         rows += '<tr><td>' + esc(k) + ' <span class="muted small">(whips de desconectivo)</span></td><td class="n">' + pzPorTipo[k] + '</td></tr>';
@@ -14331,6 +14387,7 @@
       });
     });
     // un breaker por circuito, no por tramo (y uno por cada ckt del tubo)
+    linMano().forEach(function (l) { rows.push(['Circuits', l.item, 'a mano', 1, l.ft.toFixed(2), fmtFtIn(l.ft * 12), '']); });
     var brkCsv = breakersDeCircuitos(state.areas);
     Object.keys(brkCsv).sort().forEach(function (k) { rows.push(['Circuits', k, '', brkCsv[k], '', '', '']); });
     var wallLen = {};
@@ -14685,6 +14742,16 @@
     });
     // las rutas con hilos: el tubo exacto y el conductor, con el código de su grupo (feeder → 06-FEED)
     Object.keys(rp).forEach(function (k) { var i = k.indexOf('\u0001'); add(k.slice(i + 1), Math.ceil(rp[k] / 12), 'FT', k.slice(0, i)); });
+    /* (v35.I) Lo puesto A MANO en pies (Edgar: «que se sumara a los cables y
+       las tuberías que ya nos ha dado el conteo por medida, y que no se quede
+       como conteo de pieza»): va al MISMO renglón del tubo o del cable medido
+       si ya existe con ese nombre; si no, sale como renglón por pie propio. */
+    linMano().forEach(function (l) {
+      var k = manoClave(l.item), ya = null;
+      out.forEach(function (e) { if (!ya && e.unit === 'FT' && manoClave(e.name) === k) ya = e; });
+      if (ya) { ya.qty += l.ft; ya.aMano = (ya.aMano || 0) + l.ft; }
+      else { add(l.item, l.ft, 'FT', l.codigo || '08-ROUGH'); if (out.length) out[out.length - 1].aMano = l.ft; }
+    });
     var cntNom = {};
     Object.keys(cnt).forEach(function (id) { var c = catCount(id); if (!c || c.receta) return; var nm = c.alias || c.nom; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
     Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
@@ -18080,6 +18147,14 @@
       if (o.moldeRect) { var mh = parseInt(o.moldeHoja, 10); if (mh >= 0) o.moldeHoja = mh; else delete o.moldeHoja; } else delete o.moldeHoja;
     });
     // el cuadre (17/09): paneles y categorías esperados con enteros ≥ 0, nada más
+    // (v35.I) el tubo y el cable puestos A MANO, en pies: se suman al tubo medido del mismo nombre
+    if (state.project) {
+      var lmS = Array.isArray(state.project.linMano) ? state.project.linMano : [];
+      lmS = lmS.filter(function (o) { return o && typeof o === 'object' && o.item; }).map(function (o) {
+        return { id: String(o.id || uid()).slice(0, 40), item: String(o.item).replace(/\s+/g, ' ').trim().slice(0, 80), ft: Math.max(0, Math.round(+o.ft || 0)), codigo: esCodigo(o.codigo) ? o.codigo : '' };
+      }).filter(function (o) { return o.ft > 0; });
+      if (lmS.length) state.project.linMano = lmS; else delete state.project.linMano;
+    }
     if (state.project && state.project.cuadre && typeof state.project.cuadre === 'object') {
       var qc = state.project.cuadre, lim = function (o) { var r = {}; Object.keys(o || {}).slice(0, 200).forEach(function (k) { var v = parseInt(o[k], 10); if (v >= 0) r[String(k).slice(0, 40)] = v; }); return r; };
       qc.paneles = lim(qc.paneles); qc.cats = lim(qc.cats); var vb = parseInt(qc.brk, 10); qc.brk = vb >= 0 ? vb : null;
@@ -20804,6 +20879,7 @@
     if (!(Number.isInteger(state.curSheet) && state.curSheet >= 0 && state.curSheet < state.sheets.length)) state.curSheet = 0;
     if (o.view && typeof o.view === 'object') { Object.assign(view, o.view); view.z = numSeguro(view.z, 1) || 1; view.tx = numSeguro(view.tx, 0); view.ty = numSeguro(view.ty, 0); }
     syncProjectInputs();
+    try { migraLinMano(); } catch (e) {}
     renderSheetTabs(); updateBgLinesBtn();
     applyView(); refresh();
     try { purgaPdfBin(); } catch (e) {}   // lo que el proyecto nuevo no usa, fuera
