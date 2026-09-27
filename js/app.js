@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.O';
+  var APP_VERSION = 'v35.P';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -727,6 +727,7 @@
       });
     } catch (e) { if (done) done(false); }
   }
+  var nubeLista = { filas: [], cuando: 0, pidiendo: false };   // lo que hay en la nube, para la lista del panel
   function pintaLista() {
     var sel = $('#pjLista'); if (!sel) return;
     var cur = state.project && state.project.id, html = '', hayCur = false;
@@ -740,7 +741,35 @@
         (m.nombre && m.cliente ? ' — ' + esc(m.cliente) : '') + (fecha ? ' · ' + fecha : '') + '</option>';
     });
     if (!hayCur) html = '<option value="" selected>' + (libIndex.length ? '(este proyecto aún no se ha guardado)' : '(sin proyectos guardados todavía)') + '</option>' + html;
+    /* (v35.P, Edgar 27/09: «quiero abrir el proyecto y no me deja, ¿cómo
+       accedo a la nube?») La lista del panel solo enseñaba lo de ESTE aparato;
+       en una PC nueva Peninsula no salía por ningún lado. Ahora también lista
+       lo que está solo en la nube: se elige y se baja. */
+    var enLocal = {}; libIndex.forEach(function (m) { enLocal[m.id] = 1; });
+    var deNube = (nubeLista.filas || []).filter(function (r) { return !enLocal[r.id] && r.id !== cur; });
+    if (deNube.length) {
+      html += '<optgroup label="☁ En la nube (no están en este aparato)">';
+      deNube.forEach(function (r) {
+        var f = r.updated_at ? new Date(r.updated_at) : null;
+        var fecha = f && !isNaN(f) ? (f.getMonth() + 1) + '/' + f.getDate() + ' ' + ('0' + f.getHours()).slice(-2) + ':' + ('0' + f.getMinutes()).slice(-2) : '';
+        html += '<option value="nube:' + esc(r.id) + '">☁ ' + esc(r.nombre || r.job || r.cliente || '(sin nombre)') + (r.nombre && r.cliente ? ' — ' + esc(r.cliente) : '') + (fecha ? ' · ' + fecha : '') + (r.aparato ? ' · ' + esc(r.aparato) : '') + '</option>';
+      });
+      html += '</optgroup>';
+    } else if (nubeActiva() && !nubeLista.cuando) {
+      html += '<option value="" disabled>☁ leyendo la nube…</option>';
+    }
     sel.innerHTML = html;
+    if (nubeActiva() && Date.now() - nubeLista.cuando > 120000 && !nubeLista.pidiendo) refrescaNubeLista();
+  }
+  function refrescaNubeLista(done) {
+    if (!nubeActiva()) { nubeLista = { filas: [], cuando: 0, pidiendo: false }; if (done) done(null, 'sin sesión'); return; }
+    nubeLista.pidiendo = true;
+    listaNube(function (rows, err) {
+      nubeLista.pidiendo = false;
+      if (rows) { nubeLista.filas = rows; nubeLista.cuando = Date.now(); pintaLista(); }
+      else nubeLista.cuando = Date.now() - 90000;   // sin respuesta: se vuelve a intentar en medio minuto
+      if (done) done(rows, err);
+    });
   }
   function estadoVacio() {
     return { app: 'mxp-planos', version: 1, view: { tx: 120, ty: 90, z: 1 }, state: {
@@ -863,6 +892,7 @@
   function nubeEntrar() {
     if (!SB || !SB.url) { uiAlert('La nube no está configurada en esta copia de la app.'); return; }
     askLogin(function () {
+      refrescaNubeLista();   // (v35.P) al entrar, la lista del panel enseña lo de la nube
       nubeSet('espera', '');
       pintaNube();
       try { reanudaSubidas(); revisaNube('entrar'); } catch (e) {}
@@ -1228,7 +1258,7 @@
     window.addEventListener('online', function () { if (Object.keys(nube.pendientes).length) { nube.intentos = 0; clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 800); } });
     window.addEventListener('offline', function () { if (Object.keys(nube.pendientes).length) nubeSet('sinred', 'Sin internet: se sube en cuanto vuelva.'); });
   } catch (e) {}
-  window.__nubeDbg = { estado: function () { return { estado: nube.estado, pendientes: Object.keys(nube.pendientes), intentos: nube.intentos, ultimoOk: nube.ultimoOk, conflicto: nube.conflictoAbierto, pospuestos: Object.keys(nube.pospuestos) }; }, revisa: function (m) { revisaNube(m || 'test'); }, fila: filaNube, despospone: function () { nube.pospuestos = {}; }, reanuda: reanudaSubidas,
+  window.__nubeDbg = { refrescaLista: function (cb) { refrescaNubeLista(cb); }, abrirDeNube: function (f) { abrirDeNube(f); }, estado: function () { return { estado: nube.estado, pendientes: Object.keys(nube.pendientes), intentos: nube.intentos, ultimoOk: nube.ultimoOk, conflicto: nube.conflictoAbierto, pospuestos: Object.keys(nube.pospuestos) }; }, revisa: function (m) { revisaNube(m || 'test'); }, fila: filaNube, despospone: function () { nube.pospuestos = {}; }, reanuda: reanudaSubidas,
     encola: encolaSubida, sube: subeProyecto, baja: bajaProyecto, lista: listaNube, ruta: rutaNube, gzip: gzipTexto, gunzip: gunzipBlob, cola: subeCola, activa: nubeActiva };
 
   function pedirPersistencia() {
@@ -18525,25 +18555,32 @@
         b.addEventListener('click', function () { pmAccion(b.dataset.a, pmFilas[+b.dataset.i]); });
       });
     }
-    if (nubeActiva()) listaNube(function (rows, err) { pinta(rows, err); });
+    if (nubeActiva()) refrescaNubeLista(function (rows, err) { pinta(rows, err); });
     else pinta(null, null);
+  }
+  /* Abrir un proyecto que está solo en la nube (desde la tabla Proyectos o
+     desde la lista del panel): se baja, se abre y queda guardado aquí. */
+  function abrirDeNube(f) {
+    if (!f) return;
+    var tam = f.tam || f.tamano ? ' (' + Math.max(1, Math.round((+f.tam || +f.tamano || 0) / 1048576)) + ' MB)' : '';
+    setHint('⏳ Bajando «' + (f.nombre || 'Proyecto') + '» de la nube' + tam + '…');
+    bajaProyecto(f, function (o, err) {
+      if (!o) { uiAlert('No se pudo bajar de la nube: ' + (err || 'error')); setHint(''); pintaLista(); return; }
+      if (validaProyecto(o)) { uiAlert('El proyecto de la nube llegó dañado.'); setHint(''); pintaLista(); return; }
+      cierraPendiente(function () {
+        try { restoreProject(o); } catch (e) { uiAlert('No se pudo abrir: ' + (e && e.message || 'error')); return; }
+        state.project.revNube = f.revNube != null ? f.revNube : (f.rev || 0);   // (7.5) sincronizado con lo que bajó
+        try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e5) {}
+        renderSheetTabs(); pmCerrar(); pintaLista();
+        setHint('☁ ' + (state.project.name || 'Proyecto') + ' bajado de la nube');
+      });
+    });
   }
   function pmAccion(acc, f) {
     if (!f) return;
     if (acc === 'abrir') {
       if (f.local) { pmCerrar(); abrirDeBiblioteca(f.id); return; }
-      setHint('⏳ Bajando de la nube…');
-      bajaProyecto(f, function (o, err) {
-        if (!o) { uiAlert('No se pudo bajar de la nube: ' + (err || 'error')); setHint(''); return; }
-        if (validaProyecto(o)) { uiAlert('El proyecto de la nube llegó dañado.'); setHint(''); return; }
-        cierraPendiente(function () {
-          try { restoreProject(o); } catch (e) { uiAlert('No se pudo abrir: ' + (e && e.message || 'error')); return; }
-          state.project.revNube = f.revNube != null ? f.revNube : (f.rev || 0);   // (7.5) sincronizado con lo que bajó
-          try { guardaEnBiblioteca(false, null, { forzar: true }); } catch (e5) {}
-          renderSheetTabs(); pmCerrar();
-          setHint('☁ ' + (state.project.name || 'Proyecto') + ' bajado de la nube');
-        });
-      });
+      abrirDeNube(f);
       return;
     }
     if (acc === 'dup') {
@@ -18611,7 +18648,17 @@
   $('#fileProyectos').addEventListener('change', function () { pmImporta(this.files); this.value = ''; });
   $('#btnProyectos').addEventListener('click', pmAbrir);
   $('#pjNube').addEventListener('click', nubeAhora);
-  $('#pjLista').addEventListener('change', function () { abrirDeBiblioteca(this.value); });
+  $('#pjLista').addEventListener('change', function () {
+    var v = String(this.value || '');
+    if (v.indexOf('nube:') === 0) {
+      var id = v.slice(5), f = null;
+      (nubeLista.filas || []).forEach(function (r) { if (r.id === id) f = r; });
+      pintaLista();   // el select vuelve al abierto mientras baja
+      if (f) abrirDeNube(f); else refrescaNubeLista();
+      return;
+    }
+    abrirDeBiblioteca(v);
+  });
   $('#pjNuevo').addEventListener('click', function () {
     if (!hayAlgoQueGuardar()) { setHint('Este proyecto ya está vacío'); return; }
     nuevoProyecto();
