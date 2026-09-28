@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.U';
+  var APP_VERSION = 'v35.V';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9989,6 +9989,10 @@
       fila.push(mano); fila.push(tot);
       rows.push(fila);
     });
+    // (v35.V) lo medido en pies, una fila por tipo de línea, en ft
+    medidoEnPies().forEach(function (r) {
+      rows.push([r.nom + ' (medido)', r.item, r.pieza ? r.item + ' — ' + r.setPz + ' luminaria(s) de ' + r.pieza + ' ft' : '', 'Líneas', '11-LIGHT'].concat(hojas.map(function (sh, i) { return i === state.curSheet ? r.hojaFt + ' ft' : ''; })).concat(['', r.setFt + ' ft']));
+    });
     return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
   }
 
@@ -10113,6 +10117,30 @@
   }
   // (v35.R, Edgar 28/09: «que me salga en la parte de demo, como demolición») lo lineal de demolición puesto a mano
   function esLinDemo(l) { return !!l && (l.codigo === '01-DEMO' || /^DEMO\b/i.test(l.item || '')); }
+  /* (v35.V) Lo MEDIDO en pies con un tipo de línea que cuenta (LED STRIP, LED
+     LINEAR): Edgar, 28/09, «lo medí y no se contó». Va al takeoff desde
+     siempre, pero el panel de conteo no lo enseñaba. Por tipo de línea: pies
+     en esta hoja y en el set, y las piezas si el catálogo va por unidad. */
+  function medidoEnPies() {
+    var m = {};
+    var suma = function (areas, aHoja) {
+      (areas || []).forEach(function (a) {
+        var est = a && LINE_STYLES[a.lineStyle]; if (!est || !est.ft || !Array.isArray(a.pts) || a.pts.length < 2) return;
+        var L = polyPerim(a.pts, a.open); if (L < 1) return;
+        var r = m[a.lineStyle] || (m[a.lineStyle] = { k: a.lineStyle, nom: est.name.replace(/^[^A-Za-zÁ-ú]+/, '').split(' — ')[0], item: est.ft, pieza: est.pieza || 0, hojaFt: 0, setFt: 0, hojaPz: 0, setPz: 0, n: 0 });
+        var pz = est.pieza ? Math.ceil(L / 12 / (+a.tramo || est.pieza)) : 0;
+        r.setFt += L; r.setPz += pz; r.n++;
+        if (aHoja) { r.hojaFt += L; r.hojaPz += pz; }
+      });
+    };
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet) return;
+      if (!sh || typeof sh.data !== 'string') return;
+      try { var o = JSON.parse(sh.data); if (o && Array.isArray(o.areas)) suma(o.areas, false); } catch (e) {}
+    });
+    suma(state.areas, true);
+    return Object.keys(m).map(function (k) { var r = m[k]; r.hojaFt = Math.ceil(r.hojaFt / 12); r.setFt = Math.ceil(r.setFt / 12); return r; });
+  }
   function linDemo() { return linMano().filter(esLinDemo); }
   function iaBloqueHtml() {
     var F = iaContraReal(); if (!F || !F.length) return '';
@@ -10169,7 +10197,8 @@
     var hoja = conteoDeHoja(), set = conteoDelProyecto();
     var varias = (state.sheets || []).length > 1;
     var h = '<tr class="cat"><td colspan="2">Conteo manual (Count)' + (varias ? ' — esta hoja / todo el set' : '') + '</td></tr>';
-    if (!cats.length && !linDemo().length) {
+    var medido = medidoEnPies();
+    if (!cats.length && !linDemo().length && !medido.length) {
       h += '<tr><td colspan="2" class="muted small">Sin categorías todavía — coge Count en la barra y toca el plano</td></tr>';
       return h;
     }
@@ -10203,6 +10232,15 @@
         (catActiva === c.id ? ' <span class="muted small">· activa</span>' : '') + '</td>' +
         '<td class="n">' + nh + (c.manual > 0 ? ' <span class="muted small" title="Cantidad puesta a mano (Count ▾): se suma a las marcas y va al estimador">+ ' + c.manual + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + ns + '</span>' : '') + '</td></tr>';
     }
+    // (v35.V) lo medido en pies: la tira LED y la luminaria lineal
+    if (medido.length) {
+      h += '<tr class="subcat"><td>📏 Medido en pies</td><td class="n muted small">' + (varias ? 'esta hoja / set' : '') + '</td></tr>';
+      medido.forEach(function (r) {
+        var det = r.pieza ? ' <span class="muted small" title="En el catálogo va por unidad: lo medido se pasa a luminarias enteras de ' + r.pieza + ' ft (Propiedades → Tramo)">· ' + r.hojaPz + ' luminaria(s)' + (varias ? ' / ' + r.setPz : '') + '</span>' : ' <span class="muted small" title="Al estimador por pie">· por pie</span>';
+        h += '<tr class="cntFila lnFt" data-ls="' + esc(r.k) + '" title="Toca para seguir midiendo ' + esc(r.nom) + '"><td><span class="cntChip" style="background:#f2b500"></span>' + esc(r.nom) + det + ' <span class="cntCod">11-LIGHT</span></td>' +
+          '<td class="n">' + r.hojaFt + ' ft' + (varias ? ' <span class="muted">/ ' + r.setFt + '</span>' : '') + '</td></tr>';
+      });
+    }
     var totMano = cats.reduce(function (a, c) { return a + (c.manual > 0 && !c.tablero ? c.manual : 0); }, 0);
     var iaH = iaBloqueHtml();
     h += '<tr><td><b>Total conteo</b></td><td class="n"><b>' + totH + (totMano ? ' <span class="muted small">+ ' + totMano + ' a mano</span>' : '') + (varias ? ' <span class="muted">/ ' + totS + '</span>' : '') + '</b></td></tr>';
@@ -10214,6 +10252,8 @@
     var bIA = $('#iaGuarda'); if (bIA) bIA.addEventListener('click', function () { iaGuardaLeccion(($('#iaNota') || {}).value || ''); });
     $$('#countsBody tr.cntFila').forEach(function (tr) {
       tr.addEventListener('click', function () {
+        if (tr.dataset.ls) { tlibTraza(tr.dataset.ls); return; }   // (v35.V) lo medido en pies: seguir midiendo
+        if (!tr.dataset.cat) return;
         catActiva = tr.dataset.cat;
         setTool('count');
         var c = catCount(catActiva);
@@ -14650,7 +14690,7 @@
     }
     // el Count va al final: es conteo de lo que YA está en el plano del
     // ingeniero, no de lo que dibujamos nosotros
-    if (catsCount().length || state.counts.length || linDemo().length) rows += conteoBloqueHtml();
+    if (catsCount().length || state.counts.length || linDemo().length || medidoEnPies().length) rows += conteoBloqueHtml();
     rows += rutasBloqueHtml();
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
     enganchaConteoPanel();
@@ -26091,6 +26131,8 @@
 
   /* ---------------- inicio ---------------- */
   window.__mxpRefresh = refresh;
+  window.__mxpRefreshCounts = refreshCounts;
+  window.__conteoCsvDbg = conteoCsvTexto;
   window.__toolMenuDbg = function (kind) { showToolMenu(kind, document.querySelector('.dock .grpBtn') || document.body); };
   window.__mxpView = view;      // gancho de pruebas (mundo -> pantalla)
   window.__mxpAngle = refsAngle;
