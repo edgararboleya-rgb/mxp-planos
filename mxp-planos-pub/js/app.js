@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.P';
+  var APP_VERSION = 'v35.Q';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9742,6 +9742,86 @@
       return out;
     }, function () { return []; });
   }
+  /* (v35.Q, Edgar 27/09: «que esta demo de tuberías y cableado no sea piezas
+     sino en pies») RECETAS POR PIES: una receta con pies_editable cuyos
+     renglones son TODOS por pie (DEMOLICION — RETIRAR CONDUIT = 100 ft de
+     «DEMO - Conduit Run (per LF)»). No es un punto: es un largo. Si se manda
+     como receta × cantidad, 200 «piezas» son 20.000 ft, y encima el estimador
+     le quita el tubo por «sin lineales» y no llega nada. Aquí se aprenden una
+     vez (con sesión) y en toda la app se tratan como su renglón por pie. */
+  var _recetasPies = null, _recetasPiesPr = null;
+  function recetasPies() {
+    if (_recetasPies) return Promise.resolve(_recetasPies);
+    // en pruebas (listas de mentira) no se va a la red: lo que traiga el gancho, o nada
+    if (window.__listasDbg) { _recetasPies = window.__listasDbg.recetasPies || {}; return Promise.resolve(_recetasPies); }
+    if (_recetasPiesPr) return _recetasPiesPr;
+    var puede = false; try { puede = !!(SB && typeof fetch !== 'undefined' && sbAuth()); } catch (e) {}
+    if (!puede) return Promise.resolve({});
+    _recetasPiesPr = sbFetchTodo('/rest/v1/ensambles?select=id,nombre&pies_editable=is.true&order=orden').then(function (ens) {
+      ens = Array.isArray(ens) ? ens : [];
+      if (!ens.length) return {};
+      var ids = ens.map(function (e) { return e.id; }).join(',');
+      return Promise.all([
+        sbFetchTodo('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad&ensamble_id=in.(' + ids + ')&order=id'),
+        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo&order=orden')
+      ]).then(function (r) {
+        var its = r[0] || [], uni = {}, cod = {};
+        (r[1] || []).forEach(function (c) { var k = normTxt2(c.item); uni[k] = String(c.unidad || '').toUpperCase(); cod[k] = c.codigo || ''; });
+        var out = {};
+        ens.forEach(function (e) {
+          var mios = its.filter(function (x) { return x.ensamble_id === e.id; });
+          if (!mios.length || !mios.every(function (x) { return /^(LF|MLF|FT)$/.test(uni[normTxt2(x.item)] || ''); })) return;
+          var it = String(mios[0].item).replace(/\s+/g, ' ').trim();
+          out[normTxt2(e.nombre)] = { id: e.id, nombre: e.nombre, item: it, codigo: cod[normTxt2(it)] || '', porUnidad: Number(mios[0].cantidad) || 1 };
+        });
+        return out;
+      });
+    }).then(function (o) { _recetasPies = o; _recetasPiesPr = null; return o; }, function () { _recetasPiesPr = null; return {}; });
+    return _recetasPiesPr;
+  }
+  /* Las entradas del takeoff con una receta por pies pasan a su renglón por
+     pie: la cantidad ya son pies. PURA (se prueba sola). */
+  function recetasPiesAplica(entries, rp) {
+    if (!rp) return { entries: entries, cambiadas: [] };
+    var cambiadas = [];
+    var out = entries.map(function (e) {
+      var r = e && e.receta ? rp[normTxt2(e.receta)] : null;
+      if (!r) return e;
+      cambiadas.push({ receta: e.receta, item: r.item, ft: e.qty });
+      return { name: r.item, qty: e.qty, unit: 'FT', codigo: r.codigo || (esCodigo(e.codigo) && e.codigo !== CODIGO_DEFECTO ? e.codigo : '01-DEMO'), aMano: e.aMano };
+    });
+    return { entries: out, cambiadas: cambiadas };
+  }
+  /* Las categorías que quedaron con una receta por pies (antes de v35.Q) pasan
+     a pies a mano: lo puesto a mano son pies, y cada marca del plano vale 1 ft
+     (así contaba Bluebeam la demolición de tubo). La categoría se quita. */
+  function migraRecetasPies(rp) {
+    if (!rp || !state.project) return 0;
+    var n = 0, tot = conteoDelProyecto();
+    catsCount().slice().forEach(function (c) {
+      var r = c.receta ? rp[normTxt2(c.receta)] : null; if (!r) return;
+      var ft = (tot[c.id] || 0);
+      if (ft > 0) {
+        var L = linMano(), k = manoClave(r.item), e = L.filter(function (x) { return manoClave(x.item) === k; })[0];
+        if (!e) { e = { id: uid(), item: r.item, ft: 0, codigo: r.codigo || '01-DEMO' }; L.push(e); }
+        e.ft += ft;
+      }
+      state.countCats = catsCount().filter(function (q) { return q.id !== c.id; });
+      quitaMarcasDeCat(c.id);
+      if (catActiva === c.id) catActiva = null;
+      n++;
+    });
+    if (n) { refresh(); refreshCounts(); scheduleAutosave(); }
+    return n;
+  }
+  // borra las marcas de una categoría en todas las hojas (la de delante y las guardadas)
+  function quitaMarcasDeCat(id) {
+    state.counts = state.counts.filter(function (q) { return q.cat !== id; });
+    (state.sheets || []).forEach(function (sh, i) {
+      if (i === state.curSheet || !sh || typeof sh.data !== 'string') return;
+      try { var o = JSON.parse(sh.data); if (o && Array.isArray(o.counts)) { o.counts = o.counts.filter(function (q) { return q && q.cat !== id; }); sh.data = JSON.stringify(o); } } catch (e) {}
+    });
+  }
   /* Lo escrito, llevado al nombre EXACTO de la lista: «receptaculo gfci 20a emt»
      casa con «RECEPTÁCULO GFCI 20A — EMT». Si no casa con nada, se devuelve tal
      cual (y se avisa), nunca se inventa. */
@@ -10346,14 +10426,17 @@
     for (var i = 0; i < partes.length; i++) { var v = parseFloat(partes[i]); if (!(v > 0)) return 0; n *= v; }
     return Math.ceil(n - 1e-9);
   }
+  var manoRecPies = null;
   function manoCargaListas() {
     var dbg = window.__listasDbg || null;
     var pCat = manoCatalogo ? Promise.resolve(manoCatalogo)
       : (dbg && Array.isArray(dbg.catalogoU)) ? Promise.resolve(dbg.catalogoU.slice())
       : (function () { var pr; try { pr = (SB && typeof fetch !== 'undefined' && sbAuth()) ? sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo,seccion&order=orden') : Promise.resolve([]); } catch (e) { pr = Promise.resolve([]); } return pr.then(function (r) { return Array.isArray(r) ? r : []; }, function () { return []; }); })();
-    return Promise.all([pCat, listaDe('recetas')]).then(function (x) {
+    return Promise.all([pCat, listaDe('recetas'), recetasPies()]).then(function (x) {
       manoCatalogo = (x[0] || []).filter(function (r) { return r && r.item; });
       manoRecetas = x[1] || [];
+      manoRecPies = x[2] || {};
+      try { if (migraRecetasPies(manoRecPies)) setHint('Las recetas por pies que estaban como piezas pasaron a pies a mano'); } catch (e) {}
     });
   }
   // la lista de todo lo que se puede agregar, sin repetir un item del catálogo que ya trae la biblioteca
@@ -10372,7 +10455,11 @@
       var k = manoLlano(r.item); if (ya[k]) return; ya[k] = 1;
       out.push({ src: 'cat', nom: String(r.item).replace(/\s+/g, ' ').trim(), item: r.item, codigo: r.codigo || '', det: 'catálogo' + (r.seccion ? ' · ' + r.seccion : '') + (r.unidad ? ' · ' + r.unidad : ''), unidad: manoUnidad(r.unidad) });
     });
-    (manoRecetas || []).forEach(function (n) { out.push({ src: 'rec', nom: n, det: 'receta · punto completo (sin su tubo ni su cable)', unidad: 'EA' }); });
+    (manoRecetas || []).forEach(function (n) {
+      var rp = (manoRecPies || {})[normTxt2(n)];
+      if (rp) { out.push({ src: 'rec', nom: n, det: 'receta POR PIES · va como ' + rp.item + ' (' + (rp.codigo || '01-DEMO') + ')', unidad: 'FT', item: rp.item, codigo: rp.codigo || '01-DEMO' }); return; }
+      out.push({ src: 'rec', nom: n, det: 'receta · punto completo (sin su tubo ni su cable)', unidad: 'EA' });
+    });
     return out;
   }
   function manoBusca(q) {
@@ -10557,7 +10644,7 @@
     var ok = $('#manoOk'); if (ok) ok.addEventListener('click', function () { manoAgrega(($('#manoCant') || {}).value); });
     var Y = $('#manoYa'); if (Y) Y.addEventListener('click', function (ev) { var q = ev.target.closest && ev.target.closest('.mnQuita'); if (q) manoQuita(q.dataset.id); });
   })();
-  window.__manoDbg = { abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
+  window.__manoDbg = { recetasPies: recetasPies, aplicaPies: recetasPiesAplica, migraPies: migraRecetasPies, abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
     elige: manoElige, agrega: manoAgrega, lineal: function () { return JSON.parse(JSON.stringify((state.project && state.project.linMano) || [])); }, migra: migraLinMano, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
   window.__tlibDbg = { elige: tlibElige, migraDemo: migraDemoNombres, abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
@@ -15313,9 +15400,12 @@
         // las recetas, para las categorías que son un PUNTO COMPLETO
         sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden').then(null, function () { return []; }),
         // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
-        sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; })
+        sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; }),
+        recetasPies()
       ]).then(function (res) {
         var cat = res[0] || [], alias = res[1] || [], ensL = res[2] || [];
+        // (v35.Q) una receta por pies (demolición de tubo o cable) va como su renglón por pie, con la cantidad en pies
+        var aplP = recetasPiesAplica(entries, res[4] || {}); entries = aplP.entries; var recPiesCambiadas = aplP.cambiadas;
         var ensByNorm2 = {}; ensL.forEach(function (e) { ensByNorm2[normTxt2(e.nombre)] = e; });
         if (!cat.length) {
           uiAlert('El catálogo del estimador llegó vacío.\nEntra con el usuario DUEÑO del panel de Max Power (el mismo de la app operativa) y vuelve a intentar.');
@@ -15493,6 +15583,7 @@
             (porAlias.length ? '\n\n🔁 CATEGORÍAS QUE YA SABEN SU RECETA (por la tabla de alias — no hay que marcarlas una por una):\n• ' + porAlias.map(function (a) { return a.name + ' ×' + a.qty + ' → ' + a.receta + (a.full ? ' (con su tubo)' : ''); }).join('\n• ') : '') +
             (avisoCajas ? '\n\n⚠ CAJAS QUE PUEDEN IR DOS VECES: mandaste puntos completos (cada uno trae su caja, su anillo y su tapa) y además estas cajas contadas aparte:\n• ' + avisoCajas + '\nSi esas cajas son las de los puntos, bórralas del estimado.' : '') +
             (luces.length ? '\n\n💡 LUMINARIAS QUE PONE OTRO — fueron como SOLO INSTALACIÓN (la mano, el whip, la caja; la luz no):\n• ' + luces.map(function (l) { return l.name + ' ×' + l.qty + ' → ' + l.receta; }).join('\n• ') + '\nY la luz en sí, un renglón «COTIZACIÓN PENDIENTE — …» por modelo en $0: cuando llegue la cuota, pon ahí el precio de cada una.' : '') +
+            (recPiesCambiadas.length ? '\n\n📏 RECETAS POR PIES — fueron como su renglón por pie, con los pies tal cual (no × 100):\n• ' + recPiesCambiadas.map(function (r) { return r.receta + ' → ' + r.item + ' ×' + r.ft + ' ft'; }).join('\n• ') : '') +
             (recSin.length ? '\n\n⚠ RECETAS QUE NO EXISTEN (no se enviaron):\n• ' + recSin.join('\n• ') : '') +
             (unmapped.length ? '\n\n⚠ SIN MAPEAR (no se enviaron — agrégalos como alias en el estimador):\n• ' + unmapped.join('\n• ') : '') +
             '\n\nPor partida: ' + porCod.map(function (r) { return r.codigo + ' ×' + r.renglones; }).join(' · ') +
