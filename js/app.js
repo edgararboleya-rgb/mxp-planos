@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.Q';
+  var APP_VERSION = 'v35.R';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -10094,6 +10094,9 @@
     return 'LO QUE HAS APRENDIDO DE CONTEOS ANTERIORES (revisados por Edgar): qué tan certero eres por familia: ' + ac + '.' +
       (peores.length ? '\nTus errores más grandes:\n' + peores.join('\n') : '') + '\nTenlo en cuenta al dar cantidades: donde fallas más, cuenta con más cuidado y da el margen.';
   }
+  // (v35.R, Edgar 28/09: «que me salga en la parte de demo, como demolición») lo lineal de demolición puesto a mano
+  function esLinDemo(l) { return !!l && (l.codigo === '01-DEMO' || /^DEMO\b/i.test(l.item || '')); }
+  function linDemo() { return linMano().filter(esLinDemo); }
   function iaBloqueHtml() {
     var F = iaContraReal(); if (!F || !F.length) return '';
     if (iaLecc === null && !iaLeccCarga && SB && sbAuth()) iaCargaLecciones().then(function (l) { if (l && l.length) refreshCounts(); });
@@ -10149,7 +10152,7 @@
     var hoja = conteoDeHoja(), set = conteoDelProyecto();
     var varias = (state.sheets || []).length > 1;
     var h = '<tr class="cat"><td colspan="2">Conteo manual (Count)' + (varias ? ' — esta hoja / todo el set' : '') + '</td></tr>';
-    if (!cats.length) {
+    if (!cats.length && !linDemo().length) {
       h += '<tr><td colspan="2" class="muted small">Sin categorías todavía — coge Count en la barra y toca el plano</td></tr>';
       return h;
     }
@@ -10160,13 +10163,18 @@
        que se instala. */
     var esDemo = function (c) { return codigoDeCat(c) === '01-DEMO' || c.set === 'Demolition' || /^DEMO\b/i.test(c.item || c.alias || c.nom || ''); };
     var piezas = cats.filter(function (c) { return !c.tablero; });
-    var grupos = [{ nom: '🔌 Lo nuevo (instalación)', cs: piezas.filter(function (c) { return !esDemo(c); }) }, { nom: '🔨 Demolición', cs: piezas.filter(esDemo) }].filter(function (g) { return g.cs.length; });
+    var lDemo = linDemo();
+    var grupos = [{ nom: '🔌 Lo nuevo (instalación)', cs: piezas.filter(function (c) { return !esDemo(c); }) }, { nom: '🔨 Demolición', cs: piezas.filter(esDemo), lin: lDemo }].filter(function (g) { return g.cs.length || (g.lin && g.lin.length); });
     grupos.forEach(function (g) {
       if (grupos.length > 1 || g.nom.indexOf('Demolición') >= 0) {
         var gh = 0, gs = 0; g.cs.forEach(function (c) { gh += hoja[c.id] || 0; gs += set[c.id] || 0; });
         h += '<tr class="subcat"><td>' + g.nom + '</td><td class="n">' + gh + (varias ? ' <span class="muted">/ ' + gs + '</span>' : '') + '</td></tr>';
       }
       g.cs.forEach(filaCat);
+      // el tubo y el cable que se retiran, por pie (van al estimador como su renglón por pie)
+      (g.lin || []).forEach(function (l) {
+        h += '<tr class="cntFila lnDemo"><td><span class="cntChip" style="background:#ff0000"></span>' + esc(l.item) + ' <span class="muted small" title="Puesto a mano en pies (Agregar al takeoff): va al estimador por pie">· a mano</span> <span class="cntCod">' + esc(l.codigo || '01-DEMO') + '</span></td><td class="n">' + l.ft + ' ft</td></tr>';
+      });
     });
     function filaCat(c) {
       var nh = hoja[c.id] || 0, ns = set[c.id] || 0;
@@ -10457,7 +10465,8 @@
     });
     (manoRecetas || []).forEach(function (n) {
       var rp = (manoRecPies || {})[normTxt2(n)];
-      if (rp) { out.push({ src: 'rec', nom: n, det: 'receta POR PIES · va como ' + rp.item + ' (' + (rp.codigo || '01-DEMO') + ')', unidad: 'FT', item: rp.item, codigo: rp.codigo || '01-DEMO' }); return; }
+      // una receta por pies ES su renglón por pie: si ese ya está en la lista (biblioteca o catálogo), no se repite
+      if (rp) { if (!ya[manoLlano(rp.item)]) { ya[manoLlano(rp.item)] = 1; out.push({ src: 'rec', nom: n, det: 'receta POR PIES · va como ' + rp.item + ' (' + (rp.codigo || '01-DEMO') + ')', unidad: 'FT', item: rp.item, codigo: rp.codigo || '01-DEMO' }); } return; }
       out.push({ src: 'rec', nom: n, det: 'receta · punto completo (sin su tubo ni su cable)', unidad: 'EA' });
     });
     return out;
@@ -14513,6 +14522,7 @@
     // (v35.I) el tubo y el cable puestos a mano se suman al medido del mismo nombre
     var manoLin = {};
     linMano().forEach(function (l) {
+      if (esLinDemo(l)) return;   // (v35.R) la demolición de tubo y cable se enseña en 🔨 Demolición
       var kk = null; Object.keys(cabPorTipo).forEach(function (x) { if (!kk && manoClave(x) === manoClave(l.item)) kk = x; });
       if (!kk) { kk = l.item; cabPorTipo[kk] = 0; }
       cabPorTipo[kk] += l.ft * 12; manoLin[kk] = (manoLin[kk] || 0) + l.ft;
@@ -14597,7 +14607,7 @@
     }
     // el Count va al final: es conteo de lo que YA está en el plano del
     // ingeniero, no de lo que dibujamos nosotros
-    if (catsCount().length || state.counts.length) rows += conteoBloqueHtml();
+    if (catsCount().length || state.counts.length || linDemo().length) rows += conteoBloqueHtml();
     rows += rutasBloqueHtml();
     body.innerHTML = rows ? '<table>' + rows + '</table>' : '<span class="muted">Sin elementos aún</span>';
     enganchaConteoPanel();
