@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.T';
+  var APP_VERSION = 'v35.U';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2232,6 +2232,12 @@
        se traza con Line o Polyline (bajo el gabinete, en la cornisa, en el
        escalón) y el takeoff la cuenta en FT (`ft`: nombre para el estimador). */
     ledstrip: { name: '▭▭▭ LED STRIP — tira LED a la medida (cuenta en FT)', dash: '', lw: 0.7, glifo: 'led', paso: 12, ft: 'LED Strip Light' },   // 03/09 Edgar: "más fino" (era 1.1)
+    /* (v35.T) Edgar, 28/09: "el LED linear no me deja medirlo". La luminaria
+       lineal se TRAZA a la medida igual que la tira, con una rayita en cada
+       empate de luminaria (cada 4 ft), y el takeoff la pasa a PIEZAS del
+       catálogo (LED LINEAR va por unidad): tramos enteros de `pieza` ft por
+       cada corrida (a.tramo lo cambia en Propiedades). */
+    ledlinear: { name: '▭▭▭ LED LINEAR — luminaria lineal a la medida (se mide en FT, se cotiza por tramos)', dash: '', lw: 1.0, glifo: 'led', paso: 48, ft: 'LED LINEAR', pieza: 4, rot: 'LINEAR' },
     /* Edgar, 03/09: "corrida de conduit con tick marks para contar
        conductores — este es crítico y es el que más se usa". Se traza el
        recorrido y en la mitad salen las rayas que se cuentan: una larga por
@@ -4260,18 +4266,19 @@
       var Pm = puntoEn(tr, tr.tot / 2);
       if (Pm) {
         var am = Pm.ang, rad = am * Math.PI / 180, fs = 4 * kg;
+        var rotLed = (LINE_STYLES[a.lineStyle] || {}).rot || 'LED';
         var encima = a.ledRot === 'encima';
         var ox = encima ? Math.sin(rad) * 4.5 * kg : 0, oy = encima ? -Math.cos(rad) * 4.5 * kg : 0;
         if (am > 90 || am < -90) { am += 180; ox = -ox; oy = -oy; }
         var tfL = 'translate(' + (Pm.x + ox).toFixed(2) + ' ' + (Pm.y + oy).toFixed(2) + ') rotate(' + am.toFixed(1) + ')';
         if (!encima) {
-          var wL = fs * 0.72 * 3 + fs * 0.9, hL = fs * 1.15;   // "LED" en mayúsculas + aire
+          var wL = fs * 0.72 * rotLed.length + fs * 0.9, hL = fs * 1.15;   // la palabra en mayúsculas + aire
           out += '<rect x="' + (-wL / 2).toFixed(2) + '" y="' + (-hL / 2).toFixed(2) + '" width="' + wL.toFixed(2) + '" height="' + hL.toFixed(2) +
             '" rx="' + (fs * 0.2).toFixed(2) + '" fill="' + PAPEL + '" stroke="none" transform="' + tfL + '" style="pointer-events:none"/>';
         }
         out += '<text x="0" y="0" transform="' + tfL + '" font-size="' + fs.toFixed(1) +
           '" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="' + col +
-          '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">LED</text>';
+          '" stroke="none" style="pointer-events:none" font-family="Arial, sans-serif">' + esc(rotLed) + '</text>';
       }
     }
     return out;
@@ -8908,7 +8915,13 @@
           '<input id="prCondG" type="number" min="0" max="4" value="' + cF.g + '" style="flex:1" title="Tierra (EGC)"></div>';
         html += '<div class="muted small">Fases · Neutro · Tierra — la raya con punto es el neutro, la corta con patita es la tierra.</div>';
       }
-      if (e.lineStyle === 'ledstrip') {
+      if (e.lineStyle && LINE_STYLES[e.lineStyle] && LINE_STYLES[e.lineStyle].pieza) {
+        var trm = +e.tramo || LINE_STYLES[e.lineStyle].pieza;
+        html += '<div class="row" title="Largo de cada luminaria: lo medido se pasa a tramos enteros de este largo"><label>Tramo</label><select id="prTramo">' +
+          [2, 4, 8].map(function (t) { return '<option value="' + t + '"' + (trm === t ? ' selected' : '') + '>' + t + ' ft por luminaria</option>'; }).join('') + '</select></div>';
+        html += '<div class="muted small">' + fmtFtIn(perimDe(e)) + ' medidos → ' + Math.ceil(perimDe(e) / 12 / trm) + ' luminaria(s) de ' + trm + ' ft al takeoff</div>';
+      }
+      if (e.lineStyle === 'ledstrip' || e.lineStyle === 'ledlinear') {
         html += '<div class="row"><label>Rótulo LED</label><select id="prLedRot">' +
           [['centro', 'Al centro, con fondo (se ve la luz)'], ['encima', 'Encima de la tira'], ['no', 'Sin rótulo']].map(function (o) {
             return '<option value="' + o[0] + '"' + ((e.ledRot || 'centro') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
@@ -9232,6 +9245,7 @@
     on('prCondN', 'change', function (n) { condSet('n', n); });
     on('prCondG', 'change', function (n) { condSet('g', n); });
     on('prLedRot', 'change', function (n) { pushUndo(); if (n.value === 'centro') delete e.ledRot; else e.ledRot = n.value; refresh(); });
+    on('prTramo', 'change', function (n) { pushUndo(); var est0 = LINE_STYLES[e.lineStyle] || {}; if (+n.value === est0.pieza) delete e.tramo; else e.tramo = +n.value; refresh(); showProps(); });
     on('prCloudArc', 'change', function (n) { pushUndo(); e.arco = CLOUD_ARCS[n.value] ? n.value : 'media'; curCloudArc = e.arco; refresh(); });
     on('prAreaLine', 'change', function (n) {
       pushUndo(); e.lineStyle = n.value; curLineStyle = n.value;
@@ -10223,6 +10237,26 @@
   var tlibMarcados = {};          // subj marcados con el checkbox (por set|subj)
   function tlibSets() { var L = window.TAKEOFF_LIB; return (L && Array.isArray(L.sets)) ? L.sets : []; }
   function tlibKey(setNom, subj) { return setNom + '|' + subj; }
+  /* (v35.T) Lo que en la biblioteca se MIDE en vez de contarse: la tira LED y
+     la luminaria lineal se trazan a la medida con su tipo de línea (Edgar,
+     28/09: "el LED linear no me deja medirlo, si es el strip tampoco me dejó
+     seleccionarlo"). Devuelve la clave de LINE_STYLES o null. */
+  function tlibTrazaDe(it) {
+    var sj = String((it && it.subj) || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (/^LED STRIP( LIGHT)?$/.test(sj)) return 'ledstrip';
+    if (/^LED LINEAR$/.test(sj)) return 'ledlinear';
+    return null;
+  }
+  function tlibTraza(ls) {
+    var est = LINE_STYLES[ls]; if (!est) return false;
+    curLineStyle = ls;
+    setTool('line');
+    cierraTlib();
+    setHint('📏 Midiendo ' + est.name.replace(/^[^A-Za-zÁ-ú]+/, '').split(' — ')[0] + ' — clic donde empieza y clic donde termina (Polyline si dobla)' +
+      (est.pieza ? ' · al takeoff va en luminarias de ' + est.pieza + ' ft' : ' · al takeoff va en FT') +
+      (state.bg && !state.bg.cal ? ' · OJO: este plano no está calibrado' : ''));
+    return true;
+  }
   /* Qué categorías del proyecto vienen ya de la biblioteca: por alias, o por
      nombre si la creó a mano con el mismo texto. */
   function tlibEnProyecto() {
@@ -10267,7 +10301,7 @@
         var marc = !ya && it.tipo !== 'largo' && !it.descartado && tlibMarcados[k]; if (marc) nMarc++;
         var det;
         if (it.descartado) det = 'descartado — equipo que ya no se usa (Edgar, 14/09)';
-        else if (it.tipo === 'largo') det = esRutaTlib(st.nom, it) ? 'ruta de conduit — toca la fila y trázala sobre el plano' : 'largo · sin material — no se cotiza por tipo';
+        else if (it.tipo === 'largo') det = esRutaTlib(st.nom, it) ? 'ruta de conduit — toca la fila y trázala sobre el plano' : tlibTrazaDe(it) ? 'se mide en pies — toca la fila y trázala sobre el plano' : 'largo · sin material — no se cotiza por tipo';
         else if (ya) det = 'ya en el proyecto';
         else if (it.receta) det = 'receta: ' + esc(it.receta) + ' · punto completo (sin su tubo ni su cable, que los mides tú)';
         else if (it.item) det = (it.item.replace(/\s+/g, ' ').toUpperCase() === it.subj.replace(/\s+/g, ' ').toUpperCase() ? 'en el catálogo' : 'catálogo: ' + esc(it.item.replace(/\s+/g, ' '))) + (it.unidad ? ' · ' + esc(it.unidad) : '') + (it.via === 'propuesto' ? ' · propuesto' : '') + (it.codigo ? ' · ' + esc(it.codigo) : '');
@@ -10285,9 +10319,13 @@
            automáticamente cuando yo seleccione el device que quiero empezar a
            contar») La fila es un BOTÓN: se toca y ya se está contando. */
         var cuenta_ = !(it.tipo === 'largo' || it.descartado);
-        h += '<div class="tlFila' + (ya ? ' ya' : '') + (cuenta_ ? ' tlElige' : ' largo') + (ya && catActiva && ya.id === catActiva ? ' activa' : '') + '" data-k="' + esc(k) + '"' + (cuenta_ ? ' title="Tócalo y empieza a contarlo"' : '') + '>' +
+        var lsT = it.descartado ? null : tlibTrazaDe(it);
+        // un largo que se MIDE (LED STRIP): toda la fila es el botón de trazar
+        var soloTraza = !!lsT && !cuenta_;
+        h += '<div class="tlFila' + (ya ? ' ya' : '') + (cuenta_ ? ' tlElige' : soloTraza ? ' tlTraza' : ' largo') + (ya && catActiva && ya.id === catActiva ? ' activa' : '') + '" data-k="' + esc(k) + '"' + (soloTraza ? ' data-ls="' + lsT + '"' : '') + (cuenta_ ? ' title="Tócalo y empieza a contarlo"' : soloTraza ? ' title="Tócalo y trázalo sobre el plano: se mide en pies"' : '') + '>' +
           '<span class="cntChip" style="background:' + esc(it.color || '#888') + '"></span>' +
-          '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + '</span></span>' +
+          '<span class="tlTxt"><span class="tlSubj">' + esc(it.subj) + '</span><span class="tlDet">' + det + (lsT && cuenta_ ? ' · o mídelo en pies' : '') + '</span></span>' +
+          (lsT ? '<span class="tlIr tlTraza" data-ls="' + lsT + '" title="Trazarlo sobre el plano a la medida">📏 Medir ▸</span>' : '') +
           (cuenta_ ? '<span class="tlIr">' + (ya ? 'Contar ▸' : '+ Contar ▸') + '</span>' : '') + '</div>';
       });
     });
@@ -10396,6 +10434,8 @@
             (state.bg && !state.bg.cal ? ' · OJO: este plano no está calibrado' : ''));
           return;
         }
+        var ft = ev.target.closest && ev.target.closest('.tlTraza');
+        if (ft && ft.dataset.ls) { ev.preventDefault(); ev.stopPropagation(); tlibTraza(ft.dataset.ls); return; }
         var fe = ev.target.closest && ev.target.closest('.tlElige');
         if (fe) { ev.preventDefault(); tlibElige(fe.dataset.k); return; }
         var cab = ev.target.closest && ev.target.closest('.tlSet');
@@ -10658,7 +10698,7 @@
   })();
   window.__manoDbg = { recetasPies: recetasPies, aplicaPies: recetasPiesAplica, migraPies: migraRecetasPies, abre: abreMano, cierra: cierraMano, busca: function (q) { return manoBusca(q).map(function (c) { return c.src + ':' + c.nom + ':' + c.unidad; }); },
     elige: manoElige, agrega: manoAgrega, lineal: function () { return JSON.parse(JSON.stringify((state.project && state.project.linMano) || [])); }, migra: migraLinMano, cantidad: manoCantidad, quita: manoQuita, cands: function () { return manoCands.map(function (c) { return c.src + ':' + c.nom; }); } };
-  window.__tlibDbg = { elige: tlibElige, migraDemo: migraDemoNombres, abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
+  window.__tlibDbg = { elige: tlibElige, traza: tlibTraza, trazaDe: tlibTrazaDe, migraDemo: migraDemoNombres, abre: abreTlib, cierra: cierraTlib, sets: tlibSets, anadeSet: tlibAnadirSet, marca: function (k, v) { tlibMarcados[k] = v !== false; pintaTlib(); }, anadir: tlibAnadirMarcados, enProyecto: tlibEnProyecto };
 
   /* ==================================================================
      RUTAS DE CONDUIT (punto E5) — el takeoff LINEAL por tipo de material
@@ -15209,7 +15249,7 @@
     syncSheet();
     var out = [];
     function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
-    var byKey = {}, oc = {}, wg = {}, pz = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {}, circAreas = [];   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
+    var byKey = {}, oc = {}, wg = {}, pz = {}, pzLum = {}, pzFt = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {}, circAreas = [];   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -15258,7 +15298,10 @@
         var estA = LINE_STYLES[a.lineStyle];
         if (estA && estA.ft && Array.isArray(a.pts) && a.pts.length >= 2) {
           var lfA = polyPerim(a.pts, a.open);
-          if (lfA >= 1) lf[estA.ft] = (lf[estA.ft] || 0) + lfA;
+          if (lfA >= 1) {
+            if (estA.pieza) { var trmA = +a.tramo || estA.pieza; pzLum[estA.ft] = (pzLum[estA.ft] || 0) + Math.ceil(lfA / 12 / trmA); pzFt[estA.ft] = (pzFt[estA.ft] || 0) + lfA; }
+            else lf[estA.ft] = (lf[estA.ft] || 0) + lfA;
+          }
         }
         if (a.open || !AREA_PATTERNS[a.pattern] || a.pattern === 'none') return;
         var nomA = AREA_PATTERNS[a.pattern].name;
@@ -15282,6 +15325,8 @@
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT', CODIGO_DEFECTO); });
     Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF', CODIGO_DEFECTO); });
     Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', '11-LIGHT'); });
+    // (v35.T) la luminaria lineal medida en pies sale en PIEZAS, con los pies medidos de nota
+    Object.keys(pzFt).forEach(function (k) { add(k, pzLum[k], 'E', '11-LIGHT'); if (out.length) out[out.length - 1].medido = Math.round(pzFt[k] / 12) + ' ft medidos'; });
     // cada tipo de ruta con SU código: los feeders a 06-FEED, el branch a
     // 08-ROUGH, el low voltage a 13-LV — lo que dice la biblioteca
     Object.keys(rt).forEach(function (k) {
