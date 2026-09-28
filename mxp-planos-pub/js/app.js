@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.S';
+  var APP_VERSION = 'v35.T';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -25402,8 +25402,16 @@
     for (var i = undoStack.length - 1; i >= 0 && !viejo; i--) {
       try { var m = JSON.parse(undoStack[i]).bgMeta; if (m && m.w > 0 && m.h > 0 && (Math.abs(m.w - bg.w) / bg.w > 0.001 || Math.abs(m.h - bg.h) / bg.h > 0.001)) viejo = m; } catch (e) {}
     }
+    var origen = viejo ? 'el historial de esta sesión' : '';
     if (!viejo) {
-      uiAlert('No encuentro en esta sesión el tamaño que tenía el plano antes de calibrarlo (el historial de deshacer se pierde al recargar).\n\nQué hacer: si acabas de calibrar, Ctrl+Z lo devuelve todo a su sitio y calibras otra vez (ahora lo dibujado se mueve con el plano). Si ya recargaste, selecciona todas las marcas y arrástralas, o vuelve a contar esa hoja.');
+      // (v35.T) Edgar recargó y el historial se perdió: se prueba con los
+      // tamaños que el plano PUDO tener antes (el de importación, el de la
+      // escala escrita) y se toma el que reparte las marcas sobre el plano
+      var mejor = reencajaAdivina(bg);
+      if (mejor) { viejo = mejor.v; origen = mejor.v.nom; }
+    }
+    if (!viejo) {
+      uiAlert('No encuentro el tamaño que tenía el plano antes de calibrarlo: ni en el historial de esta sesión (se pierde al recargar) ni por el tamaño con que se importó.\n\nQué hacer: si acabas de calibrar, Ctrl+Z lo devuelve todo a su sitio y calibras otra vez (ahora lo dibujado se mueve con el plano). Si no, selecciona todas las marcas y arrástralas, o vuelve a contar esa hoja.');
       return false;
     }
     var f = Math.round(bg.w / viejo.w * 1000) / 1000;
@@ -25411,13 +25419,49 @@
       pushUndo();
       var n = reencajaAlFondo(viejo, bg);
       refresh(); refreshCounts(); renderBg();
-      setHint('✔ ' + n + ' cosa(s) reencajadas al plano (×' + f + ') · Ctrl+Z lo deshace');
+      setHint('✔ ' + n + ' cosa(s) reencajadas al plano (×' + f + ', desde ' + origen + ') · Ctrl+Z lo deshace');
     };
     if (sinPreguntar === true) { hazlo(); return true; }
-    uiConfirm('El plano cambió de tamaño ×' + f + ' (de ' + Math.round(viejo.w) + ' a ' + Math.round(bg.w) + ' de ancho) y lo dibujado se quedó donde estaba.\n\n¿Mover TODO lo dibujado en esta hoja (marcas del Count, símbolos, rutas, textos) para que vuelva a caer sobre el plano?\n\nOJO: lo que hayas puesto DESPUÉS de calibrar también se mueve. Ctrl+Z lo deshace.', function (ok) { if (ok) hazlo(); });
+    uiConfirm('El plano cambió de tamaño ×' + f + ' (de ' + Math.round(viejo.w) + ' a ' + Math.round(bg.w) + ' de ancho, según ' + origen + ') y lo dibujado se quedó donde estaba.\n\n¿Mover TODO lo dibujado en esta hoja (marcas del Count, símbolos, rutas, textos) para que vuelva a caer sobre el plano?\n\nOJO: lo que hayas puesto DESPUÉS de calibrar también se mueve. Ctrl+Z lo deshace.', function (ok) { if (ok) hazlo(); });
     return true;
   }
-  window.__calDbg = { reencaja: reencajaAlFondo, historial: reencajaDesdeHistorial, escala: function (f) { applyBgScale(f); } };
+  /* Los tamaños que el plano pudo tener antes de calibrarse, sin historial:
+     todo plano entra a 600 de ancho en (0,0) —insertBackground y bgDePagina—
+     y la escala escrita lo deja en paperW × factor también en (0,0). */
+  function reencajaCandidatos(bg) {
+    var c = [];
+    if (bg.pxW > 0 && bg.pxH > 0) c.push({ nom: 'el tamaño de importación', x: 0, y: 0, w: 600, h: 600 * bg.pxH / bg.pxW });
+    if (bg.paperW > 0 && bg.paperH > 0 && bg.scaleFactor > 0) c.push({ nom: 'la escala escrita ' + bgScaleName(bg.scaleFactor), x: 0, y: 0, w: bg.paperW * bg.scaleFactor, h: bg.paperH * bg.scaleFactor });
+    return c.filter(function (v) { return Math.abs(v.w - bg.w) / bg.w > 0.001 || Math.abs(v.h - bg.h) / bg.h > 0.001 || v.x !== bg.x || v.y !== bg.y; });
+  }
+  /* Qué tan bien queda lo dibujado si se supone que el plano medía «v»:
+     cuántos puntos caen dentro del plano y qué tanto se reparten por él
+     (amontonados en la esquina = poco; repartidos = mucho). */
+  function reencajaPuntaje(v, bg) {
+    var pts = [];
+    ['counts', 'symbols', 'texts'].forEach(function (k) { (state[k] || []).forEach(function (e) { if (e && e.x != null && e.y != null) pts.push([e.x, e.y]); }); });
+    if (pts.length < 2) return null;
+    var sx = v ? bg.w / v.w : 1, sy = v ? bg.h / v.h : 1;
+    var dentro = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, mg = 0.02;
+    pts.forEach(function (q) {
+      var x = v ? bg.x + (q[0] - v.x) * sx : q[0], y = v ? bg.y + (q[1] - v.y) * sy : q[1];
+      if (x >= bg.x - bg.w * mg && x <= bg.x + bg.w * (1 + mg) && y >= bg.y - bg.h * mg && y <= bg.y + bg.h * (1 + mg)) dentro++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    });
+    var ext = Math.max((x1 - x0) / bg.w, (y1 - y0) / bg.h);
+    return { dentro: dentro / pts.length, ext: ext, n: pts.length };
+  }
+  function reencajaAdivina(bg) {
+    var ahora = reencajaPuntaje(null, bg); if (!ahora) return null;
+    var mejor = null;
+    reencajaCandidatos(bg).forEach(function (v) {
+      var pz = reencajaPuntaje(v, bg); if (!pz || pz.dentro < 0.9) return;
+      if (pz.ext <= ahora.ext * 1.15) return;                 // no mejora: no se toca
+      if (!mejor || pz.ext > mejor.pz.ext) mejor = { v: v, pz: pz };
+    });
+    return mejor;
+  }
+  window.__calDbg = { reencaja: reencajaAlFondo, historial: reencajaDesdeHistorial, adivina: reencajaAdivina, candidatos: reencajaCandidatos, escala: function (f) { applyBgScale(f); } };
   function applyBgScale(f) {
     var b = state.bg; if (!b || !b.paperW) return;
     pushUndo();
