@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.V';
+  var APP_VERSION = 'v35.W';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9750,7 +9750,7 @@
   function listaDe(cual) {
     if (window.__listasDbg && Array.isArray(window.__listasDbg[cual])) return Promise.resolve(window.__listasDbg[cual].slice());
     if (_listas[cual]) return Promise.resolve(_listas[cual]);
-    var ruta = cual === 'recetas' ? '/rest/v1/ensambles?select=nombre&order=orden' : '/rest/v1/catalogo_items?select=item&order=orden';
+    var ruta = cual === 'recetas' ? '/rest/v1/ensambles?select=nombre&order=orden,id' : '/rest/v1/catalogo_items?select=item&order=orden,id';
     // sin sesión del estimador no se va a la red: el cuadro es el de siempre, al instante
     var pr; try { pr = (SB && typeof fetch !== 'undefined' && sbAuth()) ? sbFetchTodo(ruta) : Promise.resolve([]); } catch (e) { pr = Promise.resolve([]); }
     return pr.then(function (rows) {
@@ -9774,13 +9774,13 @@
     if (_recetasPiesPr) return _recetasPiesPr;
     var puede = false; try { puede = !!(SB && typeof fetch !== 'undefined' && sbAuth()); } catch (e) {}
     if (!puede) return Promise.resolve({});
-    _recetasPiesPr = sbFetchTodo('/rest/v1/ensambles?select=id,nombre&pies_editable=is.true&order=orden').then(function (ens) {
+    _recetasPiesPr = sbFetchTodo('/rest/v1/ensambles?select=id,nombre&pies_editable=is.true&order=orden,id').then(function (ens) {
       ens = Array.isArray(ens) ? ens : [];
       if (!ens.length) return {};
       var ids = ens.map(function (e) { return e.id; }).join(',');
       return Promise.all([
         sbFetchTodo('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad&ensamble_id=in.(' + ids + ')&order=id'),
-        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo&order=orden')
+        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo&order=orden,id')
       ]).then(function (r) {
         var its = r[0] || [], uni = {}, cod = {};
         (r[1] || []).forEach(function (c) { var k = normTxt2(c.item); uni[k] = String(c.unidad || '').toUpperCase(); cod[k] = c.codigo || ''; });
@@ -10328,7 +10328,7 @@
       st.items.forEach(function (it) { if (it.tipo === 'largo' || it.descartado) { nLargo++; if (esRutaTlib(st.nom, it)) nRuta++; } else { if (enP[it.subj.toUpperCase()]) nYa++; if (it.item) nCat++; } });
       var nCont = st.items.length - nLargo;
       h += '<div class="tlSet' + (abierto ? ' on' : '') + '" data-set="' + esc(st.nom) + '">' +
-        '<span class="tlFlecha"></span><span class="tlNom">' + esc(st.nom) + '</span>' +
+        '<span class="tlFlecha"></span><span class="tlNom" title="' + esc(st.nom) + '">' + esc(st.titulo || st.nom) + '</span>' +
         '<span class="tlN">' + (nCont ? nCont + ' ' + (nCont === 1 ? 'tool' : 'tools') : '') + (nRuta ? (nCont ? ' · ' : '') + nRuta + ' ruta(s)' : nLargo ? (nCont ? ' · ' : '') + nLargo + ' de largo' : '') +
         (nYa ? ' · <b>' + nYa + ' en el proyecto</b>' : '') + '</span>' +
         (nCont && nYa < nCont ? '<button class="tlTodo" data-set="' + esc(st.nom) + '" title="Añadir al proyecto todos los tools de conteo de este set que aún no estén">Todo el set</button>' : '') +
@@ -10522,7 +10522,7 @@
     var dbg = window.__listasDbg || null;
     var pCat = manoCatalogo ? Promise.resolve(manoCatalogo)
       : (dbg && Array.isArray(dbg.catalogoU)) ? Promise.resolve(dbg.catalogoU.slice())
-      : (function () { var pr; try { pr = (SB && typeof fetch !== 'undefined' && sbAuth()) ? sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo,seccion&order=orden') : Promise.resolve([]); } catch (e) { pr = Promise.resolve([]); } return pr.then(function (r) { return Array.isArray(r) ? r : []; }, function () { return []; }); })();
+      : (function () { var pr; try { pr = (SB && typeof fetch !== 'undefined' && sbAuth()) ? sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,codigo,seccion&order=orden,id') : Promise.resolve([]); } catch (e) { pr = Promise.resolve([]); } return pr.then(function (r) { return Array.isArray(r) ? r : []; }, function () { return []; }); })();
     return Promise.all([pCat, listaDe('recetas'), recetasPies()]).then(function (x) {
       manoCatalogo = (x[0] || []).filter(function (r) { return r && r.item; });
       manoRecetas = x[1] || [];
@@ -11343,7 +11343,10 @@
   }
   /* Qué familia es cada tool set de Edgar. Los que no están (Electrical Tool
      Set de fábrica, Demolition) no dan bonus ni castigo. */
-  var LEY_SET_FAM = { 'Fire Alarm': 'fire_alarm', CCTV: 'security_cctv', Telecom: 'data_comm', Receptacles: 'receptacle', Switches: 'switch', Lights: 'lighting', Boxes: 'junction_box', 'Pull Boxes': 'junction_box', 'Floor Boxes': 'junction_box', 'SwitchGear(1)': 'panel_equipment', 'SwitchGear(2)': 'panel_equipment', Generator: 'panel_equipment', 'Lightning Protection': 'grounding' };
+  var LEY_SET_FAM = { 'Fire Alarm': 'fire_alarm', CCTV: 'security_cctv', Telecom: 'data_comm', Receptacles: 'receptacle', Switches: 'switch', Lights: 'lighting', Boxes: 'junction_box', 'Pull Boxes': 'junction_box', 'Floor Boxes': 'junction_box', 'SwitchGear(1)': 'panel_equipment', 'SwitchGear(2)': 'panel_equipment', Generator: 'panel_equipment', 'Lightning Protection': 'grounding',
+    // (v35.W) los sets del catálogo por familia
+    'Cajas y anillos (catálogo)': 'junction_box', 'Cajas de piso y mueble (catálogo)': 'junction_box', 'Dispositivos (catálogo)': 'receptacle', 'Luminarias (catálogo)': 'lighting', 'Control de iluminación (catálogo)': 'lighting', 'Ventiladores (catálogo)': 'lighting', 'Lutron (catálogo)': 'switch',
+    'Breakers (catálogo)': 'panel_equipment', 'Cargadores EV (catálogo)': 'panel_equipment', 'Bajo voltaje (catálogo)': 'data_comm', 'Seguridad y acceso (catálogo)': 'security_cctv', 'Sonido, intercom y reloj (catálogo)': 'data_comm' };
   function leyMismaFam(a, b) {
     if (!a || !b) return null;
     var n = function (f) { return f === 'exit_emergency' ? 'lighting' : f === 'motor_mech' ? 'panel_equipment' : f; };
@@ -15493,10 +15496,10 @@
       var sinColumnaCodigo = false, sinColumnaLineal = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
-        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad&order=orden'),
+        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad&order=orden,id'),
         sbFetchTodo('/rest/v1/alias_takeoff?select=*&order=alias'),
         // las recetas, para las categorías que son un PUNTO COMPLETO
-        sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden').then(null, function () { return []; }),
+        sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden,id').then(null, function () { return []; }),
         // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
         sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; }),
         recetasPies()
@@ -15855,9 +15858,9 @@
     if (!sbAuth()) { askLogin(scopePide); return; }
     pintaScope('Leyendo tus recetas y tu catálogo…');
     Promise.all([
-      sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo,pies_editable,orden&order=orden'),
+      sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo,pies_editable,orden&order=orden,id'),
       sbFetchTodo('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad&order=id'),
-      sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad,codigo,seccion&order=orden'),
+      sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad,codigo,seccion&order=orden,id'),
       sbFetchTodo('/rest/v1/alias_takeoff?select=alias,item,factor&order=alias').then(null, function () { return []; })
     ]).then(function (res) {
       var ens = res[0] || [], ei = res[1] || [], cat = res[2] || [], alias = res[3] || [];
