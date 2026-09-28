@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.X';
+  var APP_VERSION = 'v35.Y';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -9644,6 +9644,7 @@
     estampaCofre('count', cM);
     cM.cat = ct.id;                    // la categoría activa manda, no la del cofre
     state.counts.push(cM);
+    if (!lucesModo() && esCatLuz(ct)) lucesPregunta(null, 'estás contando «' + ct.nom + '»');   // (v35.Y) la primera luz del proyecto
     renderConteo(); refreshCounts();
     /* (21/09, verificación) UN PANEL SE COLOCA UNA VEZ. Tras «colocar» el
        NHI, la categoría activa es la del tablero: el siguiente toque en el
@@ -10289,6 +10290,7 @@
   }
   function tlibTraza(ls) {
     var est = LINE_STYLES[ls]; if (!est) return false;
+    if (!lucesModo()) lucesPregunta(null, 'vas a medir ' + est.name.replace(/^[^A-Za-zÁ-ú]+/, '').split(' — ')[0]);   // (v35.Y)
     curLineStyle = ls;
     setTool('line');
     cierraTlib();
@@ -10408,6 +10410,7 @@
     cierraTlib();
     refresh(); refreshCounts(); pintaTlib();
     setHint((nuevo ? '✔ Añadida · ' : '') + 'Contando «' + c.nom + '» — toca cada uno en el plano');
+    if (esCatLuz(c) && !lucesModo()) lucesPregunta(null, 'vas a contar «' + c.nom + '»');   // (v35.Y)
     return c;
   }
   function tlibAnadirMarcados() {
@@ -15390,7 +15393,7 @@
     });
     var cntNom = {};
     Object.keys(cnt).forEach(function (id) { var c = catCount(id); if (!c || c.receta) return; var nm = c.alias || c.nom; if (!nm) return; cntNom[nm] = (cntNom[nm] || 0) + cnt[id]; });
-    Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); });
+    Object.keys(cntNom).forEach(function (k) { var c0 = null; catsCount().forEach(function (c) { if ((c.alias || c.nom) === k) c0 = c; }); var n0 = out.length; add(k, cntNom[k], (c0 && c0.unidad && c0.unidad !== 'E') ? c0.unidad : 'EA', codigoDeCat(c0)); if (out.length > n0 && esCatLuz(c0)) out[out.length - 1].luz = true; });
     /* Las categorías que son un PUNTO COMPLETO salen aparte, como receta: no
        son un renglón de catálogo, son una receta × cantidad. */
     var recetas = {};
@@ -15399,12 +15402,14 @@
       /* la receta COMPLETA y la receta sin lineal son dos filas distintas: si
          se sumaran, 30 stubs de datos y 63 receptáculos irían con la misma
          bandera y una de las dos cosas saldría mal */
-      var kR = c.receta + '\u0001' + (c.recetaFull ? '1' : '0');
+      var kR = c.receta + '\u0001' + (c.recetaFull ? '1' : '0') + '\u0001' + (esCatLuz(c) ? 'L' : '');
       recetas[kR] = (recetas[kR] || 0) + cnt[id];
     });
     Object.keys(recetas).forEach(function (kR) {
-      var i = kR.lastIndexOf('\u0001'), nmR = kR.slice(0, i);
-      out.push({ receta: nmR, qty: recetas[kR], full: kR.slice(i + 1) === '1', unit: 'EA', codigo: CODIGO_DEFECTO, name: nmR });
+      var pr = kR.split('\u0001'), nmR = pr[0];
+      var eR = { receta: nmR, qty: recetas[kR], full: pr[1] === '1', unit: 'EA', codigo: CODIGO_DEFECTO, name: nmR };
+      if (pr[2] === 'L') { eR.luz = true; eR.codigo = '11-LIGHT'; }   // (v35.Y) una luz con receta: para «solo labor»
+      out.push(eR);
     });
     return out;
   }
@@ -15428,6 +15433,70 @@
     return '';
   }
   window.__luzDbg = luzSoloInstalacion;
+  /* LUCES: ¿CON PRECIO O SOLO LABOR? (v35.Y, Edgar 28/09: «en iluminación quiero
+     que me preguntes antes de cotizarlo o contarlo si es con precio o solo labor;
+     en Peninsula todas las luces serán solo labor»). Es una decisión del
+     PROYECTO: se pregunta al empezar a contar o medir la primera luz y, si no
+     se contestó, antes de mandar al estimador. Se guarda en el proyecto
+     (state.project.lucesModo = 'labor' | 'precio') y se cambia en Count ▾ → Más….
+     Con SOLO LABOR cada luz va con su mano, su caja y su whip, y la luminaria
+     en $0 de material, también dentro de su receta. Los sensores, relés,
+     contactores, photocells y ventiladores NO son luminarias: van a su precio. */
+  var LUZ_NO = /SENSOR|RELAY|CONTACTOR|PHOTOCELL|CLOCK|DIMMER|CONSOLE|CABINET|\bFANS?\b|POLE BASE|PULL BOX|FUSE|SPLICE|CLIPS|HOLDER|PUESTA|CASETA|LUTRON|\bPICO\b|TRANSFORMER|DRIVER|STROBE|SHADE|\bHUB\b|REPEATER|INSTALACI|DEMO\b|SWITCH|RECEPT|OUTLET|\bBOX\b|RING|CONDUIT|WIRE|THHN|CABLE/;
+  function esLuminaria(nombre) {
+    var n = String(nombre || '').toUpperCase().replace(/\s+/g, ' ').trim();
+    if (!n || LUZ_NO.test(n)) return false;
+    return /LIGHT|FIXTURE|TROFFER|PENDANT|CHANDEL|SCONCE|VANITY|\bLED\b|STRIP|LINEAR|WALL ?PACK|HIGH-?BAY|FLOOD|\bEXIT\b|FLUORESCENT|INCANDESCENT|\bCAN\b|DOWN ?LIGHT|LUMINARIA|LAMP\b|\bLUZ\b/.test(n);
+  }
+  function lucesModo() { var m = state.project && state.project.lucesModo; return (m === 'labor' || m === 'precio') ? m : ''; }
+  function esCatLuz(c) {
+    if (!c || c.tablero) return false;
+    var deLuz = codigoDeCat(c) === '11-LIGHT' || c.set === 'Lights' || /Luminarias/.test(c.set || '');
+    return deLuz && esLuminaria(c.item || c.alias || c.nom);
+  }
+  function esEntradaLuz(e) { return !!e && (e.luz === true || (e.codigo === '11-LIGHT' && esLuminaria(e.name))); }
+  var lucesPreguntando = false;
+  function lucesPregunta(cb, cuando) {
+    if (lucesModo()) { if (cb) cb(lucesModo()); return; }
+    if (lucesPreguntando) { if (cb) cb(''); return; }
+    lucesPreguntando = true;
+    uiDialog('💡 Las luces de este proyecto, ¿van CON PRECIO o SOLO LABOR?\n\n' +
+      'SOLO LABOR: la luminaria la pone otro. Va la mano, la caja y el whip; la luz a $0.\n' +
+      'CON PRECIO: MXP pone la luminaria, a su precio del catálogo.\n\n' +
+      'Se guarda en el proyecto. Se cambia en Count ▾ → Más… → Luces.' + (cuando ? '\n\n(' + cuando + ')' : ''),
+      { okTxt: 'Solo labor', tercero: 'Con precio', cancelTxt: 'Después' }, function (r) {
+        lucesPreguntando = false;
+        if (r === true || r === 'tercero') {
+          if (!state.project) state.project = {};
+          state.project.lucesModo = r === true ? 'labor' : 'precio';
+          scheduleAutosave(); refreshCounts();
+          setHint('💡 Luces de este proyecto: ' + (r === true ? 'SOLO LABOR (la luminaria a $0)' : 'CON PRECIO'));
+        }
+        if (cb) cb(lucesModo());
+      });
+  }
+  function lucesCambia() {
+    var ant = lucesModo();
+    if (state.project) delete state.project.lucesModo;
+    lucesPregunta(function (m) { if (!m && ant) { state.project.lucesModo = ant; } }, ant ? 'ahora: ' + (ant === 'labor' ? 'solo labor' : 'con precio') : 'todavía sin decidir');
+  }
+  /* Una receta de luz en SOLO LABOR se abre aquí en sus renglones, igual que la
+     abre el estimador (sin el tubo ni el cable si esos se miden aparte), y la
+     luminaria va a $0. PURA: recibe la receta, sus componentes y el catálogo. */
+  var ES_LINEAL_CABLE_E = function (n) { return /ROMEX|MC\b|THHN|THW|MCM|SPEAKER WIRE|CAT ?[56]/.test(n) && !/CONNECTOR|STAPLE|SNAP/.test(n); };
+  function recetaLuzSoloLabor(comps, qty, full, catByNorm, nrm) {
+    var out = [], falta = [];
+    (comps || []).forEach(function (cmp) {
+      var nomU = String(cmp.item || '').toUpperCase().replace(/\s+/g, ' ');   // la misma regla del estimador, en mayúsculas
+      if (!full && (ES_LINEAL_CABLE_E(nomU) || /CONDUIT/.test(nomU))) return;
+      var t = catByNorm[nrm(cmp.item)];
+      if (!t) { falta.push(cmp.item); return; }
+      var luz = esLuminaria(t.item);
+      out.push({ item: t.item, unidad: t.unidad, precio: luz ? 0 : (t.precio || 0), horas: t.horas_unidad || 0, cantidad: (Number(cmp.cantidad) || 0) * qty, luz: luz });
+    });
+    return { renglones: out, falta: falta };
+  }
+  window.__lucesDbg = { esLuminaria: esLuminaria, modo: lucesModo, pregunta: lucesPregunta, cambia: lucesCambia, esEntrada: esEntradaLuz, abre: recetaLuzSoloLabor };
   /* COMPARAR CON EL BORRADOR ANTERIOR (v34.F, 18/09). Entre lo que la app
      mandó y el borrador a mano hubo ~$100.000 de diferencia y nadie lo vio
      hasta el final. Esto mira qué llevaba el estimado anterior del MISMO
@@ -15493,6 +15562,12 @@
     entries = buildTakeoffEntries(true);
     if (!entries.length) { uiAlert('El plano no tiene nada que contar todavía — coloca símbolos, paredes o cableado primero.'); return; }
     function go() {
+      // (v35.Y) con luces en el takeoff, primero: ¿con precio o solo labor?
+      if (!lucesModo() && entries.some(esEntradaLuz)) {
+        lucesPregunta(function (m) { if (m) go(); else setHint('💡 Antes de mandar: di si las luces van con precio o solo labor (Count ▾ → Más… → Luces)'); }, 'antes de mandar al estimador');
+        return;
+      }
+      var soloLabor = lucesModo() === 'labor' && entries.some(esEntradaLuz);
       var sinColumnaCodigo = false, sinColumnaLineal = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
@@ -15502,9 +15577,12 @@
         sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden,id').then(null, function () { return []; }),
         // la lista viva de códigos de partida; si la tabla no está, se sigue con la copia local
         sbFetch('/rest/v1/codigos_partida?select=*').then(function (r) { guardaCodigos(r); return r; }, function () { return null; }),
-        recetasPies()
+        recetasPies(),
+        // (v35.Y) en «solo labor» las recetas de luz se abren aquí, con la luminaria a $0
+        soloLabor ? sbFetchTodo('/rest/v1/ensamble_items?select=ensamble_id,item,cantidad').then(null, function () { return null; }) : Promise.resolve([])
       ]).then(function (res) {
         var cat = res[0] || [], alias = res[1] || [], ensL = res[2] || [];
+        var ensItemsL = res[5];
         // (v35.Q) una receta por pies (demolición de tubo o cable) va como su renglón por pie, con la cantidad en pies
         var aplP = recetasPiesAplica(entries, res[4] || {}); entries = aplP.entries; var recPiesCambiadas = aplP.cambiadas;
         var ensByNorm2 = {}; ensL.forEach(function (e) { ensByNorm2[normTxt2(e.nombre)] = e; });
@@ -15515,8 +15593,25 @@
         }
         var catByNorm = {}; cat.forEach(function (c) { catByNorm[normTxt2(c.item)] = c; });
         var aliasByNorm = {}; alias.forEach(function (a) { aliasByNorm[normTxt2(a.alias)] = a; });
-        var mapped = {}, unmapped = [], recetas = {}, recSin = [], luces = [], porAlias = [];
+        var mapped = {}, unmapped = [], recetas = {}, recSin = [], luces = [], porAlias = [], labor = [];
+        if (soloLabor && !ensItemsL) { uiAlert('No pude leer las recetas del estimador para mandar las luces como SOLO LABOR. Vuelve a intentar.'); setHint(''); return; }
+        /* (v35.Y) SOLO LABOR: la receta de una luz se abre en sus renglones (caja,
+           whip, anillo, wirenuts… y la luminaria a $0, con sus horas). */
+        function abreLuz(nomReceta, qty, full, quien) {
+          var en = ensByNorm2[normTxt2(nomReceta)];
+          if (!en) { recSin.push(nomReceta + ' (' + qty + ' — ' + quien + ')'); return; }
+          var r = recetaLuzSoloLabor(ensItemsL.filter(function (x) { return x.ensamble_id === en.id; }), qty, full, catByNorm, normTxt2);
+          r.falta.forEach(function (f) { unmapped.push(f + ' (de la receta ' + nomReceta + ')'); });
+          r.renglones.forEach(function (m) {
+            var kL = m.item + '|11-LIGHT' + (m.luz ? '|L' : '');
+            if (!mapped[kL]) mapped[kL] = { item: m.item, unidad: m.unidad, precio: m.precio, horas: m.horas, cantidad: 0, origen: 'takeoff', codigo: '11-LIGHT' };
+            mapped[kL].cantidad += m.cantidad;
+          });
+          labor.push({ name: quien, qty: qty, receta: nomReceta });
+        }
         entries.forEach(function (e) {
+          var luzLabor = soloLabor && esEntradaLuz(e);
+          if (luzLabor && e.receta) { abreLuz(e.receta, e.qty, !!e.full, e.name); return; }
           // PUNTO COMPLETO: no es un renglón del catálogo, es una receta × cantidad
           if (e.receta) {
             var en = ensByNorm2[normTxt2(e.receta)];
@@ -15537,6 +15632,7 @@
              categoría a mano como «punto completo» no es práctico (Edgar:
              «no lo veo práctico»), así que se dice UNA vez por herramienta de
              Bluebeam, en la tabla de alias, y ya vale para todos los planos. */
+          if (al && al.receta && luzLabor) { abreLuz(al.receta, e.qty, !!al.receta_full, e.name); return; }
           if (al && al.receta) {
             var enAl = ensByNorm2[normTxt2(al.receta)];
             if (!enAl) { recSin.push(al.receta + ' (' + e.qty + ' — el alias «' + e.name + '» apunta ahí y esa receta no existe)'); return; }
@@ -15567,12 +15663,15 @@
           }
           // el mismo item en dos partidas (jbox en rough y en feeders) son dos renglones
           var cod = esCodigo(e.codigo) ? e.codigo : CODIGO_DEFECTO;
-          var k = target.item + '|' + cod;
-          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: target.precio || 0, horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff', codigo: cod };
+          // (v35.Y) una luz suelta en «solo labor»: la luminaria a $0, con sus horas
+          var aLabor = luzLabor && esLuminaria(target.item);
+          var k = target.item + '|' + cod + (aLabor ? '|L' : '');
+          if (!mapped[k]) mapped[k] = { item: target.item, unidad: target.unidad, precio: aLabor ? 0 : (target.precio || 0), horas: target.horas_unidad || 0, cantidad: 0, origen: 'takeoff', codigo: cod };
           mapped[k].cantidad += e.qty * factor;
+          if (aLabor) labor.push({ name: e.name, qty: e.qty, receta: '' });
         });
         var items = Object.keys(mapped).sort().map(function (k, i) { var m = mapped[k]; m.orden = i + 1; return m; });
-        if (luces.length) {
+        if (luces.length && !soloLabor) {
           // la luz en sí, en $0 hasta que llegue la cuota: un renglón POR MODELO con su
           // cantidad (cada modelo tiene su precio; la de 2.000 lm no vale lo que la de 5.000)
           luces.forEach(function (l) {
@@ -15683,6 +15782,7 @@
             (sinColumnaCodigo ? '\n\n⚠ El estimador aún no tiene la columna "codigo" en estimado_items: los renglones fueron SIN código de partida. SQL listo en docs/takeoff/sql/e2-codigo-partida.sql.' : '') +
             (porAlias.length ? '\n\n🔁 CATEGORÍAS QUE YA SABEN SU RECETA (por la tabla de alias — no hay que marcarlas una por una):\n• ' + porAlias.map(function (a) { return a.name + ' ×' + a.qty + ' → ' + a.receta + (a.full ? ' (con su tubo)' : ''); }).join('\n• ') : '') +
             (avisoCajas ? '\n\n⚠ CAJAS QUE PUEDEN IR DOS VECES: mandaste puntos completos (cada uno trae su caja, su anillo y su tapa) y además estas cajas contadas aparte:\n• ' + avisoCajas + '\nSi esas cajas son las de los puntos, bórralas del estimado.' : '') +
+            (labor.length ? '\n\n💡 LUCES SOLO LABOR (así lo dice el proyecto): la luminaria a $0, con su mano, su caja y su whip:\n• ' + labor.map(function (l) { return l.name + ' ×' + l.qty + (l.receta ? ' (receta ' + l.receta + ' abierta)' : ''); }).join('\n• ') : '') +
             (luces.length ? '\n\n💡 LUMINARIAS QUE PONE OTRO — fueron como SOLO INSTALACIÓN (la mano, el whip, la caja; la luz no):\n• ' + luces.map(function (l) { return l.name + ' ×' + l.qty + ' → ' + l.receta; }).join('\n• ') + '\nY la luz en sí, un renglón «COTIZACIÓN PENDIENTE — …» por modelo en $0: cuando llegue la cuota, pon ahí el precio de cada una.' : '') +
             (recPiesCambiadas.length ? '\n\n📏 RECETAS POR PIES — fueron como su renglón por pie, con los pies tal cual (no × 100):\n• ' + recPiesCambiadas.map(function (r) { return r.receta + ' → ' + r.item + ' ×' + r.ft + ' ft'; }).join('\n• ') : '') +
             (recSin.length ? '\n\n⚠ RECETAS QUE NO EXISTEN (no se enviaron):\n• ' + recSin.join('\n• ') : '') +
@@ -16057,6 +16157,9 @@
       return res;
     }
     var apr = iaResumenChecklist();
+    // (v35.Y) la decisión de luces del proyecto: con precio o solo labor (si no está, que la pregunte)
+    var lucesTxt = 'LUCES DE ESTE PROYECTO: ' + (lucesModo() === 'labor' ? 'SOLO LABOR (la luminaria la pone otro: cotizar mano, caja y whip; la luz a $0).' : lucesModo() === 'precio' ? 'CON PRECIO (MXP suministra la luminaria).' : 'SIN DECIDIR: antes de cotizar o contar luces, pregúntale a Edgar si van con precio o solo labor.');
+    apr = lucesTxt + (apr ? '\n\n' + apr : '');
     chkLlama({ mensajes: [{ rol: 'user', texto: chkPregunta(extra) + (apr ? '\n\n' + apr : '') }] }).then(sigue).then(function (res) {
       chk.corriendo = false;
       if (!state.project || state.project.id !== idProy) return;   // cambió de proyecto mientras tanto
@@ -25731,6 +25834,7 @@
             (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
           html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
           html += '<div class="tmItem" data-k="__reencaja"><span>Reencajar lo dibujado al plano… <span class="muted">· si al calibrar se corrió a una esquina</span></span></div>';
+          html += '<div class="tmItem" data-k="__luces"><span>💡 Luces: con precio o solo labor… <span class="muted">· ' + (lucesModo() === 'labor' ? 'ahora SOLO LABOR' : lucesModo() === 'precio' ? 'ahora CON PRECIO' : 'sin decidir') + '</span></span></div>';
         }
         /* (20/09) «Buscar iguales» se queda ESCONDIDO salvo en «Mostrar todo» o si
            ya lo usó. Diagnóstico (17/09, sobre planos reales): barre a 72 px por
@@ -25977,6 +26081,7 @@
           if (k === '__manual') { tm.hidden = true; abreMano(''); return; }
           if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
           if (k === '__reencaja') { tm.hidden = true; reencajaDesdeHistorial(); return; }
+          if (k === '__luces') { tm.hidden = true; lucesCambia(); return; }
           if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
           catActiva = k;
           setTool('count');
