@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v35.R';
+  var APP_VERSION = 'v35.S';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -7380,16 +7380,19 @@
         if (!real || real <= 0) { setHint('No entendí esa medida — intenta de nuevo (ej: 4\' 6")'); return; }
         var f = real / len;
         pushUndo();
+        var viejoBg = { x: state.bg.x, y: state.bg.y, w: state.bg.w, h: state.bg.h };
         // escala el fondo alrededor del primer punto para que la distancia coincida
         state.bg.w *= f; state.bg.h *= f;
         state.bg.x = a[0] + (state.bg.x - a[0]) * f;
         state.bg.y = a[1] + (state.bg.y - a[1]) * f;
+        // (v35.S) y todo lo dibujado encima —marcas, símbolos, rutas— se mueve con él
+        var nMov = reencajaAlFondo(viejoBg, state.bg);
         // queda constancia de que ESTA hoja está a escala: el takeoff lineal
         // (Rutas, E5) no vale nada sobre un plano sin calibrar, y hasta ahora
         // no había forma de saber si lo estaba
         state.bg.cal = 1;
-        renderBg();
-        setHint('✔ Plano calibrado: esa distancia ahora mide ' + fmtFtIn(real) + '. Todo el plano quedó a escala.');
+        renderBg(); refresh(); refreshCounts();
+        setHint('✔ Plano calibrado: esa distancia ahora mide ' + fmtFtIn(real) + '. Todo el plano quedó a escala.' + (nMov ? ' Lo dibujado (' + nMov + ') se movió con el plano.' : ''));
         setTool('measure');
       });
     }
@@ -25362,15 +25365,70 @@
     for (var i = 0; i < BG_SCALES.length; i++) if (BG_SCALES[i][0] === f) return BG_SCALES[i][1];
     return '1:' + f;
   }
+  /* (v35.S, Edgar 28/09, con captura de Peninsula: «puse escala al plano y
+     todo el conteo se me fue para una esquina») Calibrar o poner la escala
+     cambiaba el tamaño del fondo y dejaba lo dibujado encima (las marcas del
+     Count, símbolos, rutas, textos…) en las coordenadas viejas: se quedaba en
+     una esquina. Ahora TODO lo dibujado en la hoja se mueve con el plano, con
+     la misma transformación (escala alrededor del mismo punto). Devuelve
+     cuántas cosas movió. */
+  function reencajaAlFondo(v, n) {
+    if (!v || !n || !(v.w > 0) || !(v.h > 0) || !(n.w > 0) || !(n.h > 0)) return 0;
+    var sx = n.w / v.w, sy = n.h / v.h;
+    if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9 && v.x === n.x && v.y === n.y) return 0;
+    var X = function (x) { return Math.round((n.x + (x - v.x) * sx) * 100) / 100; }, Y = function (y) { return Math.round((n.y + (y - v.y) * sy) * 100) / 100; };
+    var cnt = 0;
+    var mueve = function (e) {
+      if (!e || typeof e !== 'object') return;
+      if (Array.isArray(e.pts)) { e.pts = e.pts.map(function (q) { return [X(q[0]), Y(q[1])]; }); cnt++; return; }
+      if (e.x1 != null && e.y1 != null) { e.x1 = X(e.x1); e.y1 = Y(e.y1); e.x2 = X(e.x2); e.y2 = Y(e.y2); cnt++; return; }
+      if (e.x != null && e.y != null) { e.x = X(e.x); e.y = Y(e.y); if (e.tx != null) { e.tx = X(e.tx); e.ty = Y(e.ty); } cnt++; }
+    };
+    ['walls', 'symbols', 'texts', 'dims', 'areas', 'wires', 'leaders', 'inks', 'counts', 'panels', 'guia', 'huecos'].forEach(function (k) { (state[k] || []).forEach(mueve); });
+    // la puerta vive a una distancia de la punta de su pared: esa distancia crece igual
+    (state.openings || []).forEach(function (o) { if (o.pos != null) { o.pos = Math.round(o.pos * sx * 100) / 100; cnt++; } });
+    // el molde de cada símbolo (la muestra en la leyenda) está en coordenadas del plano
+    catsCount().forEach(function (c) { if (c.moldeRect && (c.moldeHoja == null || c.moldeHoja === state.curSheet)) { var r = c.moldeRect; c.moldeRect = { x0: X(r.x0), y0: Y(r.y0), x1: X(r.x1), y1: Y(r.y1) }; } });
+    // el overlay va pegado al base
+    if (state.bg2 && state.bg2.w > 0) { state.bg2.x = X(state.bg2.x); state.bg2.y = Y(state.bg2.y); state.bg2.w = state.bg2.w * sx; state.bg2.h = state.bg2.h * sy; }
+    return cnt;
+  }
+  /* Lo que YA se corrió (calibrado con la versión vieja): en esta sesión el
+     historial de Ctrl+Z guarda el tamaño que tenía el plano antes. Se busca el
+     último distinto al de ahora y se reencaja lo dibujado desde ahí. */
+  function reencajaDesdeHistorial(sinPreguntar) {
+    var bg = state.bg; if (!bg || !bg.url) { setHint('Esta hoja no tiene plano de fondo'); return false; }
+    var viejo = null;
+    for (var i = undoStack.length - 1; i >= 0 && !viejo; i--) {
+      try { var m = JSON.parse(undoStack[i]).bgMeta; if (m && m.w > 0 && m.h > 0 && (Math.abs(m.w - bg.w) / bg.w > 0.001 || Math.abs(m.h - bg.h) / bg.h > 0.001)) viejo = m; } catch (e) {}
+    }
+    if (!viejo) {
+      uiAlert('No encuentro en esta sesión el tamaño que tenía el plano antes de calibrarlo (el historial de deshacer se pierde al recargar).\n\nQué hacer: si acabas de calibrar, Ctrl+Z lo devuelve todo a su sitio y calibras otra vez (ahora lo dibujado se mueve con el plano). Si ya recargaste, selecciona todas las marcas y arrástralas, o vuelve a contar esa hoja.');
+      return false;
+    }
+    var f = Math.round(bg.w / viejo.w * 1000) / 1000;
+    var hazlo = function () {
+      pushUndo();
+      var n = reencajaAlFondo(viejo, bg);
+      refresh(); refreshCounts(); renderBg();
+      setHint('✔ ' + n + ' cosa(s) reencajadas al plano (×' + f + ') · Ctrl+Z lo deshace');
+    };
+    if (sinPreguntar === true) { hazlo(); return true; }
+    uiConfirm('El plano cambió de tamaño ×' + f + ' (de ' + Math.round(viejo.w) + ' a ' + Math.round(bg.w) + ' de ancho) y lo dibujado se quedó donde estaba.\n\n¿Mover TODO lo dibujado en esta hoja (marcas del Count, símbolos, rutas, textos) para que vuelva a caer sobre el plano?\n\nOJO: lo que hayas puesto DESPUÉS de calibrar también se mueve. Ctrl+Z lo deshace.', function (ok) { if (ok) hazlo(); });
+    return true;
+  }
+  window.__calDbg = { reencaja: reencajaAlFondo, historial: reencajaDesdeHistorial, escala: function (f) { applyBgScale(f); } };
   function applyBgScale(f) {
     var b = state.bg; if (!b || !b.paperW) return;
     pushUndo();
+    var viejo = { x: b.x, y: b.y, w: b.w, h: b.h };
     b.scaleFactor = f;
     b.w = b.paperW * f;
     b.h = b.paperH * f;
     b.cal = 1;                                   // a escala por la escala escrita, igual de bueno
-    renderBg(); zoomFit(); refresh();
-    setHint('✔ Plano a escala ' + bgScaleName(f) + ' — ya puedes medir directo (M) sin calibrar.');
+    var nM = reencajaAlFondo(viejo, b);          // (v35.S) lo dibujado se mueve con el plano
+    renderBg(); zoomFit(); refresh(); refreshCounts();
+    setHint('✔ Plano a escala ' + bgScaleName(f) + ' — ya puedes medir directo (M) sin calibrar.' + (nM ? ' Lo dibujado (' + nM + ') se movió con el plano.' : ''));
   }
   function showToolMenu(kind, anchor, extra) {
     var tm = $('#toolMenu');
@@ -25540,6 +25598,7 @@
           html += '<div class="tmItem" data-k="__alias"><span>A qué ítem del catálogo va…' +
             (cAl && cAl.alias && cAl.alias !== cAl.nom ? ' <span class="muted">· ' + esc(cAl.alias) + '</span>' : ' <span class="muted">· con su propio nombre</span>') + '</span></div>';
           html += '<div class="tmItem" data-k="__marcar"><span>Marcar en el plano las de la activa</span></div>';
+          html += '<div class="tmItem" data-k="__reencaja"><span>Reencajar lo dibujado al plano… <span class="muted">· si al calibrar se corrió a una esquina</span></span></div>';
         }
         /* (20/09) «Buscar iguales» se queda ESCONDIDO salvo en «Mostrar todo» o si
            ya lo usó. Diagnóstico (17/09, sobre planos reales): barre a 72 px por
@@ -25785,6 +25844,7 @@
           if (k === '__codigo') { tm.hidden = true; catActivaSegura(); showToolMenu('countcodigo', anchor); return; }
           if (k === '__manual') { tm.hidden = true; abreMano(''); return; }
           if (k === '__marcar') { tm.hidden = true; marcaCatEnHoja(catActivaSegura().id); return; }
+          if (k === '__reencaja') { tm.hidden = true; reencajaDesdeHistorial(); return; }
           if (k === '__borra') { tm.hidden = true; borraCat(catActivaSegura().id); return; }
           catActiva = k;
           setTool('count');
