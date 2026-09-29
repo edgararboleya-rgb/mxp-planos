@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v36.A';
+  var APP_VERSION = 'v36.B';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -15516,7 +15516,7 @@
       var t = catByNorm[nrm(cmp.item)];
       if (!t) { falta.push(cmp.item); return; }
       var luz = esLuminaria(t.item);
-      out.push({ item: t.item, unidad: t.unidad, precio: luz ? 0 : (t.precio || 0), horas: t.horas_unidad || 0, cantidad: (Number(cmp.cantidad) || 0) * qty, luz: luz });
+      out.push({ item: t.item, unidad: t.unidad, precio: luz ? 0 : (t.precio || 0), horas: t.horas_unidad || 0, cantidad: (Number(cmp.cantidad) || 0) * qty, luz: luz, codigo: t.codigo || '' });
     });
     return { renglones: out, falta: falta };
   }
@@ -15595,7 +15595,7 @@
       var sinColumnaCodigo = false, sinColumnaLineal = false;
       setHint('Leyendo el catálogo del estimador…');
       Promise.all([
-        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad&order=orden,id'),
+        sbFetchTodo('/rest/v1/catalogo_items?select=item,unidad,precio,horas_unidad,codigo&order=orden,id'),
         sbFetchTodo('/rest/v1/alias_takeoff?select=*&order=alias'),
         // las recetas, para las categorías que son un PUNTO COMPLETO
         sbFetchTodo('/rest/v1/ensambles?select=id,nombre,modo&order=orden,id').then(null, function () { return []; }),
@@ -15627,8 +15627,12 @@
           var r = recetaLuzSoloLabor(ensItemsL.filter(function (x) { return x.ensamble_id === en.id; }), qty, full, catByNorm, normTxt2);
           r.falta.forEach(function (f) { unmapped.push(f + ' (de la receta ' + nomReceta + ')'); });
           r.renglones.forEach(function (m) {
-            var kL = m.item + '|11-LIGHT' + (m.luz ? '|L' : '');
-            if (!mapped[kL]) mapped[kL] = { item: m.item, unidad: m.unidad, precio: m.precio, horas: m.horas, cantidad: 0, origen: 'takeoff', codigo: '11-LIGHT' };
+            /* (v36.B, Edgar 29/09: «me pone dos veces caja JB 1900… me la separa en dos»)
+               cada pieza con la partida de SU item: la caja 1900 de la receta de luz va a
+               09-COND y se junta con las cajas contadas; solo la luminaria va a 11-LIGHT */
+            var codL = m.luz ? '11-LIGHT' : (esCodigo(m.codigo) ? m.codigo : '11-LIGHT');
+            var kL = m.item + '|' + codL + (m.luz ? '|L' : '');
+            if (!mapped[kL]) mapped[kL] = { item: m.item, unidad: m.unidad, precio: m.precio, horas: m.horas, cantidad: 0, origen: 'takeoff', codigo: codL };
             mapped[kL].cantidad += m.cantidad;
           });
           labor.push({ name: quien, qty: qty, receta: nomReceta });
