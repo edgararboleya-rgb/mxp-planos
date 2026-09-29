@@ -527,6 +527,14 @@ body.touch #pjEntrar { min-height: 40px; padding: 6px 14px; font-size: 14px; }
 
 /* Count (fase 5.5): el conteo manual dentro del panel Materiales */
 .cntCod { display: inline-block; font-size: 9.5px; font-weight: 600; letter-spacing: .03em; color: var(--mp-teal-text, #0b7285); background: var(--mp-sky-3, #DCEEF7); border-radius: 4px; padding: 0 4px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
+.cntLuz { font-size: 10px; font-weight: 650; border-radius: 10px; padding: 1px 7px; margin-left: 6px; cursor: pointer; border: 1px solid transparent; line-height: 1.4; }
+.cntLuz.labor { background: #fff4e0; color: #8a5300; border-color: #f0c98a; }
+.cntLuz.precio { background: #e6f4ea; color: #1e6b34; border-color: #9fd3ae; }
+.cntLuz.nada { background: #fff; color: #a33; border: 1px dashed #d99; }
+.cntLuz.propio { box-shadow: 0 0 0 1px currentColor inset; }
+.cntLuz:hover { filter: brightness(.95); }
+tr.lucesProy td { font-size: 11.5px; padding: 5px 4px; background: var(--mp-sky-3, #DCEEF7); }
+.cntLucesProy { font-size: 10.5px; padding: 1px 8px; border-radius: 8px; border: 1px solid rgba(27,60,140,.25); background: #fff; cursor: pointer; margin-left: 4px; }
 .cntCod.def { color: var(--mp-ink-2); background: transparent; border: 1px dashed var(--mp-line); }
 #toolMenu .tmPie { font-size: 11px; color: var(--mp-ink-2); padding: 6px 8px 2px; max-width: 320px; white-space: normal; line-height: 1.35; }
 .cntChip { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .25); margin-right: 6px; vertical-align: -1px; flex: none; }
