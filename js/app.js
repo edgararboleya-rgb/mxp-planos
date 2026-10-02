@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v36.C';
+  var APP_VERSION = 'v36.D';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -2244,6 +2244,18 @@
        fase, una larga con punto por el neutro, una corta con patita por la
        tierra. Los números se ponen en Propiedades (Conductores). */
     feeder: { name: '⚡ FEEDER / CONDUIT RUN — con marcas de conductores', dash: '', lw: 1.1, ticks: 1 },
+    /* (v36.D, Edgar 02/10) CABLES QUE SE MIDEN, no se cuentan: el par 0-10V y
+       los cables de fire alarm estaban en la biblioteca como casillas de
+       conteo con unidad MLF —contar «1» era 1.000 ft—. Ahora son tipos de
+       línea: se trazan a la medida y al takeoff van en FT con el NOMBRE EXACTO
+       del catálogo (`ft`), y el estimador divide entre mil al transferir. Solo
+       desde la biblioteca («📏 Medir») y desde la fila del conteo (`lib`): no
+       engordan el menú de tipos de línea. */
+    dim010: { name: '0-10V — par de dimming 18/2 (se mide en FT)', dash: '6 3 1.5 3', lw: 0.8, lib: 1, ft: '18/2 CMP 0-10V DIMMING CABLE (PURPLE/GRAY)', codigo: '08-ROUGH' },
+    fa182:  { name: 'FIRE ALARM 18/2 — cable blindado (se mide en FT)', dash: '8 3', lw: 0.8, lib: 1, ft: '18/2 SHIELDED FIRE ALARM CABLE', codigo: '13-LV' },
+    fa144:  { name: 'FIRE ALARM 14/4 FPL (se mide en FT)', dash: '8 3 2 3', lw: 0.9, lib: 1, ft: '14/4 FPL FIRE ALARM CABLE', codigo: '13-LV' },
+    fa182wp: { name: 'FIRE ALARM 18/2 FPL wet location (se mide en FT)', dash: '8 3', lw: 0.8, lib: 1, ft: '18/2 FPL WET LOC. AQ-293', codigo: '13-LV' },
+    fa144wp: { name: 'FIRE ALARM 14/4 FPL wet location (se mide en FT)', dash: '8 3 2 3', lw: 0.9, lib: 1, ft: '14/4 FPL WET LOC. AQ-246', codigo: '13-LV' },
     cloud:    { name: '☁ Nube de revisión', dash: '' },
 
     /* -- lindero y servidumbres -- */
@@ -2960,6 +2972,7 @@
     var pl = '', si = '';
     Object.keys(LINE_STYLES).forEach(function (k) {
       if (LINE_STYLES[k].homerun && actual !== k) return;   // el homerun se traza con su herramienta
+      if (LINE_STYLES[k].lib && actual !== k) return;       // (v36.D) los cables medidos salen de la biblioteca
       var o = '<option value="' + k + '"' + (actual === k ? ' selected' : '') + '>' +
         esc(LINE_STYLES[k].name) + '</option>';
       if (LINE_STYLES[k].site) si += o; else pl += o;
@@ -9993,7 +10006,7 @@
     });
     // (v35.V) lo medido en pies, una fila por tipo de línea, en ft
     medidoEnPies().forEach(function (r) {
-      rows.push([r.nom + ' (medido)', r.item, r.pieza ? r.item + ' — ' + r.setPz + ' luminaria(s) de ' + r.pieza + ' ft' : '', 'Líneas', '11-LIGHT'].concat(hojas.map(function (sh, i) { return i === state.curSheet ? r.hojaFt + ' ft' : ''; })).concat(['', r.setFt + ' ft']));
+      rows.push([r.nom + ' (medido)', r.item, r.pieza ? r.item + ' — ' + r.setPz + ' luminaria(s) de ' + r.pieza + ' ft' : '', 'Líneas', r.codigo || '11-LIGHT'].concat(hojas.map(function (sh, i) { return i === state.curSheet ? r.hojaFt + ' ft' : ''; })).concat(['', r.setFt + ' ft']));
     });
     return '﻿' + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(','); }).join('\r\n');
   }
@@ -10129,7 +10142,7 @@
       (areas || []).forEach(function (a) {
         var est = a && LINE_STYLES[a.lineStyle]; if (!est || !est.ft || !Array.isArray(a.pts) || a.pts.length < 2) return;
         var L = polyPerim(a.pts, a.open); if (L < 1) return;
-        var r = m[a.lineStyle] || (m[a.lineStyle] = { k: a.lineStyle, nom: est.name.replace(/^[^A-Za-zÁ-ú]+/, '').split(' — ')[0], item: est.ft, pieza: est.pieza || 0, hojaFt: 0, setFt: 0, hojaPz: 0, setPz: 0, n: 0 });
+        var r = m[a.lineStyle] || (m[a.lineStyle] = { k: a.lineStyle, nom: est.name.replace(/^[^A-Za-zÁ-ú0-9]+/, '').split(' — ')[0], item: est.ft, pieza: est.pieza || 0, codigo: est.codigo || '11-LIGHT', hojaFt: 0, setFt: 0, hojaPz: 0, setPz: 0, n: 0 });
         var pz = est.pieza ? Math.ceil(L / 12 / (+a.tramo || est.pieza)) : 0;
         r.setFt += L; r.setPz += pz; r.n++;
         if (aHoja) { r.hojaFt += L; r.hojaPz += pz; }
@@ -10295,15 +10308,21 @@
     var sj = String((it && it.subj) || '').replace(/\s+/g, ' ').trim().toUpperCase();
     if (/^LED STRIP( LIGHT)?$/.test(sj)) return 'ledstrip';
     if (/^LED LINEAR$/.test(sj)) return 'ledlinear';
+    // (v36.D) cables por pies: el nombre del tool es el del catálogo
+    if (/0-10V DIMMING CABLE/.test(sj)) return 'dim010';
+    if (/18\/ ?2 .*FIRE ALARM CABLE|^18\/2 SHIELDED/.test(sj)) return 'fa182';
+    if (/14\/4 FPL FIRE ALARM CABLE/.test(sj)) return 'fa144';
+    if (/18\/ ?2 FPL.*WET/.test(sj)) return 'fa182wp';
+    if (/14\/4 FPL.*WET/.test(sj)) return 'fa144wp';
     return null;
   }
   function tlibTraza(ls) {
     var est = LINE_STYLES[ls]; if (!est) return false;
-    if (!lucesModo()) lucesPregunta(null, 'vas a medir ' + est.name.replace(/^[^A-Za-zÁ-ú]+/, '').split(' — ')[0]);   // (v35.Y)
+    if (!est.lib && !lucesModo()) lucesPregunta(null, 'vas a medir ' + est.name.replace(/^[^A-Za-zÁ-ú0-9]+/, '').split(' — ')[0]);   // (v35.Y)
     curLineStyle = ls;
     setTool('line');
     cierraTlib();
-    setHint('📏 Midiendo ' + est.name.replace(/^[^A-Za-zÁ-ú]+/, '').split(' — ')[0] + ' — clic donde empieza y clic donde termina (Polyline si dobla)' +
+    setHint('📏 Midiendo ' + est.name.replace(/^[^A-Za-zÁ-ú0-9]+/, '').split(' — ')[0] + ' — clic donde empieza y clic donde termina (Polyline si dobla)' +
       (est.pieza ? ' · al takeoff va en luminarias de ' + est.pieza + ' ft' : ' · al takeoff va en FT') +
       (state.bg && !state.bg.cal ? ' · OJO: este plano no está calibrado' : ''));
     return true;
@@ -10847,6 +10866,7 @@
   /* De una fila de la biblioteca de takeoff al tipo de ruta, si lo es. */
   function rutaTipoDeTlib(setNom, it) {
     if (!it || it.tipo !== 'largo' || it.descartado) return null;
+    if (tlibTrazaDe(it)) return null;   // (v36.D) un cable que se mide por pies no es una ruta de conduit
     return rutaTipo(setNom + '|' + it.subj + '|' + (it.label || ''));
   }
   function esRutaTlib(setNom, it) { return !!rutaTipoDeTlib(setNom, it); }
@@ -14025,7 +14045,7 @@
     { k: 'pattern', nom: 'Patrón', tipo: 'ops', kinds: ['area'],
       ops: function () { return Object.keys(AREA_PATTERNS).map(function (k) { return [k, AREA_PATTERNS[k].name]; }); } },
     { k: 'lineStyle', nom: 'Tipo de línea', tipo: 'ops', def: 'solid', kinds: ['area'],
-      ops: function () { return Object.keys(LINE_STYLES).map(function (k) { return [k, LINE_STYLES[k].name.replace(/^[^A-Za-zÁ-ú]+/, '')]; }); } },
+      ops: function () { return Object.keys(LINE_STYLES).map(function (k) { return [k, LINE_STYLES[k].name.replace(/^[^A-Za-zÁ-ú0-9]+/, '')]; }); } },
     { k: 'size', nom: 'Tamaño', tipo: 'num', min: 3, step: 0.5, def: 9, kinds: ['text', 'leader'] },
     { k: 'font', nom: 'Fuente', tipo: 'ops', def: 'arch', kinds: ['text', 'leader'],
       ops: function () { return Object.keys(TEXT_FONTS).map(function (k) { return [k, TEXT_FONTS[k].corto]; }); } },
@@ -14815,10 +14835,10 @@
         out.push({ kind: 'area', tipo: 'circ', id: a.id, nombre: rotuloCirc(a.circ), det: (a.circ.panel || '') + ' · drop ' + (a.circ.drop || 0) + '\'', medida: fmtFtIn(Lh), num: Lh });
       } else if (a.open) {
         var L2 = perimDe(a);
-        out.push({ kind: 'area', tipo: 'line', id: a.id, nombre: est.name.replace(/^[^A-Za-zÁ-ú]+/, ''), det: a.pts.length === 2 ? 'línea' : 'polilínea ' + a.pts.length + ' pts', medida: fmtFtIn(L2), num: L2 });
+        out.push({ kind: 'area', tipo: 'line', id: a.id, nombre: est.name.replace(/^[^A-Za-zÁ-ú0-9]+/, ''), det: a.pts.length === 2 ? 'línea' : 'polilínea ' + a.pts.length + ' pts', medida: fmtFtIn(L2), num: L2 });
       } else {
         var pd = AREA_PATTERNS[a.pattern], sq = areaDe(a) / 144;
-        out.push({ kind: 'area', tipo: 'area', id: a.id, nombre: pd ? pd.name : (a.pattern || 'Polígono'), det: a.lineStyle && a.lineStyle !== 'solid' ? est.name.replace(/^[^A-Za-zÁ-ú]+/, '') : '', medida: sq.toFixed(1) + ' sq ft · ' + fmtFtIn(perimDe(a)), num: sq });
+        out.push({ kind: 'area', tipo: 'area', id: a.id, nombre: pd ? pd.name : (a.pattern || 'Polígono'), det: a.lineStyle && a.lineStyle !== 'solid' ? est.name.replace(/^[^A-Za-zÁ-ú0-9]+/, '') : '', medida: sq.toFixed(1) + ' sq ft · ' + fmtFtIn(perimDe(a)), num: sq });
       }
     });
     state.wires.forEach(function (w) {
@@ -15307,6 +15327,7 @@
     var out = [];
     function add(name, qty, unit, codigo) { if (qty > 0) out.push({ name: name, qty: qty, unit: unit, codigo: codigo || CODIGO_DEFECTO }); }
     var byKey = {}, oc = {}, wg = {}, pz = {}, pzLum = {}, pzFt = {}, wl = {}, areaSumE = {}, lf = {}, cnt = {}, rt = {}, rp = {}, circAreas = [];   // rp: rutas con hilos y tamaño, por código de partida + item exacto   // lf: líneas que se cotizan por pie (LED strip); cnt: el Count por categoría; rt: las rutas de conduit por tipo (E5)
+    var lfCod = {};   // (v36.D) el código de partida de cada estilo medido
     var fuentes = soloHoja
       ? [{ symbols: state.symbols, openings: state.openings, wires: state.wires, areas: state.areas, walls: state.walls, counts: state.counts }]
       : state.sheets.map(function (sh) { var d = {}; try { d = JSON.parse(sh.data || '{}'); } catch (e) {} return d; });
@@ -15357,7 +15378,7 @@
           var lfA = polyPerim(a.pts, a.open);
           if (lfA >= 1) {
             if (estA.pieza) { var trmA = +a.tramo || estA.pieza; pzLum[estA.ft] = (pzLum[estA.ft] || 0) + Math.ceil(lfA / 12 / trmA); pzFt[estA.ft] = (pzFt[estA.ft] || 0) + lfA; }
-            else lf[estA.ft] = (lf[estA.ft] || 0) + lfA;
+            else { lf[estA.ft] = (lf[estA.ft] || 0) + lfA; lfCod[estA.ft] = estA.codigo || '11-LIGHT'; }   // (v36.D) cada estilo con su partida
           }
         }
         if (a.open || !AREA_PATTERNS[a.pattern] || a.pattern === 'none') return;
@@ -15381,7 +15402,7 @@
     Object.keys(pz).forEach(function (k) { add(k, pz[k], 'EA', '08-ROUGH'); });   // (23/09) conectores de liquidtight
     Object.keys(wl).forEach(function (k) { add((WALL_TYPES[k] ? WALL_TYPES[k].name : k) + ' wall', Math.ceil(wl[k] / 12), 'FT', CODIGO_DEFECTO); });
     Object.keys(areaSumE).forEach(function (k) { add(k, Math.round(areaSumE[k] / 144), 'SF', CODIGO_DEFECTO); });
-    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', '11-LIGHT'); });
+    Object.keys(lf).forEach(function (k) { add(k, Math.ceil(lf[k] / 12), 'FT', lfCod[k] || '11-LIGHT'); });
     // (v35.T) la luminaria lineal medida en pies sale en PIEZAS, con los pies medidos de nota
     Object.keys(pzFt).forEach(function (k) { add(k, pzLum[k], 'E', '11-LIGHT'); if (out.length) out[out.length - 1].medido = Math.round(pzFt[k] / 12) + ' ft medidos'; });
     // cada tipo de ruta con SU código: los feeders a 06-FEED, el branch a
@@ -15515,7 +15536,8 @@
     var out = [], falta = [];
     (comps || []).forEach(function (cmp) {
       var nomU = String(cmp.item || '').toUpperCase().replace(/\s+/g, ' ');   // la misma regla del estimador, en mayúsculas
-      if (!full && (ES_LINEAL_CABLE_E(nomU) || /CONDUIT/.test(nomU))) return;
+      // (v36.D, Peninsula) el whip de 3/8" flex va con el punto: NO se mide en el plano, así que se queda
+      if (!full && (ES_LINEAL_CABLE_E(nomU) || (/CONDUIT/.test(nomU) && !/FLEX/.test(nomU)))) return;
       var t = catByNorm[nrm(cmp.item)];
       if (!t) { falta.push(cmp.item); return; }
       var luz = esLuminaria(t.item);
@@ -22226,7 +22248,7 @@
       var st = LINE_STYLES[k];
       items.push('<span class="it"><svg width="30" height="12"><line x1="1" y1="6" x2="29" y2="6" stroke="#14161a" stroke-width="' +
         (st.lw || 0.9) + '"' + (st.dash ? ' stroke-dasharray="' + st.dash + '"' : '') + '/></svg>' +
-        esc(st.name.replace(/^[^A-Za-zÁ-ú]+/, '')) + '</span>');
+        esc(st.name.replace(/^[^A-Za-zÁ-ú0-9]+/, '')) + '</span>');
     });
     var hoja = conteoDeHoja();
     catsCount().forEach(function (c) {
@@ -25872,7 +25894,7 @@
       // el menu de la Polilinea tambien separado: planta arriba, site abajo
       html += '<div class="tmHead">Tipo de línea</div>';
       Object.keys(LINE_STYLES).forEach(function (k6) {
-        if (k6 === 'cloud' || LINE_STYLES[k6].site || LINE_STYLES[k6].homerun) return;   // nube y homerun tienen su herramienta
+        if (k6 === 'cloud' || LINE_STYLES[k6].site || LINE_STYLES[k6].homerun || LINE_STYLES[k6].lib) return;   // nube y homerun tienen su herramienta; los cables, la biblioteca
         html += '<div class="tmItem' + (k6 === curLineStyle ? ' cur' : '') + '" data-k="' + k6 + '"><span>' +
           esc(LINE_STYLES[k6].name) + '</span></div>';
       });
