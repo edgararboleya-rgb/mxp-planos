@@ -1484,3 +1484,35 @@ body.touch #matBarra button { min-height: 40px; padding: 7px 11px; font-size: 12
 #tlibLista .tlFila .tlIr { flex: none; font-size: 11px; font-weight: 650; color: var(--mp-blue, #2A5BD7); padding: 3px 8px; border: 1px solid rgba(27,60,140,.18); border-radius: 8px; background: #fff; white-space: nowrap; }
 #tlibLista .tlFila.tlElige:hover .tlIr { background: linear-gradient(180deg, #2A5BD7 0%, #1B3C8C 100%); color: #fff; border-color: transparent; }
 #tlibLista .tlFila.activa { background: var(--mp-sky-2); box-shadow: inset 3px 0 0 var(--mp-blue, #2A5BD7); }
+
+/* (v36.C, Edgar 02/10: «demasiados botones… crea botones que se desplieguen»)
+   El panel derecho por tareas: lo de cada sesión a la vista, lo demás en
+   desplegables en línea (el mismo details.prGrupo de Propiedades), cada uno con
+   su estado en el título para que plegar no esconda nada importante. */
+details.rpGrupo > summary { min-width: 0; }
+details.rpGrupo > summary .rpRes { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+details.rpGrupo > summary .rpRes.ojo { color: #9A6B00; font-weight: 650; opacity: 1; }
+details.rpGrupo > .prGrupoBody { padding-top: 6px; }
+details.rpGrupo .prGrupoBody > button { width: 100%; justify-content: center; }
+details.rpGrupo .prGrupoBody > button.rpUltimo { margin-top: 8px; }
+details.rpGrupo .lay.subLay { padding-left: 22px; font-size: 11.5px; color: var(--mp-ink-2); }
+.rpSub { font-size: 9.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .1em; color: var(--mp-ink-2); margin-top: 6px; }
+.rpSub:first-child { margin-top: 0; }
+.rpNota { font-size: 11px; line-height: 1.35; color: #7A5A00; background: #FFF7E0; border: 1px solid #F0DCA0; border-radius: 8px; padding: 5px 8px; }
+#btnBuscaPdf { width: 100%; justify-content: center; }
+#ovRow2 { flex-wrap: wrap; padding-left: 0; }
+body.touch details.rpGrupo > summary { min-height: 44px; font-size: 11.5px; }
+/* Materiales: los tres CSV en un solo «CSV para Excel ▾» */
+#matCsv { flex: 0 0 100%; }
+#matCsv > summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 8px; border: 1px solid rgba(27,60,140,.18); border-radius: 9px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F2F9FD 100%); color: var(--mp-navy); font-weight: 600; cursor: pointer; user-select: none; }
+#matCsv > summary::-webkit-details-marker { display: none; }
+#matCsv > summary::after { content: '▸'; font-size: 10px; opacity: .6; }
+#matCsv[open] > summary::after { content: '▾'; }
+#matCsv > summary svg.ico { width: 14px; height: 14px; }
+#matCsv .mbCsvBody { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 4px; }
+body.touch #matCsv > summary { min-height: 44px; padding: 7px 11px; font-size: 12px; }
+details.rpGrupo > summary { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--mp-navy); padding: 7px 10px; }
+details.rpGrupo > summary .rpRes { font-size: 11px; }
+details.rpGrupo > summary { white-space: nowrap; overflow: hidden; }
+details.rpGrupo > summary .rpRes { flex: 1 1 auto; max-width: none; text-align: right; }

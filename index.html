@@ -190,113 +190,153 @@
         <div id="propsBody" class="pbody muted">Nada seleccionado</div>
       </section>
 
+      <!-- (v36.C, Edgar 02/10: «siento que tenemos demasiados botones… si no son
+           necesarios, crea botones que se desplieguen y tengan varias opciones».)
+           EL PANEL POR TAREAS. A la vista solo lo de cada sesión; lo que se toca una
+           vez por plano va en desplegables EN LÍNEA (details.rpGrupo), cerrados de
+           fábrica y con su estado en el título. Lo que solo sirve a veces aparece
+           solo cuando sirve (pintaPanelDer). Ningún id sale del DOM: los manejadores
+           se enlazan por id al cargar. -->
       <section class="panel" id="layersPanel">
-        <h3>Capas</h3>
+        <h3>Plano y capas</h3>
         <div class="pbody" id="layersBody">
-          <label class="lay"><input type="checkbox" data-layer="background" checked> Background (imported plan)</label>
-          <div class="sub"><span>Opacity</span><input type="range" id="bgOpacity" min="10" max="100" value="70"></div>
-          <div class="sub"><button id="btnBgScale" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Aplica la escala escrita en el plano (ej: 1/4&quot; = 1'-0&quot;) sin calibrar" data-ico="escala">Escala del plano</button></div>
-          <div class="sub"><button id="btnBuscaPdf" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Busca una palabra dentro del PDF del ingeniero (PANEL A, GFCI, 2-WAY...) y te lleva a donde está, en cualquier hoja del set" data-ico="buscar">Buscar texto en el plano</button></div>
-          <div class="sub"><button id="btnBgLines" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" data-ico="tijera">Solo líneas (fondo transparente)</button></div>
-          <div class="sub"><button id="btnBgDel" style="flex:1;padding:4px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px" title="Borra la imagen del plano importado y deja SOLO lo que dibujaste. No se puede deshacer." data-ico="papelera">Quitar el plano de fondo</button></div>
-          <div class="sub"><button id="btnOv" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara 2 pisos: el plano base se pone AZUL y el otro ROJO — donde no cuadran, algo cambió" data-ico="overlay">Overlay: comparar con otro plano</button></div>
+          <button id="btnBuscaPdf" title="Busca una palabra dentro del PDF del ingeniero (PANEL A, GFCI, 2-WAY...) y te lleva a donde está, en cualquier hoja del set" data-ico="buscar">Buscar texto en el plano</button>
+          <!-- mientras se comparan dos pisos: fuera de los desplegables, a la vista -->
           <div class="sub" id="ovRow" hidden><span>Rojo</span><input type="range" id="ov2Op" min="10" max="100" value="70"></div>
           <div class="sub" id="ovRow2" hidden>
-            <button id="btnOvEjes" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Busca los ejes (A, B, 1, 2…) en las dos hojas y las cuadra solas con todos los cruces" data-ico="diana">Por los ejes</button>
-            <button id="btnOvAlign" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos" data-ico="diana">Alinear (2 puntos)</button>
-            <button id="btnOvOff" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Quitar el overlay y devolver el color" data-ico="close"></button>
+            <button id="btnOvEjes" style="flex:1" title="Busca los ejes (A, B, 1, 2…) en las dos hojas y las cuadra solas con todos los cruces" data-ico="diana">Por los ejes</button>
+            <button id="btnOvAlign" style="flex:1" title="Toca 2 puntos de control (ejes) en cada plano y se cuadran solos" data-ico="diana">2 puntos</button>
+            <button id="btnOvOff" style="flex:none" title="Quitar el overlay y devolver el color" data-ico="close">Quitar</button>
           </div>
-          <div class="sub"><button id="btnAI" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="Pregúntale a Claude sobre este plano. No toca nada: contesta." data-ico="chat">Preguntarle a Claude</button></div>
-          <div class="sub"><button id="btnPlanoIA" style="flex:1;padding:5px 8px;border:1px solid #0b84ff;background:#eaf3ff;color:#0b4a8f;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700" title="El cerebro lee la imagen del plano (el fondo, o una foto que escojas) y arma los cuartos como piezas editables" data-ico="varita">IA: plano desde imagen</button></div>
-          <div class="sub"><button id="btnRecibo" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí" data-ico="recibo">Recibo del último escaneo importado</button></div>
-          <div class="sub"><button id="btnGuiaDel" style="padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Borrar el contorno de guia calcado del survey (las piezas se quedan donde estan)" data-ico="brujula"></button><button id="btnWeld" style="flex:1;padding:4px 8px;border:1px solid #c9c9c3;background:#fff;border-radius:5px;cursor:pointer;font-size:11px" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)" data-ico="magnet">Soldar armado (unir piezas del escaneo)</button></div>
-          <label class="lay"><input type="checkbox" data-layer="architecture" checked> Architecture (walls)</label>
-          <label class="lay"><input type="checkbox" data-layer="areas" checked> Surfaces / Roofs</label>
-          <label class="lay"><input type="checkbox" data-layer="furniture" checked> Furniture / Plumbing</label>
-          <label class="lay"><input type="checkbox" data-layer="electrical" checked> Electrical</label>
-          <label class="lay"><input type="checkbox" data-layer="annotation" checked> Dims &amp; Text</label>
-          <label class="lay" title="Las marcas del Count (conteo manual sobre el plano del ingeniero)"><input type="checkbox" data-layer="count" checked> Count (conteo)</label>
-          <label class="lay"><input type="checkbox" data-layer="grid" checked> Grid</label>
-          <label class="lay" title="Esconde el nombre impreso en el equipo del riser (PANEL, DISC, ATS, METER). El dibujo se queda igual."><input type="checkbox" id="cbEqName" checked> Nombres del equipo (riser)</label>
+          <details class="prGrupo rpGrupo" id="rpgFondo" data-k="fondo" hidden>
+            <summary>Plano del ingeniero<span class="n rpRes" id="rpgFondoRes"></span></summary>
+            <div class="prGrupoBody">
+              <div class="row"><label>Opacidad</label><input type="range" id="bgOpacity" min="10" max="100" value="70" style="flex:1;min-width:0"></div>
+              <button id="btnBgScale" title="Aplica la escala escrita en el plano (ej: 1/4&quot; = 1'-0&quot;) sin calibrar" data-ico="escala">Escala escrita en el plano</button>
+              <button id="btnOv" title="Compara 2 pisos: el plano base se pone AZUL y el otro ROJO — donde no cuadran, algo cambió" data-ico="overlay">Comparar con otro piso (overlay)</button>
+              <button id="btnBgLines" data-ico="tijera">Solo líneas (fondo transparente)</button>
+              <button id="btnBgDel" class="danger rpUltimo" title="Borra la imagen del plano importado y deja SOLO lo que dibujaste. No se puede deshacer." data-ico="papelera">Quitar el plano de fondo</button>
+            </div>
+          </details>
+          <details class="prGrupo rpGrupo" id="rpgCapas" data-k="capas">
+            <summary>Capas<span class="n rpRes" id="rpgCapasRes"></span></summary>
+            <div class="prGrupoBody">
+              <label class="lay" title="Las marcas del Count (conteo manual sobre el plano del ingeniero)"><input type="checkbox" data-layer="count" checked> Marcas del Count</label>
+              <label class="lay"><input type="checkbox" data-layer="electrical" checked> Eléctrico</label>
+              <label class="lay subLay" title="Esconde el nombre impreso en el equipo del riser (PANEL, DISC, ATS, METER). El dibujo se queda igual."><input type="checkbox" id="cbEqName" checked> Nombres en el equipo del riser</label>
+              <label class="lay"><input type="checkbox" data-layer="background" checked> Plano de fondo</label>
+              <label class="lay"><input type="checkbox" data-layer="architecture" checked> Paredes</label>
+              <label class="lay"><input type="checkbox" data-layer="annotation" checked> Cotas y textos</label>
+              <label class="lay"><input type="checkbox" data-layer="areas" checked> Áreas y techos</label>
+              <label class="lay"><input type="checkbox" data-layer="furniture" checked> Muebles y plomería</label>
+              <label class="lay"><input type="checkbox" data-layer="grid" checked> Cuadrícula (solo en pantalla)</label>
+            </div>
+          </details>
+          <details class="prGrupo rpGrupo" id="rpgTam" data-k="tam">
+            <summary>Tamaños<span class="n rpRes" id="rpgTamRes"></span></summary>
+            <div class="prGrupoBody">
+              <div class="row" title="Tamaño de las marcas del Count (círculos, cuadrados, rombos con su número). Edgar, 15/09: «están muy grandes y se me van a confundir». Se guarda con el proyecto."><label>Marcas Count</label>
+                <input type="range" id="pjCntEsc" min="30" max="150" step="5" value="45" style="flex:1;min-width:0">
+                <span id="pjCntEscV" class="small muted" style="width:36px;text-align:right;flex:none">45%</span>
+              </div>
+              <div class="row" title="Tamaño de los devices (switches, receptáculos, luces…) respecto al plano. Muebles, paneles y site siguen a tamaño real. Se guarda con el proyecto y sale igual en el PDF."><label>Símbolos</label>
+                <input type="range" id="pjSymEsc" min="30" max="120" step="5" value="50" style="flex:1;min-width:0">
+                <span id="pjSymEscV" class="small muted" style="width:36px;text-align:right;flex:none">50%</span>
+              </div>
+              <div class="row" title="Grosor de las líneas del plano: paredes, puertas, ventanas, símbolos, cables. No cambia las ayudas de pantalla (selección, cotas, grilla). Se guarda con el proyecto y sale igual en el PDF."><label>Líneas</label>
+                <input type="range" id="pjLwEsc" min="30" max="130" step="5" value="50" style="flex:1;min-width:0">
+                <span id="pjLwEscV" class="small muted" style="width:36px;text-align:right;flex:none">50%</span>
+              </div>
+              <div class="row" title="A cuánto se redondean las medidas que se ven y se imprimen"><label>Redondear a</label>
+                <select id="pjPrec" style="flex:1">
+                  <option value="8">1/8"</option>
+                  <option value="4" selected>1/4"</option>
+                  <option value="2">1/2"</option>
+                  <option value="1">1"</option>
+                </select>
+              </div>
+            </div>
+          </details>
+          <details class="prGrupo rpGrupo" id="rpgScan" data-k="scan">
+            <summary>Casa escaneada (MXP Scan)</summary>
+            <div class="prGrupoBody">
+              <button id="btnWeld" title="Después de arrastrar cada cuarto a su sitio: fusiona las paredes dobladas del empate, suelda esquinas y re-tipa solo (calle=block, interior=drywall)" data-ico="magnet">Soldar las piezas del escaneo</button>
+              <button id="btnGuiaDel" title="Borrar el contorno de guía calcado del survey (las piezas se quedan donde están)" data-ico="brujula" hidden>Borrar la guía del survey</button>
+              <button id="btnRecibo" title="Compara lo que trae el archivo de MXP Scan con lo que se dibujó aquí" data-ico="recibo" hidden>Recibo del último escaneo</button>
+              <button id="btnPlanoIA" title="El cerebro lee la imagen del plano (el fondo, o una foto que escojas) y arma los cuartos como piezas editables" data-ico="varita">IA: plano desde una imagen</button>
+            </div>
+          </details>
         </div>
       </section>
 
       <section class="panel" id="projPanel">
         <h3>Proyecto</h3>
         <div class="pbody">
-          <div class="row" title="Tus proyectos: los guardados en este aparato y, con sesión, los que están solo en la nube (☁). Elige uno y se abre; el que dejas queda guardado."><label>Proyectos</label>
-            <select id="pjLista" style="flex:1;min-width:0"></select>
-            <button id="pjNuevo" style="flex:none;padding:4px 8px" title="Empezar un proyecto nuevo — el actual queda guardado en este aparato">🆕</button>
+          <div class="row" title="Tus proyectos: los guardados en este aparato y, con sesión, los que están solo en la nube (☁). Elige uno y se abre; el que dejas queda guardado.">
+            <select id="pjLista" style="flex:1;min-width:0" aria-label="Proyectos"></select>
+            <button id="pjNuevo" style="flex:none" title="Empezar un proyecto nuevo — el actual queda guardado en este aparato" data-ico="mas">Nuevo</button>
           </div>
           <div class="row"><label>Nube</label><span id="pjNube" class="nubeBadge off"></span>
             <button id="pjEntrar" title="Entra con tu usuario del panel de Max Power: a partir de ahí los planos suben solos a la nube">Entrar</button></div>
           <input id="pjName" placeholder="Nombre del proyecto">
           <input id="pjClient" placeholder="Cliente">
           <input id="pjAddress" placeholder="Dirección">
-          <div class="row">
-            <input id="pjJob" placeholder="Job No. (MXP-…)">
-            <input id="pjSheetNo" placeholder="Hoja (E-1)" style="width:70px;flex:none">
-          </div>
-          <input id="pjSheetTitle" placeholder="Título de hoja (POWER RISER DIAGRAM)">
-          <input id="pjDrawn" placeholder="Dibujado por" value="">
-          <button id="btnPurgar" style="margin-top:8px;padding:5px 8px;border:1px solid #c9a0a0;background:#fff;color:#a33;border-radius:5px;cursor:pointer;font-size:11px;width:100%" title="Borra TODOS los proyectos guardados en este aparato, los PDF importados, la sesión del estimador y el token del cerebro (iPad compartido o prestado). Lo que bajaste como .mxp.json no se toca." data-ico="escoba">Borrar todo lo guardado en este aparato</button>
-          <div class="row"><label>Precision</label>
-            <select id="pjPrec" style="flex:1">
-              <option value="8">1/8"</option>
-              <option value="4" selected>1/4"</option>
-              <option value="2">1/2"</option>
-              <option value="1">1"</option>
-            </select>
-          </div>
-          <div class="row" title="Tamaño de los devices (switches, receptáculos, luces…) respecto al plano. Muebles, paneles y site siguen a tamaño real. Se guarda con el proyecto y sale igual en el PDF."><label>Símbolos</label>
-            <input type="range" id="pjSymEsc" min="30" max="120" step="5" value="50" style="flex:1;min-width:0">
-            <span id="pjSymEscV" class="small muted" style="width:36px;text-align:right;flex:none">50%</span>
-          </div>
-          <div class="row" title="Tamaño de las marcas del Count (círculos, cuadrados, rombos con su número). Edgar, 15/09: «están muy grandes y se me van a confundir». Se guarda con el proyecto."><label>Marcas Count</label>
-            <input type="range" id="pjCntEsc" min="30" max="150" step="5" value="45" style="flex:1;min-width:0">
-            <span id="pjCntEscV" class="small muted" style="width:36px;text-align:right;flex:none">45%</span>
-          </div>
-          <div class="row" title="Grosor de las líneas del plano: paredes, puertas, ventanas, símbolos, cables. No cambia las ayudas de pantalla (selección, cotas, grilla). Se guarda con el proyecto y sale igual en el PDF."><label>Líneas</label>
-            <input type="range" id="pjLwEsc" min="30" max="130" step="5" value="50" style="flex:1;min-width:0">
-            <span id="pjLwEscV" class="small muted" style="width:36px;text-align:right;flex:none">50%</span>
-          </div>
-          <div class="row"><label>Hoja</label>
-            <select id="pjSheet" style="flex:1" title="Qué sale al imprimir o exportar el PDF">
-              <option value="limpia" selected>Solo el plano (hoja limpia)</option>
-              <option value="marco">Solo el plano, con marco</option>
-              <option value="full">Con carátula y leyenda</option>
-            </select>
-          </div>
-          <div class="row" title="El sello que va estampado sobre el plano al imprimir o exportar (como el de un plano de ingeniero)"><label>Sello</label>
-            <select id="pjSello" style="flex:1">
-              <option value="" selected>Sin sello</option>
-              <option value="FOR PERMIT">FOR PERMIT</option>
-              <option value="FOR CONSTRUCTION">FOR CONSTRUCTION</option>
-              <option value="AS-BUILT">AS-BUILT</option>
-              <option value="NOT FOR CONSTRUCTION">NOT FOR CONSTRUCTION</option>
-              <option value="FOR REVIEW / BID">FOR REVIEW / BID</option>
-              <option value="REVISION">REVISION</option>
-            </select>
-          </div>
-          <div class="row" title="Coge el PDF del ingeniero tal cual y le estampa encima tus marcas, en vector: su plano sigue nítido a cualquier zoom y su texto se sigue pudiendo buscar">
-            <label>PDF vector</label>
-            <button id="btnPdfVec" style="flex:1" title="PDF vectorial ENCIMA del original: el plano del ingeniero no se convierte en imagen. Solo funciona si esta hoja tiene un PDF de fondo." data-ico="pdf">Encima del original</button>
-          </div>
-          <div class="row" title="DXF: el formato con el que se habla con AutoCAD y Revit sin pasar por PDF">
-            <label class="corto">DXF</label>
-            <button id="btnDxfExp" style="flex:1" title="Exportar esta hoja a DXF, en pulgadas y por capas (A-WALL, E-POWR, A-ANNO…). Sale exactamente lo que se ve." data-ico="dxf">Exportar</button>
-            <button id="btnDxfImp" style="flex:1" title="Importar un DXF del ingeniero. Entra como líneas y rótulos: un DXF ajeno no dice cuál de sus líneas es una pared." data-ico="upload">Importar</button>
-          </div>
-          <div class="row"><label>Print scale</label>
-            <select id="pjScale" style="flex:1">
-              <option value="fit" selected>Graphic (fit page)</option>
-              <option value="24">1/2" = 1'-0"</option>
-              <option value="32">3/8" = 1'-0"</option>
-              <option value="48">1/4" = 1'-0"</option>
-              <option value="64">3/16" = 1'-0"</option>
-              <option value="96">1/8" = 1'-0"</option>
-            </select>
-          </div>
+          <details class="prGrupo rpGrupo" id="rpgSalida" data-k="salida">
+            <summary>Imprimir y exportar<span class="n rpRes" id="rpgSalidaRes"></span></summary>
+            <div class="prGrupoBody">
+              <div class="rpSub">Lo que sale con el botón PDF</div>
+              <div class="row"><label>Hoja</label>
+                <select id="pjSheet" style="flex:1" title="Qué sale al imprimir o exportar el PDF">
+                  <option value="limpia" selected>Solo el plano (hoja limpia)</option>
+                  <option value="marco">Solo el plano, con marco</option>
+                  <option value="full">Con carátula y leyenda</option>
+                </select>
+              </div>
+              <div class="row"><label>Escala</label>
+                <select id="pjScale" style="flex:1" title="Escala al imprimir. Si a esa escala no cabe en la hoja, se baja sola a la mayor que cabe y te lo dice.">
+                  <option value="fit" selected>Ajustar a la hoja</option>
+                  <option value="24">1/2" = 1'-0"</option>
+                  <option value="32">3/8" = 1'-0"</option>
+                  <option value="48">1/4" = 1'-0"</option>
+                  <option value="64">3/16" = 1'-0"</option>
+                  <option value="96">1/8" = 1'-0"</option>
+                </select>
+              </div>
+              <div class="row" title="El sello que va estampado sobre el plano al imprimir o exportar (como el de un plano de ingeniero)"><label>Sello</label>
+                <select id="pjSello" style="flex:1">
+                  <option value="" selected>Sin sello</option>
+                  <option value="FOR PERMIT">FOR PERMIT</option>
+                  <option value="FOR CONSTRUCTION">FOR CONSTRUCTION</option>
+                  <option value="AS-BUILT">AS-BUILT</option>
+                  <option value="NOT FOR CONSTRUCTION">NOT FOR CONSTRUCTION</option>
+                  <option value="FOR REVIEW / BID">FOR REVIEW / BID</option>
+                  <option value="REVISION">REVISION</option>
+                </select>
+              </div>
+              <div id="pjSelloNota" class="rpNota" hidden>Con «Solo el plano (hoja limpia)» el sello no sale: elige la hoja con marco o con carátula.</div>
+              <div class="rpSub">Cajetín — sale con carátula y en el Panel Schedule</div>
+              <div class="row">
+                <input id="pjJob" placeholder="Job No. (MXP-…)">
+                <input id="pjSheetNo" placeholder="Nº hoja" style="width:70px;flex:none" title="Número de ESTA hoja (también se cambia con doble clic en su pestaña)">
+              </div>
+              <input id="pjSheetTitle" placeholder="Título de esta hoja (POWER RISER DIAGRAM)">
+              <input id="pjDrawn" placeholder="Dibujado por" value="">
+              <div class="rpSub">Otros archivos</div>
+              <button id="btnPdfVec" title="PDF vectorial ENCIMA del original: el plano del ingeniero no se convierte en imagen. Solo funciona si esta hoja tiene un PDF de fondo." data-ico="pdf" hidden>PDF encima del original</button>
+              <div class="row" title="DXF: el formato con el que se habla con AutoCAD y Revit sin pasar por PDF">
+                <label class="corto">DXF</label>
+                <button id="btnDxfExp" style="flex:1" title="Exportar esta hoja a DXF, en pulgadas y por capas (A-WALL, E-POWR, A-ANNO…). Sale exactamente lo que se ve." data-ico="dxf">Exportar</button>
+                <button id="btnDxfImp" style="flex:1" title="Importar un DXF del ingeniero. Entra como líneas y rótulos: un DXF ajeno no dice cuál de sus líneas es una pared." data-ico="upload">Importar</button>
+              </div>
+            </div>
+          </details>
+          <details class="prGrupo rpGrupo" id="rpgAparato" data-k="aparato">
+            <summary>Claude y este aparato</summary>
+            <div class="prGrupoBody">
+              <button id="btnAI" title="Pregúntale a Claude sobre este plano (no toca nada: contesta). Aquí están también sus ajustes, el botón de probar y «tomé una medida y no cuadra»." data-ico="chat">Preguntarle a Claude · ajustes</button>
+              <button id="btnPurgar" class="danger rpUltimo" title="Borra TODOS los proyectos guardados en este aparato, los PDF importados, la sesión del estimador y el token del cerebro (iPad compartido o prestado). Lo que bajaste como .mxp.json no se toca." data-ico="escoba">Borrar todo lo guardado en este aparato</button>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -318,9 +358,14 @@
           <div class="mbGrupo"><span class="mbTit">3 · Sacar</span>
             <button id="btnEst" class="pri" title="Enviar el takeoff al estimador de Max Power (crea un estimado BORRADOR)" data-ico="upload">Al estimador</button>
             <button id="btnMarcas" title="Lista de marcas (como el Markups List de Bluebeam): cada objeto del plano en una tabla — clic para ir a él, filtro y CSV" data-ico="lista">Lista de marcas</button>
-            <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">CSV materiales</button>
-            <button id="btnCntCsv" title="Exportar el conteo a CSV: una columna por hoja y el total del set" data-ico="download">CSV conteo</button>
-            <button id="btnRtCsv" title="Exportar las rutas a CSV: una fila por tipo y zona, una columna por hoja y el total del set" data-ico="download">CSV rutas</button>
+            <details class="mbCsv" id="matCsv" data-k="csv">
+              <summary data-ico="download">CSV para Excel</summary>
+              <div class="mbCsvBody">
+            <button id="btnCsv" title="Exportar lista de materiales a CSV (Excel)" data-ico="download">Materiales</button>
+            <button id="btnCntCsv" title="Exportar el conteo a CSV: una columna por hoja y el total del set" data-ico="download">Conteo</button>
+            <button id="btnRtCsv" title="Exportar las rutas a CSV: una fila por tipo y zona, una columna por hoja y el total del set" data-ico="download">Rutas</button>
+              </div>
+            </details>
           </div>
         </div>
         <div class="pbody" id="countsBody"><span class="muted">Sin elementos aún</span></div>

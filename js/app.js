@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v36.B';
+  var APP_VERSION = 'v36.C';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -5180,6 +5180,7 @@
       renderBg.ultimo = out;
     }
     scheduleHires();
+    pintaPanelDer();
   }
 
   /* --- re-dibujado nítido de la zona visible (nivel Bluebeam) ---
@@ -5836,7 +5837,7 @@
     svg.className.baseVal = 'mxp tool-' + t + (eqNameOff ? ' sinEqName' : '');
     if (!sel && !selGroup) showProps();   // Cable muestra su lista de materiales
     setHint(HINTS[t] || '');
-    if (t === 'calibrate' && !state.bg) setHint('CALIBRAR: primero importa un plano de fondo con el botón "Fondo"');
+    if (t === 'calibrate' && !state.bg) setHint('CALIBRAR: primero importa un plano de fondo con el botón «Abrir»');
     /* MATCHPROP como en AutoCAD: si ya tienes una marca escogida, entrar al
        pincel COGE SU FORMATO — no te hace tocarla otra vez. */
     if (t !== 'match') pincelCogeOrigen = false;
@@ -6591,7 +6592,7 @@
       if (p.comoSeLlama) nombres[p.comoSeLlama] = 1;
     });
     if (apagada && !todos.length) {
-      setHint('⚠ La capa de eso está apagada — enciéndela en Capas y vuelve a intentarlo');
+      setHint('⚠ La capa de eso está apagada — enciéndela en Plano y capas → Capas y vuelve a intentarlo'); abreGrupo('capas');
       return;
     }
     var antes = base.length, n = ponSel(todos.length ? todos : base);
@@ -7324,7 +7325,7 @@
   /* --- medir / cotas / calibrar --- */
   function twoPointDown(p, kind) {
     if (kind === 'dim' || kind === 'leader') enciendeCapaTexto();
-    if (kind === 'calibrate' && !state.bg) { setHint('Primero importa un plano de fondo (botón "Fondo")'); return; }
+    if (kind === 'calibrate' && !state.bg) { setHint('Primero importa un plano de fondo (botón «Abrir»)'); return; }
     if (!drawing) { drawing = { mode: 'twopoint', kind: kind, a: p }; return; }
     var a = drawing.a; drawing = null; G.prev.innerHTML = '';
     var len = Math.hypot(p[0] - a[0], p[1] - a[1]);
@@ -8298,7 +8299,7 @@
     limpiaHuerfanas();
     selGroup = null; sel = null;
     refresh(); renderSel(); showProps();
-    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: botón de la brújula en el panel derecho');
+    setHint('🧭 ' + mover.length + ' tramo(s) ahora son GUÍA: imantan pero no cuentan. Ctrl+Z lo deshace · borrarla: Plano y capas → Casa escaneada → Borrar la guía');
   }
   function borrarGuia() {
     if (!state.guia.length) { setHint('🧭 No hay guía en la hoja'); return; }
@@ -9636,7 +9637,7 @@
     // metía una marca gemela debajo y el total salía inflado
     if (esEcoDeDobleClic('cnt:' + ct.id, x, y)) return;
     if (!layerVisible.count) {
-      setHint('⚠ La capa Count está apagada: enciéndela en Capas para ver lo que marcas');
+      setHint('⚠ La capa Count está apagada: enciéndela en Plano y capas → Capas para ver lo que marcas'); abreGrupo('capas');
       return;
     }
     pushUndo();
@@ -11156,6 +11157,8 @@
     plegadas: function () { return (layout.plegadas || []).slice(); },
     pliega: pliegaSeccion,
     prGrupos: function () { return Object.assign({}, layout.prGrupos); },
+    rpGrupos: function () { return Object.assign({}, layout.rpGrupos); },
+    pintaPanelDer: function () { pintaPanelDer(); }, abreGrupo: function (k) { abreGrupo(k); },
     dock: function (id, d) { DOCKS.forEach(function (k) { layout.docks[k] = layout.docks[k].filter(function (x) { return x !== id; }); }); layout.docks[d].push(id); guardaLayout(); pintaBarras(); },
     abre: abrePanelBarras,
     visible: function (id) { return toolVisible(id); },
@@ -11470,7 +11473,7 @@
   function leyConCerebro(motivo) {
     if (!ley || !ley.cv || !ley.b64) return;
     var c = cerebroCfg();
-    if (!c.url) { uiAlert('El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!c.url) { uiAlert('El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente (Proyecto → Claude y este aparato).'); return; }
     leyEnVuelo = true;
     var hoja = state.curSheet;
     pintaLey((typeof motivo === 'string' && motivo ? 'La lectura en el aparato no salió bien (' + motivo + '). Se la paso al cerebro… ' : 'Leyendo la leyenda con el cerebro… ') + '(30-60 s). Puedes seguir trabajando.');
@@ -11486,7 +11489,7 @@
     }).catch(function (e) {
       leyEnVuelo = false;
       if (!ley) return;
-      pintaLey(null, 'No hubo respuesta del cerebro (' + (e && e.message ? e.message : 'red') + '). Revisa la conexión en Ajustes del asistente.');
+      pintaLey(null, 'No hubo respuesta del cerebro (' + (e && e.message ? e.message : 'red') + '). Revisa la conexión en Ajustes del asistente (Proyecto → Claude y este aparato).');
     });
   }
 
@@ -12534,13 +12537,13 @@
     if (cuenta && cuenta.enVuelo) { setHint('Ya hay un conteo en marcha — espera a que termine o cancélalo en el panel'); return; }
     abreCuenta();
     var c = cerebroCfg();
-    if (!c.url) { pintaCuenta(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!c.url) { pintaCuenta(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente (Proyecto → Claude y este aparato).'); return; }
     if (!state.bg || !state.bg.url) { pintaCuenta(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
     var simb = cuentaSimbolos();
     if (!simb.length) { pintaCuenta(null, 'Primero los nombres: Count ▾ → Leer la leyenda (o crea las categorías). Sin categorías el cerebro no sabe qué contar.'); return; }
     var losas = cuentaLosas(r);
     if (!losas || !losas.length) { pintaCuenta(null, 'La zona quedó vacía o fuera del plano. Encierra una parte del plano de fondo.'); return; }
-    if (!layerVisible.count) setHint('⚠ La capa Count está apagada: enciéndela en Capas para ver lo que marque el cerebro');
+    if (!layerVisible.count) { setHint('⚠ La capa Count está apagada: enciéndela en Plano y capas → Capas para ver lo que marque el cerebro'); abreGrupo('capas'); }
     var porNom = {};
     catsCount().forEach(function (k) { porNom[normTxt2(k.nom)] = k.id; });
     cuenta = { rect: rectEnFondo(r), hoja: state.curSheet, proj: idProyecto(), losas: losas, hechas: 0, corriendo: 0, sig: 0, marcas: [], dudas: [], fallos: [], uso: { in: 0, out: 0 },
@@ -12978,7 +12981,7 @@
     if (notas && notas.enVuelo) { setHint('Ya hay una lectura de notas en marcha'); return; }
     abreNotas();
     var c = cerebroCfg();
-    if (!c.url) { pintaNotas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!c.url) { pintaNotas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente (Proyecto → Claude y este aparato).'); return; }
     if (!state.bg || !state.bg.url) { pintaNotas(null, 'Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero primero.'); return; }
     var losas = cuentaLosas(r, NOTAS_LOSA_PULG);
     if (!losas || !losas.length) { pintaNotas(null, 'La zona quedó vacía o fuera del plano. Encierra el bloque de notas.'); return; }
@@ -13397,7 +13400,7 @@
   function rutasLocaliza() {
     if (rutasProp && rutasProp.enVuelo) { setHint('Ya hay una pasada en marcha'); return; }
     abreRutas();
-    if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente (Proyecto → Claude y este aparato).'); return; }
     var losas = panelesLosas();
     if (!losas || !losas.length) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
     var R = rutasProp = { fase: 'paneles', hoja: state.curSheet, proj: idProyecto(), enVuelo: true, cancel: false, t0: Date.now(), uso: { in: 0, out: 0 }, modelo: '', fallos: [], paneles: null, resultados: [], puestos: 0,
@@ -13505,7 +13508,7 @@
   function rutasPropon(soloPanel) {
     if (rutasProp && rutasProp.enVuelo) { setHint('Ya hay una pasada en marcha'); return; }
     abreRutas();
-    if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente.'); return; }
+    if (!cerebroCfg().url) { pintaRutas(null, 'El cerebro no está configurado: pon la dirección y el token en Ajustes del asistente (Proyecto → Claude y este aparato).'); return; }
     var r = cuentaRectHoja();
     if (!r) { pintaRutas(null, 'Esta hoja no tiene plano de fondo.'); return; }
     var C = circuitosDeHoja(), T = tablerosDeHoja(), tareas = [], soloK = soloPanel ? clavePanel(soloPanel) : null;
@@ -15928,7 +15931,7 @@
       h += '<div class="row" style="gap:6px"><button id="scopeIr" class="pri" style="flex:1">Proponer con el cerebro</button></div>';
       if (scope && scope.aviso) h += '<div class="bMuted" style="color:#a33">' + esc(scope.aviso) + '</div>';
       var nTk = 0; try { nTk = buildTakeoffEntries(true).length; } catch (e) {}
-      h += '<div class="bMuted small">Necesita el cerebro conectado (Ajustes del asistente) y tu sesión del panel. Manda el scope, tus recetas y los nombres del catálogo; no manda precios.' +
+      h += '<div class="bMuted small">Necesita el cerebro conectado (Ajustes del asistente: Proyecto → Claude y este aparato) y tu sesión del panel. Manda el scope, tus recetas y los nombres del catálogo; no manda precios.' +
         (nTk ? ' <b>Va también lo contado en esta hoja (' + nTk + ' renglones)</b>: esas cantidades mandan.' : ' Si antes cuentas el plano (Count, símbolos, rutas), esas cantidades viajan con el scope y mandan sobre las típicas.') + '</div>';
     } else {
       var P = scope.prop, F = scope.filas || [];
@@ -15982,7 +15985,7 @@
     var txt = scopeTexto().trim();
     if (txt.length < 20) { scope = scope || {}; scope.aviso = 'El scope está vacío o es muy corto: pega el texto del trabajo.'; pintaScope(); return; }
     var cc = cerebroCfg();
-    if (!cc.url) { scope = scope || {}; scope.aviso = 'Falta el cerebro: ponle la dirección y el token en Ajustes del asistente (el botón del cerebro).'; pintaScope(); return; }
+    if (!cc.url) { scope = scope || {}; scope.aviso = 'Falta el cerebro: ponle la dirección y el token en Ajustes del asistente (Proyecto → Claude y este aparato).'; pintaScope(); return; }
     if (!sbAuth()) { askLogin(scopePide); return; }
     pintaScope('Leyendo tus recetas y tu catálogo…');
     Promise.all([
@@ -16588,7 +16591,7 @@
      decisión mía: el que arma el riser decide si quiere el nombre impreso
      dentro de cada caja o la caja limpia. Se guarda con el proyecto. */
   var cbEq = $('#cbEqName');
-  if (cbEq) cbEq.addEventListener('change', function () { ponEqName(!cbEq.checked); });
+  if (cbEq) cbEq.addEventListener('change', function () { ponEqName(!cbEq.checked); pintaPanelDer(); });
   $$('#layersBody input[type=checkbox]').forEach(function (cb) {
     if (!cb.dataset.layer) return;
     cb.addEventListener('change', function () {
@@ -16596,6 +16599,7 @@
       (LAYER_GROUPS[cb.dataset.layer] || []).forEach(function (gid) {
         document.getElementById(gid).style.display = cb.checked ? '' : 'none';
       });
+      pintaPanelDer();
     });
   });
   $('#bgOpacity').addEventListener('input', function () {
@@ -16604,12 +16608,15 @@
 
   // extrae solo la tinta del fondo: lo blanco se vuelve transparente, quedan las líneas
   function updateBgLinesBtn() {
-    $('#btnBgLines').textContent = (state.bg && state.bg.origUrl)
-      ? '↩ Volver a la imagen original'
-      : '✂ Solo líneas (fondo transparente)';
+    // (v36.C) solo el texto: el textContent de antes se llevaba el icono del botón
+    var b = $('#btnBgLines'); if (!b) return;
+    var t = (state.bg && state.bg.origUrl) ? 'Volver a la imagen original' : 'Solo líneas (fondo transparente)';
+    var ult = b.lastChild;
+    if (ult && ult.nodeType === 3) ult.nodeValue = t; else b.appendChild(document.createTextNode(t));
+    pintaPanelDer();
   }
   $('#btnBgScale').addEventListener('click', function () {
-    if (!state.bg) { uiAlert('Primero importa un plano con el botón "Subir Fondo".'); return; }
+    if (!state.bg) { uiAlert('Primero importa un plano con el botón «Abrir».'); return; }
     showToolMenu('bgscale', this);
   });
   // QUITAR EL FONDO (Edgar, 08/30: "como podemos eliminar las lineas de plano
@@ -16638,11 +16645,11 @@
       });
   });
   $('#btnBgLines').addEventListener('click', function () {
-    if (!state.bg) { uiAlert('Primero importa un plano o screenshot con el botón "Fondo".'); return; }
+    if (!state.bg) { uiAlert('Primero importa un plano o screenshot con el botón «Abrir».'); return; }
     if (state.bg.origUrl) {
       state.bg.url = state.bg.origUrl;
       delete state.bg.origUrl;
-      renderBg(); updateBgLinesBtn();
+      renderBg(); updateBgLinesBtn(); scheduleAutosave();
       return;
     }
     var img = new Image();
@@ -16666,7 +16673,7 @@
       state.bg.origUrl = state.bg.url;
       state.bg.url = cv.toDataURL('image/png');
       if (state.bg.opacity < 0.95) { state.bg.opacity = 1; $('#bgOpacity').value = 100; }
-      renderBg(); updateBgLinesBtn();
+      renderBg(); updateBgLinesBtn(); scheduleAutosave();
       setHint('✔ Solo quedaron las líneas del dibujo. Calíbralo (K) y dibuja tus paredes encima.');
     };
     img.src = state.bg.url;
@@ -16679,6 +16686,54 @@
     if (r1) r1.hidden = !on;
     if (r2) r2.hidden = !on;
     if (b) b.hidden = on;
+    pintaPanelDer();
+  }
+  /* (v36.C, Edgar 02/10: «siento que tenemos demasiados botones… si no son
+     necesarios, crea botones que se desplieguen y tengan varias opciones»)
+     EL PANEL DERECHO POR TAREAS. Lo que solo sirve a veces aparece cuando sirve
+     (el plano del ingeniero solo con fondo, la guía solo si hay guía, el recibo
+     solo tras un escaneo, el PDF encima solo con PDF), y cada desplegable dice
+     en su título cómo está: plegar no esconde que la capa Count está apagada.
+     Corre en cada renderBg: solo toca .hidden, .value y textos, y no pelea con
+     un deslizador que se está arrastrando. */
+  function pintaPanelDer() {
+    var CAPA_NOM = { count: 'Count', electrical: 'Eléctrico', background: 'Fondo', architecture: 'Paredes', annotation: 'Cotas', areas: 'Áreas', furniture: 'Muebles', grid: 'Cuadrícula' };
+    try {
+      var g = function (id) { return document.getElementById(id); };
+      var bg = state && state.bg, pc = function (o) { return Math.round((o == null ? 0.7 : o) * 100); };
+      var f = g('rpgFondo'); if (f) f.hidden = !bg;
+      var op = g('bgOpacity'); if (bg && op && document.activeElement !== op) op.value = String(pc(bg.opacity));
+      var o2 = g('ov2Op'); if (state.bg2 && o2 && document.activeElement !== o2) o2.value = String(pc(state.bg2.opacity));
+      var fr = g('rpgFondoRes'); if (fr) fr.textContent = bg ? 'opacidad ' + pc(bg.opacity) + ' %' + (bg.origUrl ? ' · solo líneas' : '') : '';
+      var gd = g('btnGuiaDel'); if (gd) gd.hidden = !(state.guia && state.guia.length);
+      var rc = g('btnRecibo'); if (rc) rc.hidden = !ultimoRecibo;
+      var pv = g('btnPdfVec'); if (pv) pv.hidden = !(bg && bg.pdfId);
+      // capas: cuáles están apagadas, en ámbar
+      var off = [];
+      $$('#layersBody input[type=checkbox][data-layer]').forEach(function (cb) { if (!cb.checked) off.push(CAPA_NOM[cb.dataset.layer] || cb.dataset.layer); });
+      var cr = g('rpgCapasRes');
+      if (cr) { cr.textContent = off.length ? off.length + (off.length === 1 ? ' apagada: ' : ' apagadas: ') + off.join(', ') : 'todo se ve'; cr.classList.toggle('ojo', off.length > 0); }
+      var tr = g('rpgTamRes');
+      if (tr) tr.textContent = 'marcas ' + Math.round(escCnt() * 100) + ' · símb. ' + Math.round(escSym() * 100) + ' · líneas ' + Math.round(escLw() * 100) + ' %';
+      // lo que sale con el botón PDF
+      var hs = g('pjSheet'), sc = g('pjScale'), sl = g('pjSello');
+      if (hs && sc && sl) {
+        var hojaTxt = { limpia: 'hoja limpia', marco: 'con marco', full: 'con carátula' }[hs.value] || hs.value;
+        var escTxt = sc.value === 'fit' ? 'ajustada' : (sc.options[sc.selectedIndex] || {}).text || sc.value;
+        var sr = g('rpgSalidaRes'); if (sr) sr.textContent = hojaTxt + ' · ' + escTxt + ' · ' + (sl.value ? sl.value.toLowerCase() : 'sin sello');
+        var sn = g('pjSelloNota'); if (sn) sn.hidden = !(sl.value && hs.value === 'limpia');
+      }
+    } catch (e) {}
+  }
+  /* Abrir un desplegable del panel desde un aviso («enciéndela en Capas»): se
+     despliega su sección si estaba plegada y se abre el grupo. */
+  function abreGrupo(k) {
+    var d = document.querySelector('#rightPanel details[data-k="' + k + '"]');
+    if (!d || d.hidden) return;
+    var sec = d.closest('section.panel');
+    if (sec && sec.classList.contains('plegada')) pliegaSeccion(sec.id, false);
+    if (!d.open) d.open = true;   // el «toggle» lo recuerda
+    try { d.scrollIntoView({ block: 'nearest' }); } catch (e) {}
   }
   // vuelve transparente lo claro y pinta la tinta del color dado (para comparar azul vs rojo)
   function tintTo(url, r, g, bl, cb) {
@@ -18505,7 +18560,7 @@
   });
 
   $('#btnOv').addEventListener('click', function () {
-    if (!state.bg) { uiAlert('Primero sube el plano BASE con "Subir Fondo". Después cargas el plano a comparar.'); return; }
+    if (!state.bg) { uiAlert('Primero abre el plano BASE con el botón «Abrir». Después cargas el plano a comparar.'); return; }
     // (26/09) lo normal es comparar con OTRA HOJA DEL SET (demolición contra nuevo, fuerza contra luces)
     var otras = [];
     (state.sheets || []).forEach(function (sh, i) { if (i !== state.curSheet && fondoDeHoja(i)) otras.push(i); });
@@ -18534,7 +18589,7 @@
     rd.readAsDataURL(f);
   });
   $('#ov2Op').addEventListener('input', function () {
-    if (state.bg2) { state.bg2.opacity = this.value / 100; renderBg(); }
+    if (state.bg2) { state.bg2.opacity = this.value / 100; renderBg(); scheduleAutosave(); }
   });
   $('#btnOvOff').addEventListener('click', function () {
     state.bg2 = null;
@@ -18809,6 +18864,7 @@
     $('#pjLwEsc').value = String(Math.round(escLw() * 100)); $('#pjLwEscV').textContent = Math.round(escLw() * 100) + '%';
     var pc = $('#pjCntEsc'); if (pc) { pc.value = String(Math.round(escCnt() * 100)); $('#pjCntEscV').textContent = Math.round(escCnt() * 100) + '%'; }
     aplicaGrosor();
+    pintaPanelDer();
   }
   (function () {
     var pc = $('#pjCntEsc'); if (!pc) return;
@@ -18826,10 +18882,13 @@
     pintaEscalas(); scheduleAutosave();
   });
   pintaEscalas();
-  (function () { var sl = $('#pjSello'); if (sl) sl.addEventListener('change', function () { state.printSello = sl.value; scheduleAutosave(); }); })();
+  (function () { var sl = $('#pjSello'); if (sl) sl.addEventListener('change', function () { state.printSello = sl.value; scheduleAutosave(); pintaPanelDer(); }); })();
   $('#pjScale').addEventListener('change', function () {
-    state.printScale = this.value; scheduleAutosave();
+    state.printScale = this.value; scheduleAutosave(); pintaPanelDer();
   });
+  /* (v36.C) La Hoja no tenía «change»: state.printSheet solo se guardaba al
+     imprimir, así que cambiarla y cerrar la perdía. */
+  (function () { var hs = $('#pjSheet'); if (hs) hs.addEventListener('change', function () { state.printSheet = hs.value; scheduleAutosave(); pintaPanelDer(); }); })();
   /* ================= FASE 7.4 — ☁ PROYECTOS =================
      Una sola pantalla con TODO: lo que está en este aparato, lo que está en la
      nube y lo que está en los dos. Abrir, duplicar, borrar, y meter de golpe
@@ -19328,7 +19387,7 @@
     zoomFit();
     updateBgLinesBtn();
     setHint(paperW
-      ? 'Plano importado. Usa "📐 Escala del plano" (a la derecha) si el plano trae su escala (ej: 1/4" = 1\'-0"), o calibra (⌖) con una medida conocida.'
+      ? 'Plano importado. Usa Plano y capas → Plano del ingeniero → «Escala escrita en el plano» si el plano trae su escala (ej: 1/4" = 1\'-0"), o calibra (⌖) con una medida conocida.'
       : 'Plano importado. Usa "📐 Escala del plano" si conoces la escala y el tamaño de hoja, o CALIBRAR (⌖) con una medida conocida.');
     setTool('calibrate');
   }
@@ -19619,6 +19678,7 @@
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: ar.doc, page: q.pg };
             if (ar.pdfKey) { state.bg.pdfId = ar.pdfKey; state.bg.pdfPage = q.pg; if (vista) state.bg.vista = 1; }
+            pintaPanelDer();   // (v36.C) el «PDF encima del original» aparece en cuanto hay pdfId
           } else {
             // las demás se arman enteras, sin activarlas: así no se pierde el undo
             S.nuevas.push({ hoja: hojaConFondo(nom, bgDePagina(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72, ar.pdfKey, q.pg, vista)), doc: ar.doc, pg: q.pg });
@@ -19799,6 +19859,7 @@
             insertBackground(url, Math.round(vp.width), Math.round(vp.height), vp1.width / 72, vp1.height / 72);
             pdfLive[state.curSheet] = { doc: doc, page: pageNum };
             if (pdfKey) { state.bg.pdfId = pdfKey; state.bg.pdfPage = pageNum; if (vista) state.bg.vista = 1; encolaPdfNube(pdfKey); }
+            pintaPanelDer();   // (v36.C) el «PDF encima del original» aparece en cuanto hay pdfId
             if (!state.sheets[state.curSheet].no) {
               state.sheets[state.curSheet].no = 'PG-1';
               state.project.sheetNo = 'PG-1';
@@ -21816,8 +21877,10 @@
     state.printSello = o.state.printSello || '';
     $('#pjScale').value = state.printScale;
     ponEqName(!!o.state.eqNameOff);   // la casilla de los nombres viaja con el proyecto
-    var hs = $('#pjSheet'); if (hs && o.state.printSheet) hs.value = o.state.printSheet;   // (auditoria 31/08) se guardaba y no se restauraba
-    var sl0 = $('#pjSello'); if (sl0 && o.state.printSello != null) sl0.value = o.state.printSello;
+    // (auditoria 31/08) se guardaba y no se restauraba. (v36.C) Y si el proyecto
+    // no la trae, de fábrica: antes se quedaba la del proyecto anterior.
+    var hs = $('#pjSheet'); if (hs) { hs.value = o.state.printSheet || 'limpia'; if (!hs.value) hs.value = 'limpia'; state.printSheet = hs.value; }
+    var sl0 = $('#pjSello'); if (sl0) { sl0.value = o.state.printSello || ''; if (sl0.value !== (o.state.printSello || '')) sl0.value = ''; state.printSello = sl0.value; }
     // proyectos viejos (sin multi-hoja): se envuelven en una sola hoja
     if (!state.sheets || !state.sheets.length) {
       state.sheets = [{ no: state.project.sheetNo || 'E-1', title: state.project.sheetTitle || '', data: null }];
@@ -21885,11 +21948,11 @@
               walls: state.walls.slice(wAntes),
               doors: n.doors, windows: n.windows
             });
-            ultimoRecibo = rec.txt;
+            ultimoRecibo = rec.txt; pintaPanelDer();
             setHint('🏠 Escaneo importado: ' + n.walls + ' paredes, ' + n.doors + ' aberturas, ' +
               n.windows + ' ventanas' + (n.floors > 1 ? ' en ' + n.floors + ' pisos' : '') +
               (withFurn && n.furn ? ' + ' + n.furn + ' muebles de referencia' : ' — plano limpio, sin muebles') +
-              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — botón "Recibo del último escaneo" en Capas'
+              (rec.fallas ? ' · ⚠️ el RECIBO marca ' + rec.fallas + ' diferencia(s) — Plano y capas → Casa escaneada → Recibo'
                           : ' · 📋 recibo: todo llegó completo') +
               ' · a escala real, en drywall (el block lo pone 🧲 Soldar)');
             // si algo se perdió, se enseña en la cara: es el punto débil
@@ -22352,7 +22415,7 @@
     var lista = $('#buscaLista'), n = $('#buscaN');
     if (!lista) return;
     if (estado === 'buscando') { lista.innerHTML = '<div class="bMuted">Buscando…</div>'; if (n) n.textContent = ''; return; }
-    if (estado === 'sinfondo') { lista.innerHTML = '<div class="bMuted">Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero con el botón <b>Fondo</b>.</div>'; if (n) n.textContent = ''; return; }
+    if (estado === 'sinfondo') { lista.innerHTML = '<div class="bMuted">Esta hoja no tiene plano de fondo. Importa el PDF del ingeniero con el botón <b>Abrir</b>.</div>'; if (n) n.textContent = ''; return; }
     if (estado === 'sinpdf') { lista.innerHTML = '<div class="bMuted">El fondo de esta hoja es una <b>imagen</b>, no un PDF: no trae texto que buscar. Vuelve a importarlo como PDF y se puede buscar dentro.</div>'; if (n) n.textContent = ''; return; }
     if (estado === 'escaneado') {
       lista.innerHTML = '<div class="bMuted">Ese PDF <b>no trae texto</b>: está escaneado, es una foto de la hoja' +
@@ -24641,9 +24704,14 @@
      los PDF crudos, la sesión de Supabase y el token del cerebro, sin manera
      de limpiarlo de golpe. */
   if ($('#btnPurgar')) $('#btnPurgar').addEventListener('click', function () {
-    uiConfirm('¿Borrar TODO lo guardado en este aparato?\n\nSe van: TODOS los proyectos guardados en este aparato (lista Proyectos), los PDF importados, la sesión del estimador y el token del cerebro. Lo que ya descargaste (.mxp.json) o mandaste por AirDrop no se toca.\n\nEsto no se puede deshacer.', function (ok) {
+    uiConfirm('¿Borrar TODO lo guardado en este aparato?\n\nSe van: TODOS los proyectos guardados en este aparato (lista Proyectos), los PDF importados, la sesión del estimador, el token del cerebro y tus ajustes de este aparato (barras, favoritos, Mi cofre, códigos). Lo que ya descargaste (.mxp.json) o mandaste por AirDrop no se toca, y el contador de números de estimado (EST-AAAA-NNN) se conserva para que no se repitan.\n\nEsto no se puede deshacer.', function (ok) {
       if (!ok) return;
+      /* (v36.C) Los números EST-AAAA-NNN los da este aparato (mxp_est_seq_<año>):
+         si se borraban, el siguiente estimado repetía un número ya mandado. */
+      var seqs = {};
+      try { for (var iS = 0; iS < localStorage.length; iS++) { var kS = localStorage.key(iS); if (/^mxp_est_seq_/.test(kS)) seqs[kS] = localStorage.getItem(kS); } } catch (e) {}
       try { localStorage.clear(); } catch (e) {}
+      try { Object.keys(seqs).forEach(function (kS) { localStorage.setItem(kS, seqs[kS]); }); } catch (e) {}
       try { sessionStorage.clear(); } catch (e) {}
       try { indexedDB.deleteDatabase('mxp-planos'); } catch (e) {}
       var fin = function () { location.reload(); };
@@ -24959,6 +25027,9 @@
     L.palOculta = !!g.palOculta; L.rpOculta = !!g.rpOculta;
     L.plegadas = Array.isArray(g.plegadas) ? g.plegadas.filter(function (x) { return typeof x === 'string'; }) : [];
     L.prGrupos = { herr: !(g.prGrupos && g.prGrupos.herr === false), aspecto: !!(g.prGrupos && g.prGrupos.aspecto) };
+    // (v36.C) los desplegables del panel derecho: solo claves conocidas, solo «abierto»
+    L.rpGrupos = {};
+    if (g.rpGrupos && typeof g.rpGrupos === 'object') RP_GRUPOS.forEach(function (k) { if (g.rpGrupos[k] === true) L.rpGrupos[k] = true; });
     return L;
   }
   /* Aplicar lo que no son barras: el tamaño de las cajitas (variable CSS en
@@ -24978,6 +25049,26 @@
   function aplicaPlegadas() {
     var pl = (layout && layout.plegadas) || [];
     $$('#rightPanel section.panel[id]').forEach(function (sec) { sec.classList.toggle('plegada', pl.indexOf(sec.id) >= 0); });
+    aplicaRpGrupos();
+  }
+  /* (v36.C) Los desplegables del panel derecho: cerrados de fábrica y cada uno
+     se acuerda de cómo lo dejó Edgar. Abrirlo por código también dispara
+     «toggle»: se compara antes de guardar. */
+  var RP_GRUPOS = ['fondo', 'capas', 'tam', 'scan', 'salida', 'aparato', 'csv'];
+  function aplicaRpGrupos() {
+    var rg = (layout && layout.rpGrupos) || {};
+    $$('#rightPanel details[data-k]').forEach(function (d) {
+      var k = d.dataset.k, abre = !!rg[k];
+      if (d.open !== abre) d.open = abre;
+      if (d._rp) return;
+      d._rp = 1;
+      d.addEventListener('toggle', function () {
+        if (!layout.rpGrupos) layout.rpGrupos = {};
+        if (!!layout.rpGrupos[k] === d.open) return;
+        if (d.open) layout.rpGrupos[k] = true; else delete layout.rpGrupos[k];
+        guardaLayoutLuego();
+      });
+    });
   }
   function pliegaSeccion(id, plegada) {
     if (!layout.plegadas) layout.plegadas = [];
@@ -25429,7 +25520,7 @@
     html += '<div class="bpSec">Panel derecho — ancho</div>';
     var pwAct = layout.panelW || Math.round(($('#rightPanel') || { getBoundingClientRect: function () { return { width: 258 }; } }).getBoundingClientRect().width) || 258;
     html += '<div class="bpRow"><input type="range" data-bp="pw" min="' + PANEL_W_MIN + '" max="' + PANEL_W_MAX + '" step="10" value="' + pwAct + '" style="flex:1" title="Ancho del panel de la derecha. También se arrastra por su borde izquierdo."><span class="nm" style="flex:none;width:44px;text-align:right">' + pwAct + ' px</span></div>';
-    html += '<p class="bpNota">Si algo del panel se corta (el «Importar» del DXF, el nombre de la nube…), ensánchalo aquí o arrastra su borde izquierdo. Doble clic en el borde: ancho de fábrica.</p>';
+    html += '<p class="bpNota">Si algo del panel se corta (el «Importar» del DXF en Imprimir y exportar, el nombre de la nube…), ensánchalo aquí o arrastra su borde izquierdo. Doble clic en el borde: ancho de fábrica.</p>';
     html += '<div class="bpSec">Los costados — esconder y mostrar</div>';
     html += '<div class="bpRow bpTam"><button data-bp="pal"' + (layout.palOculta ? ' class="cur"' : '') + ' title="La paleta de símbolos, a la izquierda. También: clic en su borde o en la lengüeta">' + (layout.palOculta ? 'Mostrar la paleta' : 'Esconder la paleta') + '</button>' +
       '<button data-bp="rp"' + (layout.rpOculta ? ' class="cur"' : '') + ' title="El panel de Propiedades, a la derecha. También: clic en su borde o en la lengüeta">' + (layout.rpOculta ? 'Mostrar el panel' : 'Esconder el panel') + '</button></div>';
