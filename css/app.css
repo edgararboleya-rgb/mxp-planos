@@ -1516,3 +1516,4 @@ details.rpGrupo > summary { text-transform: none; letter-spacing: 0; font-size: 
 details.rpGrupo > summary .rpRes { font-size: 11px; }
 details.rpGrupo > summary { white-space: nowrap; overflow: hidden; }
 details.rpGrupo > summary .rpRes { flex: 1 1 auto; max-width: none; text-align: right; }
+.nubeBadge.codigo { color: var(--mp-danger); font-weight: 600; }

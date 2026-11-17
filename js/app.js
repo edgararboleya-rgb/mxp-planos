@@ -7,7 +7,7 @@
 
   // versión visible abajo a la derecha — para saber QUÉ build está corriendo
   // cuando se depura a distancia. Subirla en cada entrega.
-  var APP_VERSION = 'v36.D';
+  var APP_VERSION = 'v36.E';
   try { var _vt = document.getElementById('verTag'); if (_vt) _vt.textContent = APP_VERSION; } catch (e) {}
 
   // Si js/symbols.js no cargó (subida incompleta o cache a medias), la app no
@@ -865,7 +865,12 @@
   var NUBE_COLGADA = 90000;   // una subida que pasa de esto se da por colgada y se reintenta
   var NUBE_ESPERA = 6000, NUBE_REINTENTO = [8000, 25000, 60000];
   function nubeUid() { var s = sbAuth(); return s && s.uid ? s.uid : null; }
-  function nubeActiva() { return !!(SB && SB.url && nubeUid()); }
+  // (17/11) sin el código del teléfono la base no deja tocar las tablas: la nube espera
+  function nubeActiva() { return !!(SB && SB.url && nubeUid() && !sbFaltaCodigo()); }
+  function msgSesionCaida(corto) {
+    if (sbFaltaCodigo()) return 'Falta el código del teléfono: toca «Código» en Proyecto y escribe los 6 dígitos.';
+    return corto ? 'La sesión del panel caducó' : 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.';
+  }
   function nombreAparato() {
     var u = navigator.userAgent || '';
     if (/iPad/.test(u) || (/Macintosh/.test(u) && navigator.maxTouchPoints > 1)) return 'iPad';
@@ -877,28 +882,46 @@
   }
   function pintaNube() {
     var n = $('#pjNube'); if (!n) return;
-    var txt = { off: '☁ sin conexión al panel', espera: '☁ pendiente de subir', subiendo: '☁ subiendo…', ok: '☁ al día', error: '⚠ no subió', sinred: '☁ sin internet', conflicto: '⚠ conflicto con otro aparato', nuevo: '☁ hay una versión más nueva' }[nube.estado] || '';
+    // con sesión pero sin el código del teléfono: lo dice, en vez de un «no subió» mudo
+    var falta = !!(SB && SB.url && nubeUid() && sbFaltaCodigo());
+    var est = falta ? 'codigo' : nube.estado;   // sin el código nada sube: ni «al día» ni «pendiente» serían verdad
+    var txt = { off: '☁ sin conexión al panel', espera: '☁ pendiente de subir', subiendo: '☁ subiendo…', ok: '☁ al día', error: '⚠ no subió', sinred: '☁ sin internet', conflicto: '⚠ conflicto con otro aparato', nuevo: '☁ hay una versión más nueva', codigo: '⚠ falta el código del teléfono' }[est] || '';
     var nPend = Object.keys(nube.pendientes).length;
-    n.textContent = txt + (nube.estado === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '') + (nPend > 1 ? ' (' + nPend + ')' : '');
-    n.title = (nube.msg ? nube.msg + '\n\n' : '') +
-      (nube.estado === 'off' ? 'Entra con tu usuario del panel (botón Entrar, aquí al lado) para que los planos suban solos.'
-        : 'Toca aquí para subir ahora mismo.' + (nPend ? '\nEn cola: ' + nPend + '.' : ''));
-    n.className = 'nubeBadge ' + nube.estado + (nube.estado === 'off' ? '' : ' clic');
-    // el botón Entrar solo hace falta mientras no hay sesión
-    var be = $('#pjEntrar'); if (be) be.hidden = nubeActiva();
+    n.textContent = txt + (est === 'ok' && nube.ultimoOk ? ' · ' + nube.ultimoOk : '') + (nPend > 1 ? ' (' + nPend + ')' : '');
+    n.title = est === 'codigo'
+      ? 'Tu cuenta tiene activado el código del teléfono y esta sesión no lo pasó. Toca aquí (o «Código») y escribe los 6 dígitos: lo pendiente sube solo.' + (nPend ? '\nEn cola: ' + nPend + '.' : '')
+      : (nube.msg ? nube.msg + '\n\n' : '') +
+        (est === 'off' ? 'Entra con tu usuario del panel (botón Entrar, aquí al lado) para que los planos suban solos.'
+          : 'Toca aquí para subir ahora mismo.' + (nPend ? '\nEn cola: ' + nPend + '.' : ''));
+    n.className = 'nubeBadge ' + est + (est === 'off' ? '' : ' clic');
+    // el botón Entrar solo hace falta mientras no hay sesión; si solo falta el código, dice «Código»
+    var be = $('#pjEntrar');
+    if (be) {
+      be.hidden = nubeActiva();
+      be.textContent = falta ? 'Código' : 'Entrar';
+      be.title = falta ? 'Escribe los 6 dígitos del código del teléfono para completar la sesión'
+        : 'Entra con tu usuario del panel de Max Power: a partir de ahí los planos suben solos a la nube';
+    }
   }
   /* Entrar sin pasar por el Estimador (pedido de Edgar 04/09): misma sesión del
      panel de Max Power; al entrar, lo pendiente se encola y se revisa la nube. */
   function nubeEntrar() {
     if (!SB || !SB.url) { uiAlert('La nube no está configurada en esta copia de la app.'); return; }
-    askLogin(function () {
-      refrescaNubeLista();   // (v35.P) al entrar, la lista del panel enseña lo de la nube
-      nubeSet('espera', '');
-      pintaNube();
-      try { reanudaSubidas(); revisaNube('entrar'); } catch (e) {}
-      if (!Object.keys(nube.pendientes).length) nubeSet('ok', '');
-      setHint('✔ Sesión iniciada — los planos suben solos a la nube');
-    });
+    // (17/11) la nube se reanuda dentro del login (nubeTrasSesion), venga de donde venga
+    askLogin(function () { setHint('✔ Sesión iniciada — los planos suben solos a la nube'); });
+  }
+  /* Con la sesión completa (contraseña, o contraseña + código del teléfono) la
+     nube arranca: la lista del panel, lo que quedó sin subir mientras no se
+     podía, y la revisión del proyecto abierto. Se llama desde el login, sea cual
+     sea el botón que lo pidió (antes solo desde «Entrar»: si el código se
+     escribía desde el estimador, lo guardado en ese rato no volvía a la cola). */
+  function nubeTrasSesion() {
+    if (!nubeActiva()) { pintaNube(); return; }
+    try { refrescaNubeLista(); } catch (e) {}   // (v35.P) la lista del panel enseña lo de la nube
+    nubeSet('espera', '');
+    try { reanudaSubidas(); revisaNube('entrar'); } catch (e) {}
+    if (!Object.keys(nube.pendientes).length) nubeSet('ok', '');
+    else { nube.intentos = 0; clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 400); }   // lo que esperaba en cola sube ya
   }
   (function () { var be = document.getElementById('pjEntrar'); if (be) be.addEventListener('click', nubeEntrar); })();
   /* Tocar el badge = subir AHORA. Sirve para no esperar, y para ver el error de
@@ -1039,7 +1062,7 @@
             rev: pj.rev || 0, aparato: nombreAparato(), path: path, tamano: blob.size, pdf_ids: pdfsDe(o), borrado: false }] });
       })
       .then(function () { marcaSincronizado(id, pj.rev || 0, o); done(true); })
-      .catch(function (e) { done(false, e && e.message === 'login' ? 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.' : (e && e.message) || 'Error de red'); });
+      .catch(function (e) { done(false, e && e.message === 'login' ? msgSesionCaida() : (e && e.message) || 'Error de red'); });
   }
   /* revNube = rev que quedó en la nube. En el proyecto abierto va a state (y se
      persiste sin subir el rev); en uno cerrado se corrige dentro de proj_<id>. */
@@ -1075,13 +1098,15 @@
         if (opts.forzar) return subeBlob(uid, id, o, blob, payload.length, done);
         // (7.5) ¿alguien subió algo después de mi última sincronización?
         filaNube(id, function (fila, err) {
-          if (err) return done(false, err === 'login' ? 'La sesión del panel caducó: entra otra vez desde 💲 Estimador.' : 'No se pudo consultar la nube (' + err + ')');
+          if (err) return done(false, err === 'login' ? msgSesionCaida() : 'No se pudo consultar la nube (' + err + ')');
           var base = pjRevNube(pj);
           // distinto de mi base = alguien más subió (mayor O menor: un rev menor
           // en la nube también es otra versión, no "nada nuevo")
           var choque = fila && !fila.borrado && (base === null || fila.rev !== base);
           if (!choque) return subeBlob(uid, id, o, blob, payload.length, done);
           if (id === state.project.id) {
+            // (17/11) la revisión ya vio el choque y lo está preguntando: un solo diálogo
+            if (nube.conflictoAbierto) return done(false, 'conflicto');
             // el proyecto está abierto: Edgar decide (el diálogo para la cola mientras tanto)
             nube.conflictoAbierto = true;
             done(false, 'conflicto');
@@ -1198,6 +1223,7 @@
     if (nube.estado === 'off') nubeSet('ok');   // hay sesión: el badge deja de decir "sin conexión"
     filaNube(id, function (fila) {
       revisando = false;
+      if (nube.conflictoAbierto) return;   // (17/11) la subida ya vio el choque y lo está preguntando: un solo diálogo
       if (!fila || fila.borrado) return;
       var base = pjRevNube(pj);
       if (base !== null && fila.rev === base) return;                    // la nube es lo que ya tengo
@@ -1252,7 +1278,7 @@
     if (!nubeActiva()) return done(null, 'sin sesión');
     sbFetch('/rest/v1/planos_proyectos?select=id,nombre,cliente,job,direccion,rev,updated_at,aparato,path,tamano,borrado&borrado=is.false&order=updated_at.desc')
       .then(function (rows) { done(Array.isArray(rows) ? rows : []); })
-      .catch(function (e) { done(null, e && e.message === 'login' ? 'La sesión del panel caducó' : (e && e.message) || 'Error de red'); });
+      .catch(function (e) { done(null, e && e.message === 'login' ? msgSesionCaida(true) : (e && e.message) || 'Error de red'); });
   }
   try {
     window.addEventListener('online', function () { if (Object.keys(nube.pendientes).length) { nube.intentos = 0; clearTimeout(nube.timer); nube.timer = setTimeout(subeCola, 800); } });
@@ -15087,16 +15113,37 @@
      nube (fase 7.3/7.4). `sbRefresh()` renueva en silencio: antes de que
      venza, y tambien si el servidor contesta 401. Solo se pide la contrasena
      cuando el refresh_token ya no sirve de verdad. */
-  function sbUid(tok) {
-    // el id del usuario viaja dentro del token (campo 'sub'), en base64url
+  // lo que viaja dentro del token, en base64url: el id del usuario ('sub') y
+  // el nivel de la sesión ('aal': aal1 = solo contraseña, aal2 = con el código)
+  function sbJwt(tok) {
     try {
-      var p = String(tok).split('.')[1]; if (!p) return '';
+      var p = String(tok).split('.')[1]; if (!p) return {};
       p = p.replace(/-/g, '+').replace(/_/g, '/');
       while (p.length % 4) p += '=';
       var o = JSON.parse(atob(p));
-      return o && o.sub ? String(o.sub) : '';
-    } catch (e) { return ''; }
+      return o && typeof o === 'object' ? o : {};
+    } catch (e) { return {}; }
   }
+  function sbUid(tok) { var o = sbJwt(tok); return o.sub ? String(o.sub) : ''; }
+  /* (17/11) EL CÓDIGO DEL TELÉFONO. El 25/10 la cuenta activó el segundo
+     factor (TOTP) desde la app operativa, y la base exige desde entonces una
+     sesión «aal2» a quien lo tiene (fn_mfa_exigir, antes de cada petición).
+     Planos entraba solo con la contraseña (aal1): todo lo que tocaba tablas
+     —la nube, el estimador— se rechazaba, y la nube se quedó en «no subió»
+     desde el 22/10 sin decir por qué. Ahora: después de la contraseña se
+     piden los 6 dígitos; y una sesión vieja de solo contraseña pide SOLO el
+     código, sin volver a pedir email y contraseña. */
+  function sbFactorDe(u) {
+    var fs = (u && Array.isArray(u.factors)) ? u.factors : [];
+    for (var i = 0; i < fs.length; i++) {
+      var f = fs[i];
+      if (f && f.status === 'verified' && (!f.factor_type || f.factor_type === 'totp') && f.id) return String(f.id);
+    }
+    return '';
+  }
+  function sbNivel(a) { a = a || sbAuth(); return a && a.access_token ? (sbJwt(a.access_token).aal || 'aal1') : null; }
+  // la cuenta tiene el código y esta sesión todavía no lo pasó
+  function sbFaltaCodigo() { var a = sbAuth(); return !!(a && a.access_token && a.mfa && sbNivel(a) !== 'aal2'); }
   function sbGuardaAuth(d, email) {
     var ant = sbAuth() || {};
     var a = {
@@ -15104,7 +15151,10 @@
       refresh_token: d.refresh_token || ant.refresh_token || '',
       expires_at: d.expires_at ? d.expires_at * 1000 : (Date.now() + ((+d.expires_in || 3600) * 1000)),
       email: email || (d.user && d.user.email) || ant.email || '',
-      uid: (d.user && d.user.id) || sbUid(d.access_token) || ant.uid || ''
+      uid: (d.user && d.user.id) || sbUid(d.access_token) || ant.uid || '',
+      // el factor del código del teléfono: lo dice el usuario que viene con la
+      // sesión; si la respuesta no lo trae, se queda el que ya se sabía
+      mfa: d.user ? sbFactorDe(d.user) : (ant.mfa || '')
     };
     try { localStorage.setItem('mxp_sb_auth', JSON.stringify(a)); } catch (e) {}
     return a;
@@ -15159,10 +15209,132 @@
         }
         return r.text().then(function (t) {
           var data = null; try { data = t ? JSON.parse(t) : null; } catch (e2) {}
+          // (17/11) la base pide el código del teléfono: se trata como sesión que
+          // hay que completar (askLogin pide solo los 6 dígitos)
+          if (r.status === 403 && data && data.code === 'MFA') return sbMarcaFaltaCodigo().then(function () { throw new Error('login'); });
           if (!r.ok) throw new Error((data && (data.message || data.msg || data.error_description)) || ('HTTP ' + r.status));
           return data;
         });
       });
+  }
+  function sbGuardaMfa(id) {
+    var a = sbAuth(); if (!a) return;
+    a.mfa = id || '';
+    try { localStorage.setItem('mxp_sb_auth', JSON.stringify(a)); } catch (e) {}
+  }
+  // Auth de Supabase con la sesión guardada (el token se renueva antes si vence ya)
+  // suave = solo mirar (la revisión al arrancar): nunca renueva ni borra la sesión
+  function sbAuthApi(ruta, metodo, cuerpo, _rein, suave) {
+    var a = sbAuth();
+    if (!a || !a.access_token) return Promise.reject(new Error('login'));
+    var antes = (!suave && a.refresh_token && a.expires_at && (a.expires_at - Date.now()) < 60000) ? sbRefresh() : Promise.resolve(a);
+    return antes.then(function (a2) {
+      return fetch(SB.url + '/auth/v1/' + ruta, {
+        method: metodo || 'GET',
+        headers: { 'apikey': SB.key, 'Authorization': 'Bearer ' + a2.access_token, 'Content-Type': 'application/json' },
+        body: cuerpo ? JSON.stringify(cuerpo) : undefined
+      });
+    }).then(function (r) {
+      return r.text().then(function (t) {
+        var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
+        /* Sesión muerta: Auth no siempre contesta 401. Con la sesión borrada en el
+           servidor (otro aparato pasó el código y cerró las de solo contraseña)
+           contesta 403 session_not_found; con el token vencido, 403 bad_jwt. Se
+           intenta UNA renovación; si tampoco sirve, sbRefresh la olvida y se pide
+           la contraseña. Sin esto el cuadro del código se repetía sin fin. */
+        var codigoErr = (d && (d.error_code || d.code)) || '';
+        if (r.status === 401 || (r.status === 403 && /^(session_not_found|bad_jwt|session_expired)$/.test(String(codigoErr)))) {
+          if (suave) throw new Error('login');
+          if (!_rein && sbAuth() && sbAuth().refresh_token) return sbRefresh().then(function () { return sbAuthApi(ruta, metodo, cuerpo, true); });
+          sbOlvida();
+          throw new Error('login');
+        }
+        if (!r.ok) {
+          var e2 = new Error((d && (d.msg || d.message || d.error_description || d.error)) || ('HTTP ' + r.status));
+          e2.status = r.status; e2.codigo = d && (d.error_code || d.code);
+          throw e2;
+        }
+        return d;
+      });
+    });
+  }
+  // ¿qué factor tiene la cuenta? (una sesión guardada antes de v36.E no lo sabe)
+  function sbCargaFactor(suave) {
+    return sbAuthApi('user', 'GET', null, false, !!suave).then(function (u) { var id = sbFactorDe(u); sbGuardaMfa(id); return id; });
+  }
+  // Reto + verificación con los 6 dígitos: la sesión pasa a aal2 y se guarda
+  function sbVerificaCodigo(codigo) {
+    var a = sbAuth();
+    if (!a || !a.mfa) return Promise.reject(new Error('login'));
+    var f = encodeURIComponent(a.mfa);
+    return sbAuthApi('factors/' + f + '/challenge', 'POST', {}).then(function (reto) {
+      if (!reto || !reto.id) throw new Error('el servidor no devolvió el reto del código');
+      return sbAuthApi('factors/' + f + '/verify', 'POST', { challenge_id: reto.id, code: String(codigo || '').replace(/\s+/g, '') });
+    }).then(function (sesion) {
+      if (!sesion || !sesion.access_token) throw new Error('el servidor no devolvió la sesión con el código');
+      return sbGuardaAuth(sesion, a.email);
+    });
+  }
+  /* Pedir el código. Si varias cosas lo necesitan a la vez (la nube y el
+     estimador), sale UN solo cuadro y todas siguen cuando se acierta. */
+  var sbCodigo = { abierto: false, espera: [] };
+  function sbPideCodigo(done, aviso) {
+    if (done) sbCodigo.espera.push(done);
+    if (sbCodigo.abierto) return;
+    sbCodigo.abierto = true;
+    var termina = function (ok) {
+      sbCodigo.abierto = false;
+      var cbs = sbCodigo.espera.splice(0);
+      try { pintaNube(); } catch (e) {}
+      if (!ok) return;
+      // venga de donde venga el cuadro (la nube, el estimador, el scope…), la nube se reanuda
+      try { nubeTrasSesion(); } catch (e) {}
+      cbs.forEach(function (cb) { try { cb(); } catch (e) {} });
+    };
+    uiPrompt((aviso ? aviso + '\n\n' : '') + 'Tu cuenta tiene activado el código del teléfono.\nEscribe los 6 dígitos que te da la app de autenticación:', '', function (c) {
+      var i0 = $('#askInput'); if (i0) { i0.removeAttribute('inputmode'); i0.removeAttribute('autocomplete'); }
+      if (c === null || !String(c).trim()) {
+        setHint('Sin el código del teléfono, la nube y el estimador no responden. Cuando lo tengas, toca «Código» en Proyecto.');
+        termina(false); return;
+      }
+      setHint('Comprobando el código…');
+      sbVerificaCodigo(c).then(function () { setHint('✔ Código correcto: sesión completa'); termina(true); }, function (e) {
+        setHint('');
+        sbCodigo.abierto = false;
+        if (e && e.message === 'login') {
+          // la sesión ya no sirve: email y contraseña, y después el código
+          var cbs = sbCodigo.espera.splice(0);
+          askLoginClave(function () { cbs.forEach(function (cb) { try { cb(); } catch (e3) {} }); });
+          return;
+        }
+        // la cuenta ya no tiene ese factor (se quitó el código): se vuelve a mirar
+        if (e && (e.status === 404 || e.codigo === 'mfa_factor_not_found')) {
+          sbCodigo.abierto = true;
+          sbCargaFactor().then(function (id) {
+            if (!id) { setHint('La cuenta ya no tiene el código del teléfono: sesión completa'); termina(true); return; }
+            sbCodigo.abierto = false;
+            sbPideCodigo(null, '⚠ El código del teléfono de la cuenta cambió. Escribe el que sale ahora.');
+          }, function () { sbCodigo.abierto = false; sbPideCodigo(null, '⚠ No se pudo comprobar el código. Prueba otra vez.'); });
+          return;
+        }
+        // código malo: por el código de error de Auth, no por el texto (un «invalid JWT» no es un código malo)
+        var malo = e && (e.status === 422 || /^mfa_(verification_failed|challenge_expired|verification_rejected)$/.test(String(e.codigo || '')) || /invalid totp/i.test(e.message || ''));
+        sbPideCodigo(null, malo ? '⚠ Ese código no vale o ya cambió. Escribe el que sale ahora en el teléfono.' : '⚠ No se pudo comprobar el código (' + ((e && e.message) || 'error') + ').');
+      });
+    });
+    var i1 = $('#askInput'); if (i1) { i1.setAttribute('inputmode', 'numeric'); i1.setAttribute('autocomplete', 'one-time-code'); }
+  }
+  // La base dijo que falta el código: se apunta el factor (si no se sabía) para pedirlo
+  function sbMarcaFaltaCodigo() {
+    var a = sbAuth();
+    if (!a || a.mfa) return Promise.resolve();
+    return sbCargaFactor(true).then(function () {}, function () {});
+  }
+  // Al arrancar, una sesión de solo contraseña mira UNA vez si la cuenta tiene el código
+  function sbRevisaCodigo() {
+    var a = sbAuth();
+    if (!a || !a.access_token || !SB || !SB.url || sbNivel(a) === 'aal2') return Promise.resolve();
+    return sbCargaFactor(true).then(function () { try { pintaNube(); } catch (e) {} }, function () {});
   }
   /* TODAS LAS FILAS (16/09, con captura de Edgar): PostgREST corta cada
      respuesta a 1.000 filas y el catálogo tiene 1.084 — el «BREAKER 1P 20A»
@@ -15194,15 +15366,28 @@
       return d;
     });
   }
-  window.__sbDbg = { auth: sbAuth, uid: sbUid, guarda: sbGuardaAuth, refresh: sbRefresh, fetch: sbFetch, todo: sbFetchTodo, olvida: sbOlvida };
+  window.__sbDbg = { auth: sbAuth, uid: sbUid, guarda: sbGuardaAuth, refresh: sbRefresh, fetch: sbFetch, todo: sbFetchTodo, olvida: sbOlvida,
+    nivel: sbNivel, faltaCodigo: sbFaltaCodigo, revisaCodigo: sbRevisaCodigo, login: function (cb) { askLogin(cb || function () {}); } };
+  // Si la sesión vale y solo le falta el código del teléfono, se piden solo los 6
+  // dígitos; si no hay sesión, email y contraseña (y después el código, si la cuenta lo tiene)
   function askLogin(done) {
+    var a0 = sbAuth();
+    if (a0 && a0.refresh_token && sbFaltaCodigo()) { sbPideCodigo(done); return; }
+    askLoginClave(done);
+  }
+  function askLoginClave(done) {
     uiPrompt('Entra con tu usuario del panel de Max Power — email:', (sbAuth() && sbAuth().email) || '', function (em) {
       if (!em) return;
       uiPrompt('Contraseña:', '', function (pw) {
         var inp0 = $('#askInput'); if (inp0) inp0.type = 'text';
         if (pw === null || pw === '') return;
         setHint('Entrando…');
-        sbLogin(em.trim(), pw).then(function () { setHint('✔ Sesión iniciada'); done(); })
+        sbLogin(em.trim(), pw).then(function () {
+          if (sbFaltaCodigo()) { setHint('Contraseña correcta — falta el código del teléfono'); sbPideCodigo(done); return; }
+          setHint('✔ Sesión iniciada');
+          try { nubeTrasSesion(); } catch (e) {}
+          done();
+        })
           .catch(function (e) { uiAlert('No se pudo entrar: ' + e.message); setHint(''); });
       });
       var inp = $('#askInput'); if (inp) inp.type = 'password';
@@ -18960,7 +19145,7 @@
       });
     }
     if (nubeActiva()) refrescaNubeLista(function (rows, err) { pinta(rows, err); });
-    else pinta(null, null);
+    else pinta(null, (nubeUid() && sbFaltaCodigo()) ? msgSesionCaida(true) : null);   // (17/11) que diga por qué no sale la nube
   }
   /* Abrir un proyecto que está solo en la nube (desde la tabla Proyectos o
      desde la lista del panel): se baja, se abre y queda guardado aquí. */
@@ -26491,7 +26676,8 @@
     // sacado del nombre queda solo para archivos viejos que no traen uno)
     if (!restored && !roto && !idValido(state.project.id)) { state.project.id = nuevoIdProyecto(); state.project.creado = new Date().toISOString(); }
     pintaLista(); pintaNube();
-    try { setTimeout(function () { reanudaSubidas(); revisaNube('arranque'); }, 1500); } catch (e7) {}
+    // (17/11) antes de reanudar, se mira si la sesión guardada necesita el código del teléfono
+    try { setTimeout(function () { sbRevisaCodigo().then(function () { reanudaSubidas(); revisaNube('arranque'); }); }, 1500); } catch (e7) {}
     // precalentar el PDF guardado: el zoom nítido queda listo sin esperar al primer zoom
     try { if (restored && state.bg && state.bg.pdfId) loadPdfLive(state.bg); } catch (e) {}
     renderSheetTabs();
